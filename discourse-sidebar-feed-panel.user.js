@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.4
+// @version      0.6.5
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -1185,7 +1185,7 @@
         item.classList.add("active");
       }
 
-      renderTopics();
+      loadTopics();
     });
 
     return bar;
@@ -1380,6 +1380,7 @@
 
   // ========== 静默刷新 ==========
   // 仅在默认排序 + 全部板块时启用，避免覆盖用户选择的排序/分类
+  // 使用增量 DOM 更新，不调用 renderTopics()，避免打乱当前筛选视图
   async function _silentRefresh() {
     if (isLoading) return;
     if (currentOrder !== "default" || currentTab !== "all") return;
@@ -1391,44 +1392,80 @@
       if (!data?.topic_list?.topics) return;
 
       const freshTopics = data.topic_list.topics;
-      let hasNew = false;
-      let hasStatusChange = false;
+      const freshMap = new Map(freshTopics.map((t) => [t.id, t]));
       const newTopicIds = [];
 
-      const freshMap = new Map(freshTopics.map((t) => [t.id, t]));
-
+      // 更新已有话题状态
       allTopics.forEach((existing) => {
         if (freshMap.has(existing.id)) {
           const latest = freshMap.get(existing.id);
-          if (existing.new_posts !== latest.new_posts || existing.posts_count !== latest.posts_count) {
-            hasStatusChange = true;
-          }
           Object.assign(existing, latest);
         }
       });
 
+      // 收集新话题
       freshTopics.forEach((t) => {
         if (!loadedTopicIds.has(t.id)) {
           loadedTopicIds.add(t.id);
           allTopics.unshift(t);
           newTopicIds.push(t.id);
-          hasNew = true;
         }
       });
 
-      if (hasNew || hasStatusChange) {
-        allTopics.sort((a, b) => {
-          const aTime = a.bumped_at || a.last_posted_at || a.created_at;
-          const bTime = b.bumped_at || b.last_posted_at || b.created_at;
-          return new Date(bTime) - new Date(aTime);
-        });
-        renderTopics(newTopicIds);
+      if (newTopicIds.length === 0) {
+        // 无新话题，仅增量更新已有 DOM 项的状态（unseen dot、回复数等）
+        _updateExistingTopicItems(freshMap);
+        if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+        return;
       }
+
+      // 有新话题：创建 DOM 元素并插入列表顶部
+      // 新话题按 created_at 排序（参照 Timeline 脚本），最新在前
+      const newTopics = allTopics.filter((t) => newTopicIds.includes(t.id));
+      newTopics.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+      newTopics.forEach((t) => {
+        const item = createTopicItem(t, true);
+        if (feedListEl) {
+          feedListEl.insertBefore(item, feedListEl.firstChild);
+        }
+      });
+
+      // 更新已有话题的 DOM 状态
+      _updateExistingTopicItems(freshMap);
 
       if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
     } catch (e) {
       console.warn("[SFP] silent refresh error:", e);
     }
+  }
+
+  // 增量更新已有话题 DOM 项（unseen dot、回复数等），不重建 DOM
+  function _updateExistingTopicItems(freshMap) {
+    if (!feedListEl) return;
+    const items = feedListEl.querySelectorAll(".sfp-topic-item[data-topic-id]");
+    items.forEach((item) => {
+      const tid = parseInt(item.dataset.topicId, 10);
+      if (!tid || !freshMap.has(tid)) return;
+      const latest = freshMap.get(tid);
+      // 更新 unread dot
+      const dot = item.querySelector(".sfp-unseen-dot");
+      if (latest.unread_posts > 0) {
+        if (!dot) {
+          const newDot = document.createElement("span");
+          newDot.className = "sfp-unseen-dot";
+          item.insertBefore(newDot, item.firstChild);
+        }
+      } else {
+        if (dot) dot.remove();
+      }
+      // 更新回复数
+      const repliesEl = item.querySelector(".sfp-topic-stat");
+      if (repliesEl && latest.posts_count != null) {
+        const replies = Math.max(0, (latest.posts_count || 1) - 1);
+        repliesEl.textContent = `💬 ${replies}`;
+      }
+    });
   }
 
   // ========== 自动刷新 ==========
@@ -1527,18 +1564,26 @@
   }
 
   // ========== 客户端筛选 ==========
-  // 注意：Discourse API 中 `unseen` 字段不可靠（分类 API 始终为 false）
-  // 正确判断"未读"应使用 `new_posts > 0`（自上次阅读后的新回复数）
+  // 使用 last_read_post_number 判断已读/未读：
+  //   未读 = 从未阅读(last_read 为空) 或 未读完(last_read < highest)
+  //   已读 = 已读完(last_read >= highest)
+  //   unread_posts > 0 用于"有新回复"圆点标记
   function _applyFilter(topics) {
     let result = topics;
     if (hidePinned) {
       result = result.filter((t) => !t.pinned && !t.pinned_globally);
     }
     if (currentFilter === "unseen") {
-      result = result.filter((t) => t.new_posts > 0);
+      result = result.filter((t) => {
+        const lr = t.last_read_post_number;
+        return lr === null || lr === undefined || lr < t.highest_post_number;
+      });
     }
     if (currentFilter === "read") {
-      result = result.filter((t) => !t.new_posts || t.new_posts === 0);
+      result = result.filter((t) => {
+        const lr = t.last_read_post_number;
+        return lr !== null && lr !== undefined && lr >= t.highest_post_number;
+      });
     }
     return result;
   }
@@ -1555,6 +1600,7 @@
   function createTopicItem(topic, isNew = false) {
     const item = document.createElement("div");
     item.className = "sfp-topic-item";
+    item.dataset.topicId = topic.id;
     if (topic.pinned || topic.pinned_globally) {
       item.classList.add("sfp-pinned");
     }
@@ -1579,8 +1625,8 @@
       }
     }
 
-    // 未读标记（使用 new_posts 判断，API 中 unseen 字段不可靠）
-    const unseenDot = topic.new_posts > 0 ? '<span class="sfp-unseen-dot"></span>' : "";
+    // 未读圆点（unread_posts > 0 表示有新回复）
+    const unseenDot = (topic.unread_posts > 0) ? '<span class="sfp-unseen-dot"></span>' : "";
 
     // 头像 HTML
     const avatarHtml = avatarUrl
@@ -1676,10 +1722,10 @@
 
   // ========== 标记帖子为已读 ==========
   function markTopicAsRead(topic, itemElement) {
-    if (!topic.new_posts || topic.new_posts === 0) return;
-    topic.new_posts = 0;
+    if (!topic.unread_posts || topic.unread_posts === 0) return;
+    topic.unread_posts = 0;
     const existing = allTopics.find((t) => t.id === topic.id);
-    if (existing) existing.new_posts = 0;
+    if (existing) existing.unread_posts = 0;
     const dot = itemElement.querySelector(".sfp-unseen-dot");
     if (dot) dot.remove();
   }
