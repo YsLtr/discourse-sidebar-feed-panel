@@ -51,6 +51,7 @@
   let isLoading = false;
   let isLoadingMore = false;
   let _pendingReload = false;
+  let _silentInsertedIds = new Set(); // 静默刷新插入的临时 DOM 话题 ID，不污染 allTopics
   let autoRefreshTimer = null;
   let autoRefreshSeconds = 0;
   let routeDebounceTimer = null;
@@ -929,14 +930,8 @@
     // 恢复当前 tab 筛选的分类
     _restoreTabState();
 
-    // 如果已有缓存数据，直接渲染
-    if (allTopics.length > 0) {
-      renderTopics();
-      _startAutoRefresh();
-      _silentRefresh();
-    } else {
-      loadTopics();
-    }
+    // 始终全量加载，数据已在 deactivateFeed 中清除
+    loadTopics();
 
     // 无限滚动
     _setupScrollLoadMore();
@@ -960,6 +955,7 @@
     allTopics = [];
     usersMap = {};
     loadedTopicIds.clear();
+    _silentInsertedIds.clear();
     currentPage = 0;
     hasMorePages = true;
 
@@ -1290,6 +1286,7 @@
     hasMorePages = true;
     allTopics = [];
     loadedTopicIds.clear();
+    _silentInsertedIds.clear();
 
     if (feedListEl) {
       feedListEl.innerHTML = `<div class="sfp-loading"><div class="sfp-spinner"></div>加载中...</div>`;
@@ -1392,61 +1389,50 @@
     }
   }
 
-  // ========== 静默刷新 ==========
-  // 仅在默认排序 + 全部板块时启用，避免覆盖用户选择的排序/分类
-  // 使用增量 DOM 更新，不调用 renderTopics()，避免打乱当前筛选视图
+  // ========== 静默刷新（纯 DOM 层，不修改数据源） ==========
+  // 仅在纯默认视图（全部板块 + 默认排序 + 全部筛选）时启用
+  // 不做数据层修改（不碰 allTopics/loadedTopicIds），只做 DOM 增量更新
+  // 参照 Timeline 脚本：静默刷新用固定 order=created，保持排序一致
   async function _silentRefresh() {
-    if (isLoading) return;
+    if (isLoading || isLoadingMore) return;
     if (currentOrder !== "default" || currentTab !== "all" || currentFilter !== "all") return;
+    if (!feedListEl) return;
 
     try {
-      const data = await fetchFeedTopics(currentOrder, currentPeriod, 0);
+      // 参照 Timeline：静默刷新始终用 order=created，不用 currentOrder
+      const data = await fetchFeedTopics("created", "all", 0);
       _processUsers(data);
 
       if (!data?.topic_list?.topics) return;
 
       const freshTopics = data.topic_list.topics;
       const freshMap = new Map(freshTopics.map((t) => [t.id, t]));
-      const newTopicIds = [];
 
-      // 更新已有话题状态
-      allTopics.forEach((existing) => {
-        if (freshMap.has(existing.id)) {
-          const latest = freshMap.get(existing.id);
-          Object.assign(existing, latest);
-        }
-      });
+      // 1. 增量更新已有 DOM 项的状态（unseen dot、回复数）
+      _updateExistingTopicItems(freshMap);
 
-      // 收集新话题
-      freshTopics.forEach((t) => {
-        if (!loadedTopicIds.has(t.id)) {
-          loadedTopicIds.add(t.id);
-          allTopics.unshift(t);
-          newTopicIds.push(t.id);
-        }
-      });
+      // 2. 检测新话题：不在 allTopics 中 && 不在已插入的临时 DOM 中
+      const existingIds = new Set([
+        ...Array.from(loadedTopicIds),
+        ...Array.from(_silentInsertedIds),
+      ]);
 
-      if (newTopicIds.length === 0) {
-        // 无新话题，仅增量更新已有 DOM 项的状态（unseen dot、回复数等）
-        _updateExistingTopicItems(freshMap);
+      const newTopics = freshTopics.filter((t) => !existingIds.has(t.id));
+
+      if (newTopics.length === 0) {
         if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
         return;
       }
 
-      // 有新话题：创建 DOM 元素并插入列表顶部
-      // 新话题按 created_at 排序（参照 Timeline 脚本），最新在前
-      const newTopics = allTopics.filter((t) => newTopicIds.includes(t.id));
-      newTopics.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      // 3. 按 created_at 排序（与 Timeline 脚本一致），从旧到新插入 DOM 顶部
+      newTopics.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
       newTopics.forEach((t) => {
+        _silentInsertedIds.add(t.id);
         const item = createTopicItem(t, true);
-        if (feedListEl) {
-          feedListEl.insertBefore(item, feedListEl.firstChild);
-        }
+        // 多个新话题：越新的越靠前，所以 insertBefore(firstChild) 保持倒序
+        feedListEl.insertBefore(item, feedListEl.firstChild);
       });
-
-      // 更新已有话题的 DOM 状态
-      _updateExistingTopicItems(freshMap);
 
       if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
     } catch (e) {
