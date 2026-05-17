@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.1
+// @version      0.6.2
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -955,6 +955,13 @@
       feedListEl = null;
     }
 
+    // 清除数据缓存，避免下次激活时显示旧数据
+    allTopics = [];
+    usersMap = {};
+    loadedTopicIds.clear();
+    currentPage = 0;
+    hasMorePages = true;
+
     sidebar.classList.remove("sfp-feed-mode");
   }
 
@@ -1179,7 +1186,6 @@
       }
 
       renderTopics();
-      _checkAutoLoadOnSparseFilter();
     });
 
     return bar;
@@ -1342,14 +1348,6 @@
 
       // 统一通过 renderTopics 重渲染，确保 filter 生效
       renderTopics();
-
-      // 加载后如果筛选结果仍然稀疏，继续加载
-      const filtered = _applyFilter(allTopics);
-      if (filtered.length < 10 && hasMorePages && !isLoading) {
-        isLoadingMore = false;
-        loadMoreTopics();
-        return;
-      }
     } catch (e) {
       console.error("[SFP] loadMoreTopics error:", e);
       _removeLoadMore();
@@ -1464,11 +1462,17 @@
     });
 
     if (filtered.length === 0) {
-      // 如果还有更多页数据未加载，显示加载中而不是"无匹配"
+      // 有数据但筛选后为空 → 显示提示 + 手动加载更多
       if (hasMorePages && !isLoadingMore) {
-        feedListEl.innerHTML = `<div class="sfp-loading"><div class="sfp-spinner"></div>筛选加载中...</div>`;
-        // 触发加载更多以获取匹配项
-        loadMoreTopics();
+        feedListEl.innerHTML = `<div class="sfp-empty">当前页无匹配话题</div>`;
+        const loadMoreEl = document.createElement("div");
+        loadMoreEl.className = "sfp-load-more";
+        loadMoreEl.textContent = "加载更多";
+        loadMoreEl.addEventListener("click", () => {
+          loadMoreEl.remove();
+          loadMoreTopics();
+        });
+        feedListEl.appendChild(loadMoreEl);
       } else {
         feedListEl.innerHTML = `<div class="sfp-empty">无匹配话题</div>`;
       }
