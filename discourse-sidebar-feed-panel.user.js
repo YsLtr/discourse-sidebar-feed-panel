@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.2
+// @version      0.6.3
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -1339,15 +1339,31 @@
 
         if (newTopics.length === 0) {
           hasMorePages = false;
+          _showNoMore();
         } else {
           allTopics = allTopics.concat(newTopics);
+          _removeLoadMore();
+          // 增量追加，应用当前筛选，保留滚动位置
+          const filteredNew = _applyFilter(newTopics);
+          filteredNew.forEach((topic) => {
+            const item = createTopicItem(topic);
+            feedListEl.appendChild(item);
+          });
+          // 如果新增的都被筛选掉了且还有更多页，自动继续加载
+          if (filteredNew.length === 0 && hasMorePages) {
+            isLoadingMore = false;
+            loadMoreTopics();
+            return;
+          }
+          // 更新底部状态
+          if (!hasMorePages) {
+            _showNoMore();
+          }
         }
       } else {
         hasMorePages = false;
+        _showNoMore();
       }
-
-      // 统一通过 renderTopics 重渲染，确保 filter 生效
-      renderTopics();
     } catch (e) {
       console.error("[SFP] loadMoreTopics error:", e);
       _removeLoadMore();
@@ -1363,8 +1379,10 @@
   }
 
   // ========== 静默刷新 ==========
+  // 仅在默认排序 + 全部板块时启用，避免覆盖用户选择的排序/分类
   async function _silentRefresh() {
     if (isLoading) return;
+    if (currentOrder !== "default" || currentTab !== "all") return;
 
     try {
       const data = await fetchFeedTopics(currentOrder, currentPeriod, 0);
@@ -1462,9 +1480,17 @@
     });
 
     if (filtered.length === 0) {
+      // 构建更精确的空状态消息
+      let emptyMsg = "无匹配话题";
+      if (currentFilter === "unseen") {
+        emptyMsg = currentTab !== "all" ? "该板块暂无未读话题" : "暂无未读话题";
+      } else if (currentFilter === "read") {
+        emptyMsg = "暂无已读话题";
+      }
+
       // 有数据但筛选后为空 → 显示提示 + 手动加载更多
       if (hasMorePages && !isLoadingMore) {
-        feedListEl.innerHTML = `<div class="sfp-empty">当前页无匹配话题</div>`;
+        feedListEl.innerHTML = `<div class="sfp-empty">当前页${emptyMsg}</div>`;
         const loadMoreEl = document.createElement("div");
         loadMoreEl.className = "sfp-load-more";
         loadMoreEl.textContent = "加载更多";
@@ -1474,7 +1500,7 @@
         });
         feedListEl.appendChild(loadMoreEl);
       } else {
-        feedListEl.innerHTML = `<div class="sfp-empty">无匹配话题</div>`;
+        feedListEl.innerHTML = `<div class="sfp-empty">${emptyMsg}</div>`;
       }
     } else {
       filtered.forEach((topic) => {
