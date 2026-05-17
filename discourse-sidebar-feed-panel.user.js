@@ -50,6 +50,7 @@
   let hasMorePages = true;
   let isLoading = false;
   let isLoadingMore = false;
+  let _pendingReload = false;
   let autoRefreshTimer = null;
   let autoRefreshSeconds = 0;
   let routeDebounceTimer = null;
@@ -1041,6 +1042,8 @@
     const dropdown = document.createElement("div");
     dropdown.className = "sfp-custom-select-dropdown";
 
+    let _currentSelected = selectedValue;
+
     options.forEach((opt) => {
       const item = document.createElement("button");
       item.className = "sfp-custom-select-option" + (opt.value === selectedValue ? " selected" : "");
@@ -1048,13 +1051,16 @@
       item.textContent = opt.label;
       item.addEventListener("click", (e) => {
         e.stopPropagation();
+        if (opt.value === _currentSelected) {
+          wrapper.classList.remove("open");
+          return;
+        }
         btn.textContent = opt.label;
         dropdown.querySelectorAll(".sfp-custom-select-option").forEach((el) => el.classList.remove("selected"));
         item.classList.add("selected");
         wrapper.classList.remove("open");
-        if (opt.value !== selectedValue) {
-          onChange(opt.value);
-        }
+        _currentSelected = opt.value;
+        onChange(opt.value);
       });
       dropdown.appendChild(item);
     });
@@ -1273,8 +1279,12 @@
   }
 
   async function loadTopics() {
-    if (isLoading) return;
+    if (isLoading) {
+      _pendingReload = true;
+      return;
+    }
     isLoading = true;
+    _pendingReload = false;
 
     currentPage = 0;
     hasMorePages = true;
@@ -1315,6 +1325,10 @@
       }
     } finally {
       isLoading = false;
+      if (_pendingReload) {
+        _pendingReload = false;
+        loadTopics();
+      }
     }
   }
 
