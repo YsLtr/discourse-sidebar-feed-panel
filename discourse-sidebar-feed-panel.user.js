@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.3
+// @version      0.6.4
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -1400,7 +1400,7 @@
       allTopics.forEach((existing) => {
         if (freshMap.has(existing.id)) {
           const latest = freshMap.get(existing.id);
-          if (existing.unseen !== latest.unseen || existing.posts_count !== latest.posts_count) {
+          if (existing.new_posts !== latest.new_posts || existing.posts_count !== latest.posts_count) {
             hasStatusChange = true;
           }
           Object.assign(existing, latest);
@@ -1527,16 +1527,18 @@
   }
 
   // ========== 客户端筛选 ==========
+  // 注意：Discourse API 中 `unseen` 字段不可靠（分类 API 始终为 false）
+  // 正确判断"未读"应使用 `new_posts > 0`（自上次阅读后的新回复数）
   function _applyFilter(topics) {
     let result = topics;
     if (hidePinned) {
       result = result.filter((t) => !t.pinned && !t.pinned_globally);
     }
     if (currentFilter === "unseen") {
-      result = result.filter((t) => t.unseen);
+      result = result.filter((t) => t.new_posts > 0);
     }
     if (currentFilter === "read") {
-      result = result.filter((t) => !t.unseen);
+      result = result.filter((t) => !t.new_posts || t.new_posts === 0);
     }
     return result;
   }
@@ -1577,8 +1579,8 @@
       }
     }
 
-    // 未读标记
-    const unseenDot = topic.unseen ? '<span class="sfp-unseen-dot"></span>' : "";
+    // 未读标记（使用 new_posts 判断，API 中 unseen 字段不可靠）
+    const unseenDot = topic.new_posts > 0 ? '<span class="sfp-unseen-dot"></span>' : "";
 
     // 头像 HTML
     const avatarHtml = avatarUrl
@@ -1674,10 +1676,10 @@
 
   // ========== 标记帖子为已读 ==========
   function markTopicAsRead(topic, itemElement) {
-    if (!topic.unseen) return;
-    topic.unseen = false;
+    if (!topic.new_posts || topic.new_posts === 0) return;
+    topic.new_posts = 0;
     const existing = allTopics.find((t) => t.id === topic.id);
-    if (existing) existing.unseen = false;
+    if (existing) existing.new_posts = 0;
     const dot = itemElement.querySelector(".sfp-unseen-dot");
     if (dot) dot.remove();
   }
