@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.5.0
+// @version      0.6.0
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -26,6 +26,7 @@
   const WIDTH_KEY = "sfp_sidebar_width";
   const TAB_KEY = "sfp_current_tab";
   const FILTER_KEY = "sfp_current_filter";
+  const HIDE_PINNED_KEY = "sfp_hide_pinned";
 
   // ========== 常量 ==========
   const DEFAULT_WIDTH = 272;
@@ -39,6 +40,7 @@
   let sfpSidebarWidth = GM_getValue(WIDTH_KEY, DEFAULT_WIDTH);
   let currentTab = GM_getValue(TAB_KEY, "all");
   let currentFilter = GM_getValue(FILTER_KEY, "all");
+  let hidePinned = GM_getValue(HIDE_PINNED_KEY, false);
   let currentCategoryId = null;
 
   let allTopics = [];
@@ -217,13 +219,13 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 24px;
-        height: 24px;
+        width: 28px;
+        height: 28px;
         border: none;
-        background: transparent;
+        background: var(--primary-very-low, #f0f0f0);
         color: var(--primary-medium, #888);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: 6px;
         padding: 0;
         margin-left: 6px;
         vertical-align: middle;
@@ -235,12 +237,12 @@
         background: var(--primary-low, #eee);
       }
       .sfp-toggle-btn.active {
-        color: var(--tertiary, #0088cc);
-        background: var(--tertiary-very-low, rgba(0,136,204,0.1));
+        color: #fff;
+        background: var(--tertiary, #0088cc);
       }
       .sfp-toggle-btn svg {
-        width: 16px;
-        height: 16px;
+        width: 18px;
+        height: 18px;
         fill: currentColor;
       }
       .home-logo-wrapper-outlet .title {
@@ -250,7 +252,10 @@
       }
 
       /* ===== 侧边栏 Feed 模式 ===== */
-      .sidebar-container.sfp-feed-mode .sidebar-sections {
+      .sidebar-container.sfp-feed-mode {
+        overflow-x: hidden !important;
+      }
+      .sidebar-container.sfp-feed-mode > :not(.sfp-feed-container):not(.sfp-resizer) {
         display: none !important;
       }
       .sidebar-container.sfp-feed-mode .sfp-feed-container {
@@ -258,6 +263,7 @@
         flex-direction: column;
         height: 100%;
         overflow: hidden;
+        max-width: 100%;
       }
 
       /* ===== 拖拽调整宽度 ===== */
@@ -279,48 +285,32 @@
       /* ===== Feed Header ===== */
       .sfp-feed-header {
         flex-shrink: 0;
-        padding: 8px 10px;
+        padding: 8px 12px;
         border-bottom: 1px solid var(--primary-low, #e9e9e9);
         display: flex;
         flex-wrap: wrap;
-        gap: 5px;
+        gap: 6px;
         align-items: center;
-      }
-      .sfp-feed-header select {
-        font-size: 11px;
-        padding: 3px 6px;
-        border: 1px solid var(--primary-low, #ddd);
-        border-radius: 4px;
-        background: var(--secondary, #fff);
-        color: var(--primary, #333);
-        max-width: 90px;
-        outline: none;
-        cursor: pointer;
-        height: 24px;
-        line-height: 1;
-        transition: border-color 0.2s;
-      }
-      .sfp-feed-header select:focus {
-        border-color: var(--tertiary, #0088cc);
+        overflow: hidden;
       }
       .sfp-feed-header .sfp-refresh-btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 26px;
-        height: 26px;
+        width: 28px;
+        height: 28px;
         border: none;
-        background: transparent;
+        background: var(--primary-very-low, #f0f0f0);
         color: var(--primary-medium, #888);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: 6px;
         padding: 0;
         flex-shrink: 0;
         transition: color 0.2s, background 0.2s;
       }
       .sfp-feed-header .sfp-refresh-btn:hover {
         color: var(--tertiary, #0088cc);
-        background: var(--primary-very-low, #f5f5f5);
+        background: var(--primary-low, #eee);
       }
       .sfp-feed-header .sfp-refresh-btn.spinning svg {
         animation: sfp-spin 0.6s linear infinite;
@@ -330,8 +320,8 @@
         to { transform: rotate(360deg); }
       }
       .sfp-feed-header .sfp-refresh-btn svg {
-        width: 15px;
-        height: 15px;
+        width: 16px;
+        height: 16px;
         fill: currentColor;
       }
       .sfp-feed-header .sfp-hint-text {
@@ -346,6 +336,76 @@
       .sfp-feed-header .sfp-hint-text:hover {
         color: var(--tertiary-high, #006699);
         text-decoration: underline;
+      }
+
+      /* ===== 自定义下拉 ===== */
+      .sfp-custom-select {
+        position: relative;
+        flex-shrink: 0;
+      }
+      .sfp-custom-select-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        font-size: 12px;
+        height: 28px;
+        border: none;
+        background: var(--primary-very-low, #f0f0f0);
+        color: var(--primary, #333);
+        border-radius: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+        user-select: none;
+        transition: background 0.2s, color 0.2s;
+      }
+      .sfp-custom-select-btn:hover {
+        background: var(--primary-low, #eee);
+      }
+      .sfp-custom-select-btn::after {
+        content: "";
+        width: 0;
+        height: 0;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 5px solid currentColor;
+      }
+      .sfp-custom-select-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        margin-top: 4px;
+        min-width: 100%;
+        background: var(--secondary, #fff);
+        border: 1px solid var(--primary-low, #e9e9e9);
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        z-index: 10002;
+        display: none;
+        overflow: hidden;
+      }
+      .sfp-custom-select.open .sfp-custom-select-dropdown {
+        display: block;
+      }
+      .sfp-custom-select-option {
+        display: block;
+        width: 100%;
+        padding: 6px 14px;
+        font-size: 12px;
+        border: none;
+        background: none;
+        color: var(--primary, #333);
+        cursor: pointer;
+        text-align: left;
+        white-space: nowrap;
+        transition: background 0.15s;
+      }
+      .sfp-custom-select-option:hover {
+        background: var(--primary-very-low, #f5f5f5);
+      }
+      .sfp-custom-select-option.selected {
+        color: var(--tertiary, #08c);
+        font-weight: 600;
       }
 
       /* ===== 分类标签栏 ===== */
@@ -441,9 +501,18 @@
         cursor: pointer;
         transition: background 0.2s;
         position: relative;
+        overflow-wrap: break-word;
+        word-break: break-word;
       }
       .sfp-topic-item:hover {
         background: var(--primary-very-low, #f8f8f8);
+      }
+      .sfp-topic-item.sfp-pinned {
+        background: var(--highlight, #fff9c4);
+        border-left: 3px solid var(--tertiary, #08c);
+      }
+      .sfp-topic-item.sfp-pinned:hover {
+        background: var(--highlight-medium, #ffe69c);
       }
       .sfp-topic-item.sfp-new-highlight {
         animation: sfp-new-pulse 10s ease-out forwards;
@@ -542,6 +611,20 @@
       }
       .sfp-topic-item .sfp-topic-title:hover {
         color: var(--tertiary, #08c);
+      }
+      .sfp-pinned-badge {
+        font-size: 10px;
+        color: var(--tertiary, #08c);
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 1px;
+        margin-right: 4px;
+        background: var(--tertiary-very-low, rgba(0,136,204,0.1));
+        padding: 1px 5px;
+        border-radius: 3px;
+        vertical-align: middle;
+        white-space: nowrap;
       }
       .sfp-topic-item .sfp-topic-closed {
         color: var(--danger, #e45735);
@@ -713,7 +796,7 @@
     toggleBtn = document.createElement("button");
     toggleBtn.className = "sfp-toggle-btn" + (feedModeEnabled ? " active" : "");
     toggleBtn.title = "切换侧边栏信息流";
-    toggleBtn.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>`;
+    toggleBtn.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="7" height="18" rx="1" fill="currentColor" opacity="0.6"/><rect x="13" y="3" width="8" height="18" rx="1" fill="currentColor"/></svg>`;
 
     toggleBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -840,12 +923,6 @@
     // 恢复当前 tab 筛选的分类
     _restoreTabState();
 
-    // 应用保存的宽度
-    applySidebarWidth(sfpSidebarWidth);
-
-    // 添加拖拽调整宽度
-    setupResizer();
-
     // 如果已有缓存数据，直接渲染
     if (allTopics.length > 0) {
       renderTopics();
@@ -864,9 +941,6 @@
     if (!sidebar) return;
 
     _stopAutoRefresh();
-
-    removeResizer();
-    restoreSidebarWidth();
 
     if (feedContainer) {
       feedContainer.remove();
@@ -892,10 +966,8 @@
     });
     header.appendChild(refreshBtn);
 
-    // Order 选择
-    const orderSelect = document.createElement("select");
-    orderSelect.className = "sfp-order-select";
-    const orders = [
+    // Order 自定义下拉
+    const orderOptions = [
       { label: "默认", value: "default" },
       { label: "最新活动", value: "activity" },
       { label: "最新发布", value: "created" },
@@ -904,18 +976,8 @@
       { label: "最多点赞", value: "likes" },
       { label: "楼主点赞", value: "op_likes" },
     ];
-    orders.forEach((o) => {
-      const opt = document.createElement("option");
-      opt.value = o.value;
-      opt.textContent = o.label;
-      if (o.value === currentOrder) opt.selected = true;
-      orderSelect.appendChild(opt);
-    });
 
-    // Period 选择
-    const periodSelect = document.createElement("select");
-    periodSelect.className = "sfp-period-select";
-    const periods = [
+    const periodOptions = [
       { label: "全部", value: "all" },
       { label: "每日", value: "daily" },
       { label: "每周", value: "weekly" },
@@ -923,31 +985,28 @@
       { label: "每季", value: "quarterly" },
       { label: "每年", value: "yearly" },
     ];
-    periods.forEach((p) => {
-      const opt = document.createElement("option");
-      opt.value = p.value;
-      opt.textContent = p.label;
-      if (p.value === currentPeriod) opt.selected = true;
-      periodSelect.appendChild(opt);
-    });
 
-    function _updatePeriodVisibility() {
-      periodSelect.style.display = _needsPeriodForUrl(orderSelect.value) ? "" : "none";
-    }
-    _updatePeriodVisibility();
-
-    orderSelect.addEventListener("change", () => {
-      currentOrder = orderSelect.value;
-      GM_setValue(ORDER_KEY, currentOrder);
-      _updatePeriodVisibility();
-      loadTopics();
-    });
-
-    periodSelect.addEventListener("change", () => {
-      currentPeriod = periodSelect.value;
+    // Period 下拉（先创建，因为 order 切换时需要引用）
+    const periodSelect = _buildCustomSelect(periodOptions, currentPeriod, (value) => {
+      currentPeriod = value;
       GM_setValue(PERIOD_KEY, currentPeriod);
       loadTopics();
     });
+    periodSelect.classList.add("sfp-period-select");
+    _updatePeriodVisibility(periodSelect);
+
+    // Order 下拉
+    const orderSelect = _buildCustomSelect(orderOptions, currentOrder, (value) => {
+      currentOrder = value;
+      GM_setValue(ORDER_KEY, currentOrder);
+      _updatePeriodVisibility(periodSelect);
+      loadTopics();
+    });
+    orderSelect.classList.add("sfp-order-select");
+
+    function _updatePeriodVisibility(ps) {
+      ps.style.display = _needsPeriodForUrl(currentOrder) ? "" : "none";
+    }
 
     header.appendChild(orderSelect);
     header.appendChild(periodSelect);
@@ -955,6 +1014,57 @@
     // 新话题提示（动态更新）
     _updateShowMoreHint(header);
   }
+
+  // ========== 自定义下拉组件 ==========
+  function _buildCustomSelect(options, selectedValue, onChange) {
+    const wrapper = document.createElement("span");
+    wrapper.className = "sfp-custom-select";
+
+    const btn = document.createElement("button");
+    btn.className = "sfp-custom-select-btn";
+    btn.type = "button";
+    const selected = options.find((o) => o.value === selectedValue) || options[0];
+    btn.textContent = selected.label;
+
+    const dropdown = document.createElement("div");
+    dropdown.className = "sfp-custom-select-dropdown";
+
+    options.forEach((opt) => {
+      const item = document.createElement("button");
+      item.className = "sfp-custom-select-option" + (opt.value === selectedValue ? " selected" : "");
+      item.type = "button";
+      item.textContent = opt.label;
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        btn.textContent = opt.label;
+        dropdown.querySelectorAll(".sfp-custom-select-option").forEach((el) => el.classList.remove("selected"));
+        item.classList.add("selected");
+        wrapper.classList.remove("open");
+        if (opt.value !== selectedValue) {
+          onChange(opt.value);
+        }
+      });
+      dropdown.appendChild(item);
+    });
+
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      // 关闭其他打开的下拉
+      document.querySelectorAll(".sfp-custom-select.open").forEach((el) => {
+        if (el !== wrapper) el.classList.remove("open");
+      });
+      wrapper.classList.toggle("open");
+    });
+
+    wrapper.appendChild(btn);
+    wrapper.appendChild(dropdown);
+    return wrapper;
+  }
+
+  // 点击页面其他地方关闭下拉
+  document.addEventListener("click", () => {
+    document.querySelectorAll(".sfp-custom-select.open").forEach((el) => el.classList.remove("open"));
+  });
 
   // ========== 分类标签栏 ==========
   function _buildTabBar() {
@@ -978,7 +1088,7 @@
       bar.appendChild(tab);
     });
 
-    // 事件代理
+    // 事件代理 — 点击切换
     bar.addEventListener("click", (e) => {
       const tab = e.target.closest(".sfp-tab-item");
       if (!tab) return;
@@ -990,14 +1100,20 @@
       currentCategoryId = catId;
       GM_setValue(TAB_KEY, currentTab);
 
-      // 更新标签高亮
       bar.querySelectorAll(".sfp-tab-item").forEach((t) => {
         t.classList.remove("active");
       });
       tab.classList.add("active");
 
-      // 切换板块时重新加载
       loadTopics();
+    });
+
+    // 滚轮横向滚动
+    bar.addEventListener("wheel", (e) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        bar.scrollLeft += e.deltaY;
+      }
     });
 
     return bar;
@@ -1022,15 +1138,34 @@
       bar.appendChild(item);
     });
 
+    // 分隔
+    const sep = document.createElement("span");
+    sep.style.cssText = "color:var(--primary-low,#ddd);margin:0 2px;";
+    sep.textContent = "|";
+    bar.appendChild(sep);
+
+    // 隐藏置顶开关
+    const pinnedToggle = document.createElement("span");
+    pinnedToggle.className = "sfp-filter-item" + (hidePinned ? " active" : "");
+    pinnedToggle.dataset.filter = "hide-pinned";
+    pinnedToggle.textContent = "隐藏置顶";
+    bar.appendChild(pinnedToggle);
+
     bar.addEventListener("click", (e) => {
       const item = e.target.closest(".sfp-filter-item");
       if (!item) return;
 
-      currentFilter = item.dataset.filter;
-      GM_setValue(FILTER_KEY, currentFilter);
-
-      bar.querySelectorAll(".sfp-filter-item").forEach((i) => i.classList.remove("active"));
-      item.classList.add("active");
+      const filterVal = item.dataset.filter;
+      if (filterVal === "hide-pinned") {
+        hidePinned = !hidePinned;
+        GM_setValue(HIDE_PINNED_KEY, hidePinned);
+        item.classList.toggle("active", hidePinned);
+      } else {
+        currentFilter = filterVal;
+        GM_setValue(FILTER_KEY, currentFilter);
+        bar.querySelectorAll(".sfp-filter-item[data-filter]:not([data-filter=\"hide-pinned\"])").forEach((i) => i.classList.remove("active"));
+        item.classList.add("active");
+      }
 
       renderTopics();
       _checkAutoLoadOnSparseFilter();
@@ -1086,14 +1221,21 @@
   // ========== 数据加载 ==========
   async function fetchFeedTopics(order, period, page) {
     let url;
+    const effectiveOrder = order === "default" ? "activity" : order;
+
     if (currentTab !== "all" && currentCategoryId) {
       const cat = CATEGORY_CONFIG[currentCategoryId];
       const tabId = cat?.tabId || currentTab;
-      url = `/c/${tabId}/${currentCategoryId}/l/latest.json?page=${page}`;
+      const params = [];
+      params.push(`page=${page}`);
+      params.push(`order=${encodeURIComponent(effectiveOrder)}`);
+      if (period !== "all" && _needsPeriodForUrl(order)) {
+        params.push(`period=${encodeURIComponent(period)}`);
+      }
+      url = `/c/${tabId}/${currentCategoryId}/l/latest.json?${params.join("&")}`;
     } else {
       url = "/latest.json?";
       const params = [];
-      const effectiveOrder = order === "default" ? "activity" : order;
       params.push(`order=${encodeURIComponent(effectiveOrder)}`);
       params.push(`page=${page}`);
       if (period !== "all" && _needsPeriodForUrl(order)) {
@@ -1299,7 +1441,18 @@
     }
 
     // 客户端筛选
-    const filtered = _applyFilter(allTopics);
+    let filtered = _applyFilter(allTopics);
+
+    // 置顶帖排最前面
+    filtered.sort((a, b) => {
+      const aPinned = (a.pinned || a.pinned_globally) ? 1 : 0;
+      const bPinned = (b.pinned || b.pinned_globally) ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
+      // 同为置顶或同为非置顶，保持原有排序（按时间降序）
+      const aTime = a.bumped_at || a.last_posted_at || a.created_at;
+      const bTime = b.bumped_at || b.last_posted_at || b.created_at;
+      return new Date(bTime) - new Date(aTime);
+    });
 
     if (filtered.length === 0) {
       feedListEl.innerHTML = `<div class="sfp-empty">无匹配话题</div>`;
@@ -1329,13 +1482,17 @@
 
   // ========== 客户端筛选 ==========
   function _applyFilter(topics) {
+    let result = topics;
+    if (hidePinned) {
+      result = result.filter((t) => !t.pinned && !t.pinned_globally);
+    }
     if (currentFilter === "unseen") {
-      return topics.filter((t) => t.unseen);
+      result = result.filter((t) => t.unseen);
     }
     if (currentFilter === "read") {
-      return topics.filter((t) => !t.unseen);
+      result = result.filter((t) => !t.unseen);
     }
-    return topics;
+    return result;
   }
 
   // ========== 筛选结果稀疏时自动加载 ==========
@@ -1350,6 +1507,9 @@
   function createTopicItem(topic, isNew = false) {
     const item = document.createElement("div");
     item.className = "sfp-topic-item";
+    if (topic.pinned || topic.pinned_globally) {
+      item.classList.add("sfp-pinned");
+    }
     if (isNew) {
       item.classList.add("sfp-new-highlight");
       setTimeout(() => item.classList.remove("sfp-new-highlight"), 10000);
@@ -1386,6 +1546,11 @@
 
     // 时间
     const timeStr = formatRelativeTime(topic.bumped_at || topic.last_posted_at || topic.created_at);
+
+    // 置顶标记
+    const pinnedHtml = (topic.pinned || topic.pinned_globally)
+      ? `<span class="sfp-pinned-badge" title="${topic.pinned_globally ? '全局置顶' : '板块置顶'}">📌置顶</span>`
+      : "";
 
     // 标题
     const closedHtml = topic.closed
@@ -1427,7 +1592,7 @@
         </div>
         <span class="sfp-topic-time">${timeStr}</span>
       </div>
-      <div class="sfp-topic-title">${escapeHtml(topic.unicode_title || topic.title)}${closedHtml}</div>
+      <div class="sfp-topic-title">${pinnedHtml}${escapeHtml(topic.unicode_title || topic.title)}${closedHtml}</div>
       <div class="sfp-topic-category-tags">
         ${categoryHtml}
         ${tagsHtml}
@@ -1557,6 +1722,10 @@
     injectStyles();
 
     waitForEmber(() => {
+      // 始终应用保存的宽度，避免切换 feed 模式时宽度跳动
+      applySidebarWidth(sfpSidebarWidth);
+      setupResizer();
+
       createToggle();
 
       RouteWatcher.start();
