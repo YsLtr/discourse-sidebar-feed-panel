@@ -1397,7 +1397,7 @@
   // 使用增量 DOM 更新，不调用 renderTopics()，避免打乱当前筛选视图
   async function _silentRefresh() {
     if (isLoading) return;
-    if (currentOrder !== "default" || currentTab !== "all") return;
+    if (currentOrder !== "default" || currentTab !== "all" || currentFilter !== "all") return;
 
     try {
       const data = await fetchFeedTopics(currentOrder, currentPeriod, 0);
@@ -1578,26 +1578,19 @@
   }
 
   // ========== 客户端筛选 ==========
-  // 使用 last_read_post_number 判断已读/未读：
-  //   未读 = 从未阅读(last_read 为空) 或 未读完(last_read < highest)
-  //   已读 = 已读完(last_read >= highest)
-  //   unread_posts > 0 用于"有新回复"圆点标记
+  // 未读 = unread_posts > 0（进入帖子后第一条右边的蓝点）
+  // 已读 = unread_posts === 0（蓝点消失）
+  // 蓝点是 Discourse 判断是否真正有未读内容的唯一可靠指标
   function _applyFilter(topics) {
     let result = topics;
     if (hidePinned) {
       result = result.filter((t) => !t.pinned && !t.pinned_globally);
     }
     if (currentFilter === "unseen") {
-      result = result.filter((t) => {
-        const lr = t.last_read_post_number;
-        return lr === null || lr === undefined || lr < t.highest_post_number;
-      });
+      result = result.filter((t) => t.unread_posts > 0);
     }
     if (currentFilter === "read") {
-      result = result.filter((t) => {
-        const lr = t.last_read_post_number;
-        return lr !== null && lr !== undefined && lr >= t.highest_post_number;
-      });
+      result = result.filter((t) => !t.unread_posts || t.unread_posts === 0);
     }
     return result;
   }
