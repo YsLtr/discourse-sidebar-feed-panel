@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.0
+// @version      0.6.1
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -255,7 +255,19 @@
       .sidebar-container.sfp-feed-mode {
         overflow-x: hidden !important;
       }
+      /* 隐藏所有非 feed 的直接子元素 */
       .sidebar-container.sfp-feed-mode > :not(.sfp-feed-container):not(.sfp-resizer) {
+        display: none !important;
+      }
+      /* 显式隐藏常见 sidebar 组件（嵌套情况兜底） */
+      .sidebar-container.sfp-feed-mode .sidebar-sections,
+      .sidebar-container.sfp-feed-mode .sidebar-footer-container,
+      .sidebar-container.sfp-feed-mode .sidebar-footer-wrapper,
+      .sidebar-container.sfp-feed-mode .sidebar-footer,
+      .sidebar-container.sfp-feed-mode .sidebar-custom-sections,
+      .sidebar-container.sfp-feed-mode .sidebar-section-wrapper,
+      .sidebar-container.sfp-feed-mode .sidebar-section-header,
+      .sidebar-container.sfp-feed-mode .sidebar-section-link-wrapper {
         display: none !important;
       }
       .sidebar-container.sfp-feed-mode .sfp-feed-container {
@@ -371,10 +383,7 @@
         border-top: 5px solid currentColor;
       }
       .sfp-custom-select-dropdown {
-        position: absolute;
-        top: 100%;
-        left: 0;
-        margin-top: 4px;
+        position: fixed;
         min-width: 100%;
         background: var(--secondary, #fff);
         border: 1px solid var(--primary-low, #e9e9e9);
@@ -508,11 +517,7 @@
         background: var(--primary-very-low, #f8f8f8);
       }
       .sfp-topic-item.sfp-pinned {
-        background: var(--highlight, #fff9c4);
-        border-left: 3px solid var(--tertiary, #08c);
-      }
-      .sfp-topic-item.sfp-pinned:hover {
-        background: var(--highlight-medium, #ffe69c);
+        /* 只保留置顶 badge 标记，不加背景色 */
       }
       .sfp-topic-item.sfp-new-highlight {
         animation: sfp-new-pulse 10s ease-out forwards;
@@ -1053,7 +1058,13 @@
       document.querySelectorAll(".sfp-custom-select.open").forEach((el) => {
         if (el !== wrapper) el.classList.remove("open");
       });
-      wrapper.classList.toggle("open");
+      const isOpen = wrapper.classList.toggle("open");
+      if (isOpen) {
+        const btnRect = btn.getBoundingClientRect();
+        dropdown.style.top = (btnRect.bottom + 4) + "px";
+        dropdown.style.left = btnRect.left + "px";
+        dropdown.style.minWidth = btnRect.width + "px";
+      }
     });
 
     wrapper.appendChild(btn);
@@ -1322,24 +1333,22 @@
 
         if (newTopics.length === 0) {
           hasMorePages = false;
-          _showNoMore();
         } else {
           allTopics = allTopics.concat(newTopics);
-          newTopics.forEach((topic) => {
-            const item = createTopicItem(topic);
-            feedListEl.appendChild(item);
-          });
-          _removeLoadMore();
-
-          if (newTopics.length < 5 && hasMorePages) {
-            isLoadingMore = false;
-            loadMoreTopics();
-            return;
-          }
         }
       } else {
         hasMorePages = false;
-        _showNoMore();
+      }
+
+      // 统一通过 renderTopics 重渲染，确保 filter 生效
+      renderTopics();
+
+      // 加载后如果筛选结果仍然稀疏，继续加载
+      const filtered = _applyFilter(allTopics);
+      if (filtered.length < 10 && hasMorePages && !isLoading) {
+        isLoadingMore = false;
+        loadMoreTopics();
+        return;
       }
     } catch (e) {
       console.error("[SFP] loadMoreTopics error:", e);
@@ -1455,7 +1464,14 @@
     });
 
     if (filtered.length === 0) {
-      feedListEl.innerHTML = `<div class="sfp-empty">无匹配话题</div>`;
+      // 如果还有更多页数据未加载，显示加载中而不是"无匹配"
+      if (hasMorePages && !isLoadingMore) {
+        feedListEl.innerHTML = `<div class="sfp-loading"><div class="sfp-spinner"></div>筛选加载中...</div>`;
+        // 触发加载更多以获取匹配项
+        loadMoreTopics();
+      } else {
+        feedListEl.innerHTML = `<div class="sfp-empty">无匹配话题</div>`;
+      }
     } else {
       filtered.forEach((topic) => {
         const item = createTopicItem(topic, newTopicIds.includes(topic.id));
