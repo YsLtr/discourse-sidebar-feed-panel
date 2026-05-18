@@ -392,39 +392,46 @@
         transform: translateY(-5px) rotate(-45deg);
       }
       .sfp-show-more-overlay {
-        position: sticky;
-        top: 8px;
-        z-index: 20;
-        width: 100%;
-        height: 0;
-        display: flex;
-        justify-content: center;
-        font-size: var(--font-down-1-rem, 0.8706rem);
+        position: absolute;
+        top: 4px;
+        left: 0;
+        right: 0;
+        z-index: 2;
+        width: fit-content;
+        max-width: calc(100% - 24px);
+        margin: auto;
+        padding: 0;
+        font-size: 12px;
         pointer-events: none;
         animation: sfp-float-down 250ms ease-in-out;
       }
+      .sfp-content-wrapper.sfp-has-show-more .sfp-topic-list {
+        padding-top: 15px;
+      }
       .sfp-show-more-overlay .sfp-hint-text {
-        display: flex;
+        display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 0.5em;
-        margin: 0 auto;
-        padding: var(--space-2, 8px) var(--space-4, 16px);
+        max-width: 100%;
+        margin: 0;
+        padding: 5px 11px;
         border: none;
-        border-radius: var(--d-border-radius-large, 20px);
-        background: var(--tertiary-low, #fcf3e8);
+        background-color: rgb(53, 34, 8);
+        border-radius: 16px;
         color: var(--tertiary, #d3881f);
         cursor: pointer;
         font-size: inherit;
-        line-height: 1.4;
+        line-height: 1.35;
         text-decoration: none;
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         pointer-events: auto;
-        transition: background 0.2s, color 0.2s;
+        transition: background-color 0.2s, color 0.2s;
       }
       .sfp-show-more-overlay .sfp-hint-text:hover {
-        background: var(--highlight-low, var(--tertiary-low, #fcf3e8));
-        color: var(--tertiary-hover, var(--tertiary, #d3881f));
+        background-color: rgb(63, 44, 18);
+        color: var(--tertiary-hover, var(--tertiary-dark, #b8691a));
       }
       @keyframes sfp-float-down {
         from { opacity: 0; transform: translateY(-8px); }
@@ -667,6 +674,10 @@
         overflow-y: auto;
         overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
+      }
+      .sfp-content-wrapper {
+        position: relative;
+        min-height: 100%;
       }
 
       /* ===== 帖子列表项 ===== */
@@ -1091,10 +1102,15 @@
     feedScrollEl = document.createElement("div");
     feedScrollEl.className = "sfp-feed-scroll";
 
+    // 创建内容包装器，用于相对定位
+    const contentWrapper = document.createElement("div");
+    contentWrapper.className = "sfp-content-wrapper";
+
     feedListEl = document.createElement("div");
     feedListEl.className = "sfp-topic-list";
 
-    feedScrollEl.appendChild(feedListEl);
+    contentWrapper.appendChild(feedListEl);
+    feedScrollEl.appendChild(contentWrapper);
     feedContainer.appendChild(feedScrollEl);
     sidebar.appendChild(feedContainer);
 
@@ -1473,15 +1489,19 @@
   function _updateShowMoreHint() {
     if (!feedScrollEl) return;
 
+    const contentWrapper = feedScrollEl.querySelector(".sfp-content-wrapper");
+    if (!contentWrapper) return;
+
     // 只在默认模式（全部板块 + 默认排序 + 全部筛选）时刷新提示
     if (currentTab !== "all" || currentOrder !== "default" || currentFilter !== "all") {
       // 非默认模式移除已有提示
-      const existing = feedScrollEl.querySelector(".sfp-show-more-overlay");
+      const existing = contentWrapper.querySelector(".sfp-show-more-overlay");
       if (existing) existing.remove();
+      contentWrapper.classList.remove("sfp-has-show-more");
       return;
     }
 
-    const existing = feedScrollEl.querySelector(".sfp-show-more-overlay");
+    const existing = contentWrapper.querySelector(".sfp-show-more-overlay");
     const trackingState = getTopicTrackingState();
     const newCount = trackingState?.incomingCount || 0;
     if (newCount <= 0) {
@@ -1494,9 +1514,9 @@
 
     let hint = overlay.querySelector(".sfp-hint-text");
     if (!hint) {
-      hint = document.createElement("button");
-      hint.className = "sfp-hint-text alert alert-info clickable";
-      hint.type = "button";
+      hint = document.createElement("a");
+      hint.className = "sfp-hint-text";
+      hint.href = "#";
       hint.addEventListener("click", (e) => {
         e.preventDefault();
         _applyNativeIncomingTopics({ logPrefix: "show more" });
@@ -1504,11 +1524,10 @@
       overlay.appendChild(hint);
     }
 
-    hint.className = "sfp-hint-text alert alert-info clickable";
-    hint.type = "button";
-    hint.textContent = `${newCount} 个新的或更新的话题`;
+    hint.textContent = `查看 ${newCount} 个新的或更新的话题`;
+    contentWrapper.classList.add("sfp-has-show-more");
     if (!existing) {
-      feedScrollEl.insertBefore(overlay, feedScrollEl.firstChild);
+      contentWrapper.insertBefore(overlay, contentWrapper.firstChild);
     }
   }
 
