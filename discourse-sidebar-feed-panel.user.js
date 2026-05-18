@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.16
+// @version      0.6.18
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -36,6 +36,9 @@
   const MIN_WIDTH = DEFAULT_WIDTH;
   const MAX_WIDTH = 500;
   const DEFAULT_AUTO_REFRESH_INTERVAL = 10;
+  const AUTO_LOAD_RATE_WINDOW_MS = 5000;
+  const AUTO_LOAD_MAX_REQUESTS_PER_WINDOW = 3;
+  const AUTO_LOAD_MAX_EMPTY_FILTER_RESULTS = 3;
 
   // ========== 全局状态 ==========
   let feedModeEnabled = GM_getValue(STATE_KEY, false);
@@ -61,6 +64,10 @@
   let _pendingReload = false;
   let autoRefreshTimer = null;
   let autoRefreshSeconds = 0;
+  let autoLoadTimestamps = [];
+  let autoLoadEmptyFilterCount = 0;
+  let autoLoadStoppedForSession = false;
+  let autoLoadSessionKey = "";
   let trackingStateCallbackId = null;
   let incomingCountPollTimer = null;
   let lastKnownIncomingCount = 0;
@@ -934,6 +941,12 @@
         font-size: 11px;
         color: var(--primary-low-mid, #aaa);
       }
+      .sfp-load-more-note {
+        padding: 10px 10px 0;
+        text-align: center;
+        font-size: 12px;
+        color: var(--primary-medium, #888);
+      }
       .sfp-error {
         padding: 40px 20px;
         text-align: center;
@@ -1165,6 +1178,7 @@
     loadedTopicIds.clear();
     currentPage = 0;
     hasMorePages = true;
+    _resetAutoLoadState();
 
     sidebar.classList.remove("sfp-feed-mode");
   }
@@ -1195,6 +1209,7 @@
     const periodSelect = _buildCustomSelect(periodOptions, currentPeriod, (value) => {
       currentPeriod = value;
       GM_setValue(PERIOD_KEY, currentPeriod);
+      _resetAutoLoadState();
       loadTopics();
     });
     periodSelect.classList.add("sfp-period-select");
@@ -1206,6 +1221,7 @@
       GM_setValue(ORDER_KEY, currentOrder);
       _updatePeriodVisibility(periodSelect);
       _syncIncomingCountPollForView();
+      _resetAutoLoadState();
       loadTopics();
     });
     orderSelect.classList.add("sfp-order-select");
@@ -1413,6 +1429,7 @@
       currentCategoryId = catId;
       GM_setValue(TAB_KEY, currentTab);
       _syncIncomingCountPollForView();
+      _resetAutoLoadState();
 
       bar.querySelectorAll(".sfp-tab-item").forEach((t) => {
         t.classList.remove("active");
@@ -1474,6 +1491,7 @@
         hidePinned = !hidePinned;
         GM_setValue(HIDE_PINNED_KEY, hidePinned);
         item.classList.toggle("active", hidePinned);
+        _resetAutoLoadState();
         renderTopics();
         return;
       } else {
@@ -1481,6 +1499,7 @@
         currentFilter = filterVal;
         GM_setValue(FILTER_KEY, currentFilter);
         _syncIncomingCountPollForView();
+        _resetAutoLoadState();
         bar.querySelectorAll(".sfp-filter-item[data-filter]:not([data-filter=\"hide-pinned\"])").forEach((i) => i.classList.remove("active"));
         item.classList.add("active");
         renderTopics();
@@ -1639,6 +1658,58 @@
     return currentTab === "all" && currentOrder === "default" && currentFilter === "all";
   }
 
+  function _getAutoLoadSessionKey() {
+    return [
+      currentTab,
+      currentCategoryId || "",
+      currentOrder,
+      currentPeriod,
+      currentFilter,
+      hidePinned ? "hide-pinned" : "show-pinned",
+    ].join("|");
+  }
+
+  function _resetAutoLoadState() {
+    autoLoadTimestamps = [];
+    autoLoadEmptyFilterCount = 0;
+    autoLoadStoppedForSession = false;
+    autoLoadSessionKey = _getAutoLoadSessionKey();
+  }
+
+  function _ensureAutoLoadSession() {
+    const nextKey = _getAutoLoadSessionKey();
+    if (nextKey !== autoLoadSessionKey) {
+      _resetAutoLoadState();
+    }
+  }
+
+  function _canRunAutoLoad() {
+    _ensureAutoLoadSession();
+    if (autoLoadStoppedForSession) return false;
+
+    const now = Date.now();
+    autoLoadTimestamps = autoLoadTimestamps.filter((ts) => now - ts < AUTO_LOAD_RATE_WINDOW_MS);
+    return autoLoadTimestamps.length < AUTO_LOAD_MAX_REQUESTS_PER_WINDOW;
+  }
+
+  function _recordAutoLoadRequest() {
+    _ensureAutoLoadSession();
+    autoLoadTimestamps.push(Date.now());
+  }
+
+  function _recordAutoLoadFilterResult(filteredNewCount) {
+    _ensureAutoLoadSession();
+    if (filteredNewCount > 0) {
+      autoLoadEmptyFilterCount = 0;
+      return;
+    }
+
+    autoLoadEmptyFilterCount++;
+    if (autoLoadEmptyFilterCount >= AUTO_LOAD_MAX_EMPTY_FILTER_RESULTS) {
+      autoLoadStoppedForSession = true;
+    }
+  }
+
   // ========== 数据加载 ==========
   async function fetchFeedTopics(order, period, page) {
     let url;
@@ -1700,6 +1771,7 @@
     allTopics = [];
     loadedTopicIds.clear();
     _updateShowMoreHint();
+    _resetAutoLoadState();
 
     if (feedListEl) {
       feedListEl.innerHTML = `<div class="sfp-loading"><div class="sfp-spinner"></div>加载中...</div>`;
@@ -1745,10 +1817,14 @@
     }
   }
 
-  async function loadMoreTopics() {
+  async function loadMoreTopics({ source = "manual" } = {}) {
     if (isLoadingMore || !hasMorePages) return;
+    const isAutoLoad = source === "auto";
+    if (isAutoLoad && !_canRunAutoLoad()) return;
+
     isLoadingMore = true;
     currentPage++;
+    if (isAutoLoad) _recordAutoLoadRequest();
 
     _showLoadMoreSpinner();
 
@@ -1769,23 +1845,17 @@
           _showNoMore();
         } else {
           allTopics = allTopics.concat(newTopics);
-          _removeLoadMore();
           // 增量追加，应用当前筛选，保留滚动位置
           const filteredNew = _applyFilter(newTopics);
           filteredNew.forEach((topic) => {
             const item = createTopicItem(topic);
             feedListEl.appendChild(item);
           });
-          // 如果新增的都被筛选掉了且还有更多页，自动继续加载
-          if (filteredNew.length === 0 && hasMorePages) {
-            isLoadingMore = false;
-            loadMoreTopics();
-            return;
-          }
-          // 更新底部状态
-          if (!hasMorePages) {
-            _showNoMore();
-          }
+
+          if (isAutoLoad) _recordAutoLoadFilterResult(filteredNew.length);
+          _renderPaginationFooter({
+            note: !isAutoLoad && filteredNew.length === 0 ? "下一页无符合条件的话题" : "",
+          });
         }
       } else {
         hasMorePages = false;
@@ -1793,7 +1863,7 @@
       }
     } catch (e) {
       console.error("[SFP] loadMoreTopics error:", e);
-      _removeLoadMore();
+      _renderPaginationFooter();
     } finally {
       isLoadingMore = false;
     }
@@ -1966,21 +2036,7 @@
       });
     }
 
-    if (hasMorePages) {
-      const loadMoreEl = document.createElement("div");
-      loadMoreEl.className = "sfp-load-more";
-      loadMoreEl.textContent = "加载更多";
-      loadMoreEl.addEventListener("click", () => {
-        loadMoreEl.remove();
-        loadMoreTopics();
-      });
-      feedListEl.appendChild(loadMoreEl);
-    } else {
-      const noMoreEl = document.createElement("div");
-      noMoreEl.className = "sfp-no-more";
-      noMoreEl.textContent = "— 已经到底了 —";
-      feedListEl.appendChild(noMoreEl);
-    }
+    _renderPaginationFooter();
   }
 
   function _sortTopicsForCurrentView(topics) {
@@ -2068,7 +2124,7 @@
   function _checkAutoLoadOnSparseFilter() {
     const filtered = _applyFilter(allTopics);
     if (filtered.length < 10 && hasMorePages && !isLoadingMore && !isLoading) {
-      loadMoreTopics();
+      loadMoreTopics({ source: "auto" });
     }
   }
 
@@ -2231,29 +2287,55 @@
       if (!feedScrollEl || !hasMorePages || isLoadingMore) return;
       const { scrollTop, scrollHeight, clientHeight } = feedScrollEl;
       if (scrollHeight - scrollTop - clientHeight < 200) {
-        loadMoreTopics();
+        loadMoreTopics({ source: "auto" });
       }
     }, 300));
   }
 
   // ========== 加载更多辅助 ==========
+  function _renderPaginationFooter({ note = "" } = {}) {
+    if (!feedListEl) return;
+    _removePaginationFooter();
+
+    if (note) {
+      const noteEl = document.createElement("div");
+      noteEl.className = "sfp-load-more-note";
+      noteEl.textContent = note;
+      feedListEl.appendChild(noteEl);
+    }
+
+    if (hasMorePages) {
+      const loadMoreEl = document.createElement("div");
+      loadMoreEl.className = "sfp-load-more";
+      loadMoreEl.textContent = "加载更多";
+      loadMoreEl.addEventListener("click", () => {
+        loadMoreEl.remove();
+        loadMoreTopics({ source: "manual" });
+      });
+      feedListEl.appendChild(loadMoreEl);
+      return;
+    }
+
+    const noMoreEl = document.createElement("div");
+    noMoreEl.className = "sfp-no-more";
+    noMoreEl.textContent = "— 已经到底了 —";
+    feedListEl.appendChild(noMoreEl);
+  }
+
   function _showLoadMoreSpinner() {
-    _removeLoadMore();
+    _removePaginationFooter();
     const el = document.createElement("div");
     el.className = "sfp-load-more";
     el.innerHTML = `<span class="sfp-load-more-spinner"></span>加载中...`;
     if (feedListEl) feedListEl.appendChild(el);
   }
 
-  function _removeLoadMore() {
-    const el = feedListEl?.querySelector(".sfp-load-more");
-    if (el) el.remove();
+  function _removePaginationFooter() {
+    feedListEl?.querySelectorAll(".sfp-load-more, .sfp-no-more, .sfp-load-more-note").forEach((el) => el.remove());
   }
 
   function _showNoMore() {
-    _removeLoadMore();
-    const existing = feedListEl?.querySelector(".sfp-no-more");
-    if (existing) existing.remove();
+    _removePaginationFooter();
     const el = document.createElement("div");
     el.className = "sfp-no-more";
     el.textContent = "— 已经到底了 —";
