@@ -1082,6 +1082,22 @@
     const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
     if (!sidebar) return;
 
+    if (feedContainer && sidebar.contains(feedContainer)) {
+      sidebar.classList.add("sfp-feed-mode");
+      applySidebarWidth(sfpSidebarWidth);
+      setupResizer();
+      _updateShowMoreHint();
+      return;
+    }
+
+    if (feedContainer) {
+      feedContainer.remove();
+      feedContainer = null;
+      feedHeaderEl = null;
+      feedScrollEl = null;
+      feedListEl = null;
+    }
+
     // 创建 feed 容器
     feedContainer = document.createElement("div");
     feedContainer.className = "sfp-feed-container";
@@ -2240,6 +2256,13 @@
       observer = new MutationObserver(() => {
         if (location.href !== lastUrl) {
           _checkUrlChange();
+        }
+
+        if (feedModeEnabled) {
+          const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+          if (sidebar && (!feedContainer || !sidebar.contains(feedContainer) || !sidebar.classList.contains("sfp-feed-mode"))) {
+            activateFeed();
+          }
         }
       });
       observer.observe(document.body, { childList: true, subtree: true });
