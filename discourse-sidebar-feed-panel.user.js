@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.19
+// @version      0.6.20
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -1725,17 +1725,27 @@
   async function fetchFeedTopics(order, period, page) {
     let url;
     const effectiveOrder = order === "default" ? "activity" : order;
+    const useTopList = _usesPeriodScopedTopList(order);
 
     if (currentTab !== "all" && currentCategoryId) {
       const cat = CATEGORY_CONFIG[currentCategoryId];
       const tabId = cat?.tabId || currentTab;
       const params = [];
       params.push(`page=${page}`);
-      params.push(`order=${encodeURIComponent(effectiveOrder)}`);
-      if (period !== "all" && _needsPeriodForUrl(order)) {
+      if (useTopList) {
         params.push(`period=${encodeURIComponent(period)}`);
+        params.push(`order=${encodeURIComponent(effectiveOrder)}`);
+        url = `/c/${tabId}/${currentCategoryId}/l/top.json?${params.join("&")}`;
+      } else {
+        params.push(`order=${encodeURIComponent(effectiveOrder)}`);
+        url = `/c/${tabId}/${currentCategoryId}/l/latest.json?${params.join("&")}`;
       }
-      url = `/c/${tabId}/${currentCategoryId}/l/latest.json?${params.join("&")}`;
+    } else if (useTopList) {
+      const params = [];
+      params.push(`period=${encodeURIComponent(period)}`);
+      params.push(`order=${encodeURIComponent(effectiveOrder)}`);
+      params.push(`page=${page}`);
+      url = `/top.json?${params.join("&")}`;
     } else {
       url = "/latest.json?";
       const params = [];
@@ -1766,6 +1776,10 @@
   }
 
   function _needsPeriodForUrl(order) {
+    return _usesPeriodScopedTopList(order);
+  }
+
+  function _usesPeriodScopedTopList(order) {
     return ["views", "posts", "likes", "op_likes"].includes(order);
   }
 
