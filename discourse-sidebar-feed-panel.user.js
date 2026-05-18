@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.13
+// @version      0.6.15
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -1843,6 +1843,7 @@
       console.warn(`[SFP] ${logPrefix} error:`, e);
     } finally {
       isRefreshing = false;
+      _resetAutoRefreshCountdown();
     }
   }
 
@@ -1904,16 +1905,22 @@
     _stopAutoRefresh();
     if (!autoRefreshEnabled) return;
 
-    autoRefreshSeconds = autoRefreshInterval;
+    _resetAutoRefreshCountdown();
     autoRefreshTimer = setInterval(() => {
       autoRefreshSeconds--;
       if (autoRefreshSeconds <= 0) {
-        autoRefreshSeconds = autoRefreshInterval;
+        _resetAutoRefreshCountdown();
         if (feedModeEnabled && !isLoading && !isLoadingMore) {
-          _silentRefresh();
+          _refreshCurrentView({ logPrefix: "auto refresh" });
         }
       }
     }, 1000);
+  }
+
+  function _resetAutoRefreshCountdown() {
+    if (autoRefreshEnabled) {
+      autoRefreshSeconds = autoRefreshInterval;
+    }
   }
 
   function _stopAutoRefresh() {
