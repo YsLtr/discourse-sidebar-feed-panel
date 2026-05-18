@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.21
+// @version      0.6.22
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -42,7 +42,11 @@
 
   // ========== 全局状态 ==========
   let feedModeEnabled = GM_getValue(STATE_KEY, false);
-  let currentOrder = GM_getValue(ORDER_KEY, "default");
+  let currentOrder = GM_getValue(ORDER_KEY, "activity");
+  if (currentOrder === "default") {
+    currentOrder = "activity";
+    GM_setValue(ORDER_KEY, currentOrder);
+  }
   let currentPeriod = GM_getValue(PERIOD_KEY, "all");
   let sfpSidebarWidth = GM_getValue(WIDTH_KEY, DEFAULT_WIDTH);
   let currentTab = GM_getValue(TAB_KEY, "all");
@@ -1198,7 +1202,6 @@
   function _buildHeaderControls(header) {
     // Order 自定义下拉
     const orderOptions = [
-      { label: "默认", value: "default" },
       { label: "最新活动", value: "activity" },
       { label: "最新发布", value: "created" },
       { label: "最多浏览", value: "views" },
@@ -1541,9 +1544,9 @@
     const contentWrapper = feedScrollEl.querySelector(".sfp-content-wrapper");
     if (!contentWrapper) return;
 
-    // 只在默认模式（全部板块 + 默认排序 + 全部筛选）时刷新提示
-    if (currentTab !== "all" || currentOrder !== "default" || currentFilter !== "all") {
-      // 非默认模式移除已有提示
+    // 只在最新活动模式（全部板块 + 最新活动 + 全部筛选）时刷新提示
+    if (currentTab !== "all" || currentOrder !== "activity" || currentFilter !== "all") {
+      // 非最新活动模式移除已有提示
       const existing = contentWrapper.querySelector(".sfp-show-more-overlay");
       if (existing) existing.remove();
       contentWrapper.classList.remove("sfp-has-show-more");
@@ -1601,7 +1604,7 @@
     // 初始化已知计数
     lastKnownIncomingCount = trackingState.incomingCount || 0;
 
-    // 只在默认视图启动轮询，避免分类、排序、筛选视图空跑。
+    // 只在最新活动视图启动轮询，避免分类、排序、筛选视图空跑。
     _syncIncomingCountPollForView();
 
     // 延迟初始更新，让 trackIncoming 有时间处理
@@ -1666,7 +1669,7 @@
   }
 
   function _isDefaultFeedView() {
-    return currentTab === "all" && currentOrder === "default" && currentFilter === "all";
+    return currentTab === "all" && currentOrder === "activity" && currentFilter === "all";
   }
 
   function _getAutoLoadSessionKey() {
@@ -1724,7 +1727,7 @@
   // ========== 数据加载 ==========
   async function fetchFeedTopics(order, period, page) {
     let url;
-    const effectiveOrder = order === "default" ? "activity" : order;
+    const effectiveOrder = order;
     const useTopList = _usesPeriodScopedTopList(order, period);
 
     if (currentTab !== "all" && currentCategoryId) {
@@ -1906,7 +1909,7 @@
 
   async function _refreshCurrentView({ requireDefaultView = false, logPrefix = "refresh" } = {}) {
     if (isLoading || isLoadingMore || isRefreshing) return;
-    if (requireDefaultView && (currentOrder !== "default" || currentTab !== "all" || currentFilter !== "all")) return;
+    if (requireDefaultView && !_isDefaultFeedView()) return;
     if (!feedListEl) return;
 
     isRefreshing = true;
@@ -1942,7 +1945,7 @@
   }
 
   // ========== 静默刷新 ==========
-  // 仅在纯默认视图（全部板块 + 默认排序 + 全部筛选）时启用
+  // 仅在最新活动视图（全部板块 + 最新活动 + 全部筛选）时启用
   async function _silentRefresh() {
     if (autoSilentRefreshEnabled) {
       return _applyNativeIncomingTopics({ requireDefaultView: true, logPrefix: "silent refresh" });
@@ -2037,8 +2040,6 @@
     // 客户端筛选
     let filtered = _applyFilter(allTopics);
 
-    _sortTopicsForCurrentView(filtered);
-
     if (filtered.length === 0) {
       // 构建更精确的空状态消息
       let emptyMsg = "无匹配话题";
@@ -2062,31 +2063,6 @@
     }
 
     _renderPaginationFooter();
-  }
-
-  function _sortTopicsForCurrentView(topics) {
-    topics.sort((a, b) => {
-      const aPinned = (a.pinned || a.pinned_globally) ? 1 : 0;
-      const bPinned = (b.pinned || b.pinned_globally) ? 1 : 0;
-      if (aPinned !== bPinned) return bPinned - aPinned;
-
-      if (currentOrder === "created") {
-        return _topicTimeValue(b.created_at) - _topicTimeValue(a.created_at);
-      }
-
-      if (currentOrder === "default" || currentOrder === "activity") {
-        const aTime = a.bumped_at || a.last_posted_at || a.created_at;
-        const bTime = b.bumped_at || b.last_posted_at || b.created_at;
-        return _topicTimeValue(bTime) - _topicTimeValue(aTime);
-      }
-
-      return 0;
-    });
-  }
-
-  function _topicTimeValue(value) {
-    const time = Date.parse(value);
-    return Number.isNaN(time) ? 0 : time;
   }
 
   // ========== 客户端筛选 ==========
