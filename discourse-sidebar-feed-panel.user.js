@@ -1506,6 +1506,7 @@
     const newCount = trackingState?.incomingCount || 0;
     if (newCount <= 0) {
       if (existing) existing.remove();
+      contentWrapper.classList.remove("sfp-has-show-more");
       return;
     }
 
