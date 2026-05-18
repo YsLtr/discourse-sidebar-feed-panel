@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.5
+// @version      0.6.11
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -27,11 +27,15 @@
   const TAB_KEY = "sfp_current_tab";
   const FILTER_KEY = "sfp_current_filter";
   const HIDE_PINNED_KEY = "sfp_hide_pinned";
+  const AUTO_SILENT_REFRESH_KEY = "sfp_auto_silent_refresh";
+  const AUTO_REFRESH_ENABLED_KEY = "sfp_auto_refresh_enabled";
+  const AUTO_REFRESH_INTERVAL_KEY = "sfp_auto_refresh_interval";
 
   // ========== 常量 ==========
   const DEFAULT_WIDTH = 272;
-  const MIN_WIDTH = 220;
+  const MIN_WIDTH = 48;
   const MAX_WIDTH = 500;
+  const DEFAULT_AUTO_REFRESH_INTERVAL = 10;
 
   // ========== 全局状态 ==========
   let feedModeEnabled = GM_getValue(STATE_KEY, false);
@@ -41,6 +45,9 @@
   let currentTab = GM_getValue(TAB_KEY, "all");
   let currentFilter = GM_getValue(FILTER_KEY, "all");
   let hidePinned = GM_getValue(HIDE_PINNED_KEY, false);
+  let autoSilentRefreshEnabled = GM_getValue(AUTO_SILENT_REFRESH_KEY, false);
+  let autoRefreshEnabled = GM_getValue(AUTO_REFRESH_ENABLED_KEY, false);
+  let autoRefreshInterval = Math.max(1, Number(GM_getValue(AUTO_REFRESH_INTERVAL_KEY, DEFAULT_AUTO_REFRESH_INTERVAL)) || DEFAULT_AUTO_REFRESH_INTERVAL);
   let currentCategoryId = null;
 
   let allTopics = [];
@@ -50,10 +57,11 @@
   let hasMorePages = true;
   let isLoading = false;
   let isLoadingMore = false;
+  let isRefreshing = false;
   let _pendingReload = false;
-  let _silentInsertedIds = new Set(); // 静默刷新插入的临时 DOM 话题 ID，不污染 allTopics
   let autoRefreshTimer = null;
   let autoRefreshSeconds = 0;
+  let trackingStateCallbackId = null;
   let routeDebounceTimer = null;
   let toggleBtn = null;
   let feedContainer = null;
@@ -75,6 +83,14 @@
     script.textContent = `window.require("discourse/lib/url").default.routeTo("${path}");`;
     document.documentElement.appendChild(script);
     script.remove();
+  }
+
+  function getTopicTrackingState() {
+    try {
+      return Discourse.__container__?.lookup("service:topic-tracking-state") || null;
+    } catch (e) {
+      return null;
+    }
   }
 
   function debounce(fn, delay) {
@@ -276,7 +292,7 @@
         display: flex;
         flex-direction: column;
         height: 100%;
-        overflow: hidden;
+        overflow: visible;
         max-width: 100%;
       }
 
@@ -298,6 +314,7 @@
 
       /* ===== Feed Header ===== */
       .sfp-feed-header {
+        position: relative;
         flex-shrink: 0;
         padding: 8px 12px;
         border-bottom: 1px solid var(--primary-low, #e9e9e9);
@@ -305,9 +322,14 @@
         flex-wrap: wrap;
         gap: 6px;
         align-items: center;
-        overflow: hidden;
+        overflow: visible;
       }
-      .sfp-feed-header .sfp-refresh-btn {
+      .sfp-feed-header .sfp-header-spacer {
+        flex: 1 1 auto;
+        min-width: 8px;
+      }
+      .sfp-feed-header .sfp-refresh-btn,
+      .sfp-feed-header .sfp-settings-btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -322,7 +344,9 @@
         flex-shrink: 0;
         transition: color 0.2s, background 0.2s;
       }
-      .sfp-feed-header .sfp-refresh-btn:hover {
+      .sfp-feed-header .sfp-refresh-btn:hover,
+      .sfp-feed-header .sfp-settings-btn:hover,
+      .sfp-settings-wrap.open .sfp-settings-btn {
         color: var(--tertiary, #0088cc);
         background: var(--primary-low, #eee);
       }
@@ -333,23 +357,144 @@
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
       }
-      .sfp-feed-header .sfp-refresh-btn svg {
+      .sfp-feed-header .sfp-refresh-btn svg,
+      .sfp-feed-header .sfp-settings-btn svg {
         width: 16px;
         height: 16px;
         fill: currentColor;
       }
+      .sfp-settings-btn {
+        position: absolute;
+        top: 0;
+        right: 0;
+        z-index: 2;
+        background: transparent;
+        gap: 3px;
+        flex-direction: column;
+      }
+      .sfp-settings-line {
+        width: 14px;
+        height: 2px;
+        border-radius: 2px;
+        background: currentColor;
+        transition: transform 0.28s ease, opacity 0.2s ease;
+        transform-origin: center;
+      }
+      .sfp-settings-wrap.open .sfp-settings-line-1 {
+        transform: translateY(5px) rotate(45deg);
+      }
+      .sfp-settings-wrap.open .sfp-settings-line-2 {
+        opacity: 0;
+        transform: scaleX(0);
+      }
+      .sfp-settings-wrap.open .sfp-settings-line-3 {
+        transform: translateY(-5px) rotate(-45deg);
+      }
       .sfp-feed-header .sfp-hint-text {
+        flex: 0 1 auto;
         font-size: 11px;
         color: var(--tertiary, #0088cc);
         cursor: pointer;
-        width: 100%;
-        padding: 2px 0;
+        border: none;
+        background: transparent;
+        padding: 0 4px;
         text-decoration: none;
+        white-space: nowrap;
         transition: color 0.2s;
       }
       .sfp-feed-header .sfp-hint-text:hover {
         color: var(--tertiary-high, #006699);
         text-decoration: underline;
+      }
+      .sfp-settings-wrap {
+        position: relative;
+        width: 28px;
+        height: 28px;
+        flex-shrink: 0;
+        overflow: visible;
+      }
+      .sfp-settings-shell {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 28px;
+        height: 28px;
+        background: var(--secondary, #fff);
+        border: 1px solid var(--primary-low, #e9e9e9);
+        border-radius: 6px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+        z-index: 10003;
+        overflow: hidden;
+        transition: width 0.36s cubic-bezier(0.25, 1, 0.5, 1),
+                    height 0.36s cubic-bezier(0.25, 1, 0.5, 1),
+                    border-radius 0.24s ease,
+                    background 0.2s ease;
+      }
+      .sfp-settings-wrap.open .sfp-settings-shell {
+        width: 204px;
+        height: 128px;
+        border-radius: 8px;
+      }
+      .sfp-settings-shell:hover,
+      .sfp-settings-wrap.open .sfp-settings-shell {
+        background: var(--primary-very-low, #f5f5f5);
+      }
+      .sfp-feed-header .sfp-settings-shell .sfp-settings-btn,
+      .sfp-feed-header .sfp-settings-shell .sfp-settings-btn:hover,
+      .sfp-settings-wrap.open .sfp-settings-btn {
+        background: transparent;
+      }
+      .sfp-settings-panel {
+        box-sizing: border-box;
+        width: 204px;
+        padding: 36px 10px 10px 10px;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-8px);
+        pointer-events: none;
+        transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s;
+      }
+      .sfp-settings-wrap.open .sfp-settings-panel {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+        pointer-events: auto;
+        transition: opacity 0.26s ease 0.12s, transform 0.26s ease 0.12s, visibility 0.26s 0.12s;
+      }
+      .sfp-setting-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 12px;
+        color: var(--primary, #333);
+        line-height: 1.3;
+        padding: 4px 0;
+      }
+      .sfp-setting-row input[type="checkbox"] {
+        flex-shrink: 0;
+        margin: 0;
+      }
+      .sfp-setting-interval {
+        display: none;
+        align-items: center;
+        gap: 6px;
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--primary-medium, #777);
+      }
+      .sfp-setting-interval.visible {
+        display: flex;
+      }
+      .sfp-setting-interval input {
+        width: 58px;
+        height: 26px;
+        padding: 2px 6px;
+        border: 1px solid var(--primary-low, #e9e9e9);
+        border-radius: 4px;
+        background: var(--secondary, #fff);
+        color: var(--primary, #333);
+        font-size: 12px;
       }
 
       /* ===== 自定义下拉 ===== */
@@ -605,6 +750,7 @@
       /* 标题 */
       .sfp-topic-item .sfp-topic-title {
         font-size: 14px;
+        font-weight: bold;
         color: var(--primary, #222);
         line-height: 1.4;
         margin: 0;
@@ -618,6 +764,9 @@
       }
       .sfp-topic-item .sfp-topic-title:hover {
         color: var(--tertiary, #08c);
+      }
+      .sfp-topic-item.sfp-read .sfp-topic-title {
+        color: var(--title-color--read, var(--primary-medium, #8d8d8d));
       }
       .sfp-pinned-badge {
         font-size: 10px;
@@ -829,13 +978,20 @@
   }
 
   // ========== 侧边栏宽度控制 ==========
+  function getMinSidebarWidth() {
+    const headerToggle = document.querySelector(".header-sidebar-toggle");
+    const width = headerToggle?.getBoundingClientRect().width || headerToggle?.offsetWidth || MIN_WIDTH;
+    return Math.ceil(width) || MIN_WIDTH;
+  }
+
   function applySidebarWidth(width) {
-    sfpSidebarWidth = width;
+    const clampedWidth = Math.min(MAX_WIDTH, Math.max(getMinSidebarWidth(), width));
+    sfpSidebarWidth = clampedWidth;
     const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
     if (sidebar) {
-      sidebar.style.setProperty("width", width + "px", "important");
+      sidebar.style.setProperty("width", clampedWidth + "px", "important");
     }
-    document.documentElement.style.setProperty("--d-sidebar-width", width + "px");
+    document.documentElement.style.setProperty("--d-sidebar-width", clampedWidth + "px");
   }
 
   function restoreSidebarWidth() {
@@ -867,7 +1023,7 @@
       const onMouseMove = (e) => {
         if (!isResizing) return;
         const delta = e.clientX - startX;
-        const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + delta));
+        const newWidth = Math.min(MAX_WIDTH, Math.max(getMinSidebarWidth(), startWidth + delta));
         applySidebarWidth(newWidth);
       };
 
@@ -929,6 +1085,7 @@
 
     // 恢复当前 tab 筛选的分类
     _restoreTabState();
+    _startNativeIncomingTracking();
 
     // 始终全量加载，数据已在 deactivateFeed 中清除
     loadTopics();
@@ -942,6 +1099,7 @@
     if (!sidebar) return;
 
     _stopAutoRefresh();
+    _stopNativeIncomingTracking();
 
     if (feedContainer) {
       feedContainer.remove();
@@ -955,7 +1113,6 @@
     allTopics = [];
     usersMap = {};
     loadedTopicIds.clear();
-    _silentInsertedIds.clear();
     currentPage = 0;
     hasMorePages = true;
 
@@ -964,17 +1121,6 @@
 
   // ========== Header 控件 ==========
   function _buildHeaderControls(header) {
-    // 刷新按钮
-    const refreshBtn = document.createElement("button");
-    refreshBtn.className = "sfp-refresh-btn";
-    refreshBtn.title = "刷新";
-    refreshBtn.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>`;
-    refreshBtn.addEventListener("click", () => {
-      refreshBtn.classList.add("spinning");
-      loadTopics().finally(() => refreshBtn.classList.remove("spinning"));
-    });
-    header.appendChild(refreshBtn);
-
     // Order 自定义下拉
     const orderOptions = [
       { label: "默认", value: "default" },
@@ -1022,6 +1168,103 @@
 
     // 新话题提示（动态更新）
     _updateShowMoreHint(header);
+
+    const spacer = document.createElement("span");
+    spacer.className = "sfp-header-spacer";
+    header.appendChild(spacer);
+
+    header.appendChild(_buildSettingsControl());
+
+    // 刷新按钮
+    const refreshBtn = document.createElement("button");
+    refreshBtn.className = "sfp-refresh-btn";
+    refreshBtn.title = "刷新";
+    refreshBtn.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>`;
+    refreshBtn.addEventListener("click", () => {
+      refreshBtn.classList.add("spinning");
+      refreshCurrentView().finally(() => refreshBtn.classList.remove("spinning"));
+    });
+    header.appendChild(refreshBtn);
+  }
+
+  function _buildSettingsControl() {
+    const wrapper = document.createElement("span");
+    wrapper.className = "sfp-settings-wrap";
+
+    const shell = document.createElement("span");
+    shell.className = "sfp-settings-shell";
+
+    const btn = document.createElement("button");
+    btn.className = "sfp-settings-btn";
+    btn.type = "button";
+    btn.title = "设置";
+    btn.innerHTML = `
+      <span class="sfp-settings-line sfp-settings-line-1"></span>
+      <span class="sfp-settings-line sfp-settings-line-2"></span>
+      <span class="sfp-settings-line sfp-settings-line-3"></span>
+    `;
+
+    const panel = document.createElement("div");
+    panel.className = "sfp-settings-panel";
+    panel.innerHTML = `
+      <label class="sfp-setting-row">
+        <span>自动静默刷新</span>
+        <input type="checkbox" class="sfp-auto-silent-input"${autoSilentRefreshEnabled ? " checked" : ""}>
+      </label>
+      <label class="sfp-setting-row">
+        <span>自动刷新</span>
+        <input type="checkbox" class="sfp-auto-refresh-input"${autoRefreshEnabled ? " checked" : ""}>
+      </label>
+      <label class="sfp-setting-interval${autoRefreshEnabled ? " visible" : ""}">
+        <span>自动刷新间隔</span>
+        <input type="number" class="sfp-auto-refresh-interval-input" min="1" step="1" value="${autoRefreshInterval}">
+        <span>s</span>
+      </label>
+    `;
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      document.querySelectorAll(".sfp-settings-wrap.open").forEach((el) => {
+        if (el !== wrapper) el.classList.remove("open");
+      });
+      wrapper.classList.toggle("open");
+    });
+
+    panel.addEventListener("click", (e) => e.stopPropagation());
+
+    const autoSilentInput = panel.querySelector(".sfp-auto-silent-input");
+    autoSilentInput.addEventListener("change", () => {
+      autoSilentRefreshEnabled = autoSilentInput.checked;
+      GM_setValue(AUTO_SILENT_REFRESH_KEY, autoSilentRefreshEnabled);
+      const trackingState = getTopicTrackingState();
+      if (autoSilentRefreshEnabled && (trackingState?.incomingCount || 0) > 0) {
+        _applyNativeIncomingTopics({ requireDefaultView: true, logPrefix: "enable auto silent refresh" });
+      }
+    });
+
+    const autoRefreshInput = panel.querySelector(".sfp-auto-refresh-input");
+    const intervalRow = panel.querySelector(".sfp-setting-interval");
+    const intervalInput = panel.querySelector(".sfp-auto-refresh-interval-input");
+    autoRefreshInput.addEventListener("change", () => {
+      autoRefreshEnabled = autoRefreshInput.checked;
+      GM_setValue(AUTO_REFRESH_ENABLED_KEY, autoRefreshEnabled);
+      intervalRow.classList.toggle("visible", autoRefreshEnabled);
+      _startAutoRefresh();
+    });
+
+    intervalInput.addEventListener("change", () => {
+      const seconds = Math.max(1, Number(intervalInput.value) || DEFAULT_AUTO_REFRESH_INTERVAL);
+      autoRefreshInterval = seconds;
+      intervalInput.value = seconds;
+      GM_setValue(AUTO_REFRESH_INTERVAL_KEY, autoRefreshInterval);
+      _startAutoRefresh();
+    });
+
+    shell.appendChild(btn);
+    shell.appendChild(panel);
+    wrapper.appendChild(shell);
+    return wrapper;
   }
 
   // ========== 自定义下拉组件 ==========
@@ -1084,6 +1327,7 @@
   // 点击页面其他地方关闭下拉
   document.addEventListener("click", () => {
     document.querySelectorAll(".sfp-custom-select.open").forEach((el) => el.classList.remove("open"));
+    document.querySelectorAll(".sfp-settings-wrap.open").forEach((el) => el.classList.remove("open"));
   });
 
   // ========== 分类标签栏 ==========
@@ -1115,6 +1359,7 @@
 
       const tabId = tab.dataset.tab;
       const catId = tab.dataset.categoryId ? Number(tab.dataset.categoryId) : null;
+      if (tabId === currentTab && catId === currentCategoryId) return;
 
       currentTab = tabId;
       currentCategoryId = catId;
@@ -1180,7 +1425,10 @@
         hidePinned = !hidePinned;
         GM_setValue(HIDE_PINNED_KEY, hidePinned);
         item.classList.toggle("active", hidePinned);
+        renderTopics();
+        return;
       } else {
+        if (filterVal === currentFilter) return;
         currentFilter = filterVal;
         GM_setValue(FILTER_KEY, currentFilter);
         bar.querySelectorAll(".sfp-filter-item[data-filter]:not([data-filter=\"hide-pinned\"])").forEach((i) => i.classList.remove("active"));
@@ -1208,7 +1456,7 @@
     }
   }
 
-  async function _updateShowMoreHint(header) {
+  function _updateShowMoreHint(header) {
     // 只在默认模式（全部板块 + 默认排序 + 全部筛选）时刷新提示
     if (currentTab !== "all" || currentOrder !== "default" || currentFilter !== "all") {
       // 非默认模式移除已有提示
@@ -1216,25 +1464,59 @@
       if (existing) existing.remove();
       return;
     }
-    try {
-      const container = Discourse.__container__;
-      if (!container) return;
-      const trackingState = container.lookup("service:topic-tracking-state");
-      if (!trackingState) return;
-      const newCount = trackingState.incomingCount || 0;
-      if (newCount > 0) {
-        const existing = header.querySelector(".sfp-hint-text");
-        if (existing) existing.remove();
-        const hint = document.createElement("a");
-        hint.className = "sfp-hint-text";
-        hint.textContent = `${newCount} 个新话题`;
-        hint.addEventListener("click", (e) => {
-          e.preventDefault();
-          navigateTo("/new");
-        });
-        header.appendChild(hint);
+
+    const existing = header.querySelector(".sfp-hint-text");
+    const trackingState = getTopicTrackingState();
+    const newCount = trackingState?.incomingCount || 0;
+    if (newCount <= 0) {
+      if (existing) existing.remove();
+      return;
+    }
+
+    const hint = existing || document.createElement("button");
+    hint.className = "sfp-hint-text";
+    hint.type = "button";
+    hint.textContent = `${newCount} 个新的或更新的话题`;
+    if (!existing) {
+      hint.addEventListener("click", (e) => {
+        e.preventDefault();
+        _applyNativeIncomingTopics({ logPrefix: "show more" });
+      });
+      const spacer = header.querySelector(".sfp-header-spacer");
+      header.insertBefore(hint, spacer || null);
+    }
+  }
+
+  function _startNativeIncomingTracking() {
+    const trackingState = getTopicTrackingState();
+    if (!trackingState) return;
+
+    if (trackingStateCallbackId) {
+      trackingState.offStateChange?.(trackingStateCallbackId);
+      trackingStateCallbackId = null;
+    }
+
+    trackingState.trackIncoming?.("latest");
+    trackingStateCallbackId = trackingState.onStateChange?.(() => {
+      if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+      if (autoSilentRefreshEnabled && _isDefaultFeedView() && (trackingState.incomingCount || 0) > 0) {
+        _applyNativeIncomingTopics({ requireDefaultView: true, logPrefix: "native push" });
       }
-    } catch (e) { /* tracking state not available */ }
+    });
+
+    if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+  }
+
+  function _stopNativeIncomingTracking() {
+    const trackingState = getTopicTrackingState();
+    if (trackingStateCallbackId && trackingState?.offStateChange) {
+      trackingState.offStateChange(trackingStateCallbackId);
+    }
+    trackingStateCallbackId = null;
+  }
+
+  function _isDefaultFeedView() {
+    return currentTab === "all" && currentOrder === "default" && currentFilter === "all";
   }
 
   // ========== 数据加载 ==========
@@ -1270,6 +1552,17 @@
     return resp.json();
   }
 
+  async function fetchFeedTopicsByIds(topicIds) {
+    const ids = Array.from(new Set(topicIds.map((id) => Number(id)).filter(Number.isFinite)));
+    if (ids.length === 0) return null;
+
+    const csrfToken = getCsrfToken();
+    const headers = { "X-CSRF-Token": csrfToken };
+    const resp = await fetch(`/latest.json?topic_ids=${ids.join(",")}`, { headers });
+    if (!resp.ok) throw new Error(`API error: ${resp.status}`);
+    return resp.json();
+  }
+
   function _needsPeriodForUrl(order) {
     return ["views", "posts", "likes", "op_likes"].includes(order);
   }
@@ -1286,7 +1579,7 @@
     hasMorePages = true;
     allTopics = [];
     loadedTopicIds.clear();
-    _silentInsertedIds.clear();
+    if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
 
     if (feedListEl) {
       feedListEl.innerHTML = `<div class="sfp-loading"><div class="sfp-spinner"></div>加载中...</div>`;
@@ -1302,6 +1595,9 @@
         allTopics = topics;
         hasMorePages = topics.length > 0;
         renderTopics();
+        const topicIdSet = new Set(topics.map((topic) => topic.id));
+        const nativeIncomingTopicIds = Array.from(getTopicTrackingState()?.newIncoming || []);
+        _clearNativeIncoming(nativeIncomingTopicIds.filter((id) => topicIdSet.has(Number(id))));
       } else {
         if (feedListEl) feedListEl.innerHTML = `<div class="sfp-empty">暂无话题</div>`;
         hasMorePages = false;
@@ -1389,95 +1685,109 @@
     }
   }
 
-  // ========== 静默刷新（纯 DOM 层，不修改数据源） ==========
-  // 仅在纯默认视图（全部板块 + 默认排序 + 全部筛选）时启用
-  // 不做数据层修改（不碰 allTopics/loadedTopicIds），只做 DOM 增量更新
-  // 参照 Timeline 脚本：静默刷新用固定 order=created，保持排序一致
-  async function _silentRefresh() {
-    if (isLoading || isLoadingMore) return;
-    if (currentOrder !== "default" || currentTab !== "all" || currentFilter !== "all") return;
+  async function refreshCurrentView() {
+    return _refreshCurrentView({ logPrefix: "manual refresh" });
+  }
+
+  async function _refreshCurrentView({ requireDefaultView = false, logPrefix = "refresh" } = {}) {
+    if (isLoading || isLoadingMore || isRefreshing) return;
+    if (requireDefaultView && (currentOrder !== "default" || currentTab !== "all" || currentFilter !== "all")) return;
     if (!feedListEl) return;
 
+    isRefreshing = true;
     try {
-      // 参照 Timeline：静默刷新始终用 order=created，不用 currentOrder
-      const data = await fetchFeedTopics("created", "all", 0);
+      const nativeIncomingTopicIds = Array.from(getTopicTrackingState()?.newIncoming || []);
+      const data = await fetchFeedTopics(currentOrder, currentPeriod, 0);
       _processUsers(data);
 
       if (!data?.topic_list?.topics) return;
 
       const freshTopics = data.topic_list.topics;
       const freshMap = new Map(freshTopics.map((t) => [t.id, t]));
+      const newTopicIds = freshTopics
+        .filter((topic) => !loadedTopicIds.has(topic.id))
+        .map((topic) => topic.id);
 
-      // 1. 增量更新已有 DOM 项的状态（unseen dot、回复数）
-      _updateExistingTopicItems(freshMap);
+      freshTopics.forEach((topic) => loadedTopicIds.add(topic.id));
 
-      // 2. 检测新话题：不在 allTopics 中 && 不在已插入的临时 DOM 中
-      const existingIds = new Set([
-        ...Array.from(loadedTopicIds),
-        ...Array.from(_silentInsertedIds),
-      ]);
+      const existingTail = allTopics.filter((topic) => !freshMap.has(topic.id));
+      allTopics = freshTopics.concat(existingTail);
+      hasMorePages = freshTopics.length > 0;
 
-      const newTopics = freshTopics.filter((t) => !existingIds.has(t.id));
-
-      if (newTopics.length === 0) {
-        if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
-        return;
-      }
-
-      // 3. 按 created_at 排序（与 Timeline 脚本一致），从旧到新插入 DOM 顶部
-      newTopics.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-
-      newTopics.forEach((t) => {
-        _silentInsertedIds.add(t.id);
-        const item = createTopicItem(t, true);
-        // 多个新话题：越新的越靠前，所以 insertBefore(firstChild) 保持倒序
-        feedListEl.insertBefore(item, feedListEl.firstChild);
-      });
+      renderTopics(newTopicIds);
+      _clearNativeIncoming(nativeIncomingTopicIds.filter((id) => freshMap.has(Number(id))));
 
       if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
     } catch (e) {
-      console.warn("[SFP] silent refresh error:", e);
+      console.warn(`[SFP] ${logPrefix} error:`, e);
+    } finally {
+      isRefreshing = false;
     }
   }
 
-  // 增量更新已有话题 DOM 项（unseen dot、回复数等），不重建 DOM
-  function _updateExistingTopicItems(freshMap) {
+  // ========== 静默刷新 ==========
+  // 仅在纯默认视图（全部板块 + 默认排序 + 全部筛选）时启用
+  async function _silentRefresh() {
+    if (autoSilentRefreshEnabled) {
+      return _applyNativeIncomingTopics({ requireDefaultView: true, logPrefix: "silent refresh" });
+    }
+
+    if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+  }
+
+  async function _applyNativeIncomingTopics({ requireDefaultView = false, logPrefix = "incoming" } = {}) {
+    if (isLoading || isLoadingMore || isRefreshing) return;
+    if (requireDefaultView && !_isDefaultFeedView()) return;
     if (!feedListEl) return;
-    const items = feedListEl.querySelectorAll(".sfp-topic-item[data-topic-id]");
-    items.forEach((item) => {
-      const tid = parseInt(item.dataset.topicId, 10);
-      if (!tid || !freshMap.has(tid)) return;
-      const latest = freshMap.get(tid);
-      // 更新 unread dot
-      const dot = item.querySelector(".sfp-unseen-dot");
-      if (latest.unread_posts > 0) {
-        if (!dot) {
-          const newDot = document.createElement("span");
-          newDot.className = "sfp-unseen-dot";
-          item.insertBefore(newDot, item.firstChild);
-        }
-      } else {
-        if (dot) dot.remove();
-      }
-      // 更新回复数
-      const repliesEl = item.querySelector(".sfp-topic-stat");
-      if (repliesEl && latest.posts_count != null) {
-        const replies = Math.max(0, (latest.posts_count || 1) - 1);
-        repliesEl.textContent = `💬 ${replies}`;
-      }
-    });
+
+    const trackingState = getTopicTrackingState();
+    const incomingTopicIds = Array.from(trackingState?.newIncoming || []);
+    if (incomingTopicIds.length === 0) {
+      if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+      return;
+    }
+
+    isRefreshing = true;
+    try {
+      const data = await fetchFeedTopicsByIds(incomingTopicIds);
+      if (!data?.topic_list?.topics) return;
+      _processUsers(data);
+
+      const incomingTopics = data.topic_list.topics;
+      const incomingMap = new Map(incomingTopics.map((topic) => [topic.id, topic]));
+      const incomingIdSet = new Set(incomingTopics.map((topic) => topic.id));
+
+      incomingTopics.forEach((topic) => loadedTopicIds.add(topic.id));
+      allTopics = incomingTopics.concat(allTopics.filter((topic) => !incomingMap.has(topic.id)));
+      hasMorePages = hasMorePages || incomingTopics.length > 0;
+
+      renderTopics(Array.from(incomingIdSet));
+      _clearNativeIncoming(incomingTopicIds);
+      if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+    } catch (e) {
+      console.warn(`[SFP] ${logPrefix} error:`, e);
+    } finally {
+      isRefreshing = false;
+    }
+  }
+
+  function _clearNativeIncoming(topicIds) {
+    const trackingState = getTopicTrackingState();
+    if (topicIds?.length > 0 && trackingState?.clearIncoming) {
+      trackingState.clearIncoming(topicIds);
+    }
   }
 
   // ========== 自动刷新 ==========
-  const AUTO_REFRESH_INTERVAL = 60;
-
   function _startAutoRefresh() {
     _stopAutoRefresh();
-    autoRefreshSeconds = AUTO_REFRESH_INTERVAL;
+    if (!autoRefreshEnabled) return;
+
+    autoRefreshSeconds = autoRefreshInterval;
     autoRefreshTimer = setInterval(() => {
       autoRefreshSeconds--;
       if (autoRefreshSeconds <= 0) {
-        autoRefreshSeconds = AUTO_REFRESH_INTERVAL;
+        autoRefreshSeconds = autoRefreshInterval;
         if (feedModeEnabled && !isLoading && !isLoadingMore) {
           _silentRefresh();
         }
@@ -1505,16 +1815,7 @@
     // 客户端筛选
     let filtered = _applyFilter(allTopics);
 
-    // 置顶帖排最前面
-    filtered.sort((a, b) => {
-      const aPinned = (a.pinned || a.pinned_globally) ? 1 : 0;
-      const bPinned = (b.pinned || b.pinned_globally) ? 1 : 0;
-      if (aPinned !== bPinned) return bPinned - aPinned;
-      // 同为置顶或同为非置顶，保持原有排序（按时间降序）
-      const aTime = a.bumped_at || a.last_posted_at || a.created_at;
-      const bTime = b.bumped_at || b.last_posted_at || b.created_at;
-      return new Date(bTime) - new Date(aTime);
-    });
+    _sortTopicsForCurrentView(filtered);
 
     if (filtered.length === 0) {
       // 构建更精确的空状态消息
@@ -1525,17 +1826,9 @@
         emptyMsg = "暂无已读话题";
       }
 
-      // 有数据但筛选后为空 → 显示提示 + 手动加载更多
+      // 有数据但筛选后为空 → 显示当前页提示，分页控件由底部统一渲染
       if (hasMorePages && !isLoadingMore) {
         feedListEl.innerHTML = `<div class="sfp-empty">当前页${emptyMsg}</div>`;
-        const loadMoreEl = document.createElement("div");
-        loadMoreEl.className = "sfp-load-more";
-        loadMoreEl.textContent = "加载更多";
-        loadMoreEl.addEventListener("click", () => {
-          loadMoreEl.remove();
-          loadMoreTopics();
-        });
-        feedListEl.appendChild(loadMoreEl);
       } else {
         feedListEl.innerHTML = `<div class="sfp-empty">${emptyMsg}</div>`;
       }
@@ -1563,20 +1856,83 @@
     }
   }
 
+  function _sortTopicsForCurrentView(topics) {
+    topics.sort((a, b) => {
+      const aPinned = (a.pinned || a.pinned_globally) ? 1 : 0;
+      const bPinned = (b.pinned || b.pinned_globally) ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
+
+      if (currentOrder === "created") {
+        return _topicTimeValue(b.created_at) - _topicTimeValue(a.created_at);
+      }
+
+      if (currentOrder === "default" || currentOrder === "activity") {
+        const aTime = a.bumped_at || a.last_posted_at || a.created_at;
+        const bTime = b.bumped_at || b.last_posted_at || b.created_at;
+        return _topicTimeValue(bTime) - _topicTimeValue(aTime);
+      }
+
+      return 0;
+    });
+  }
+
+  function _topicTimeValue(value) {
+    const time = Date.parse(value);
+    return Number.isNaN(time) ? 0 : time;
+  }
+
   // ========== 客户端筛选 ==========
-  // 未读 = unread_posts > 0（进入帖子后第一条右边的蓝点）
-  // 已读 = unread_posts === 0（蓝点消失）
-  // 蓝点是 Discourse 判断是否真正有未读内容的唯一可靠指标
+  function _topicBaseUrl(topic) {
+    const slug = topic.slug || "topic";
+    return `/t/${slug}/${topic.id}`;
+  }
+
+  function _hasLastReadPostNumber(topic) {
+    return topic.last_read_post_number !== null &&
+      topic.last_read_post_number !== undefined &&
+      topic.last_read_post_number !== "";
+  }
+
+  function _topicListUrl(topic) {
+    const baseUrl = _topicBaseUrl(topic);
+    if (!_hasLastReadPostNumber(topic)) return baseUrl;
+
+    const lastRead = Number(topic.last_read_post_number);
+    const highest = Number(topic.highest_post_number);
+    if (!Number.isFinite(lastRead)) return baseUrl;
+
+    let postNumber = lastRead + 1;
+    if (Number.isFinite(highest) && postNumber > highest) {
+      postNumber = highest;
+    }
+    if (postNumber < 1) postNumber = 1;
+    return `${baseUrl}/${postNumber}`;
+  }
+
+  function _topicListUrlHasPostNumber(topic) {
+    return new RegExp(`/t/[^/]+/${topic.id}/\\d+(?:$|[/?#])`).test(_topicListUrl(topic));
+  }
+
+  // 已读 = 首页标题链接带楼层号；未读 = 首页标题链接不带楼层号。
+  function _isTopicRead(topic) {
+    return _topicListUrlHasPostNumber(topic);
+  }
+
+  function _hasUnreadMarker(topic) {
+    return !_isTopicRead(topic);
+  }
+
+  // 未读 = 首页标题链接不带楼层号；已读 = 首页标题链接带楼层号
   function _applyFilter(topics) {
     let result = topics;
     if (hidePinned) {
       result = result.filter((t) => !t.pinned && !t.pinned_globally);
     }
     if (currentFilter === "unseen") {
-      result = result.filter((t) => t.unread_posts > 0);
+      result = result.filter((t) => _hasUnreadMarker(t));
     }
     if (currentFilter === "read") {
-      result = result.filter((t) => !t.unread_posts || t.unread_posts === 0);
+      result = result.filter((t) => !_hasUnreadMarker(t));
     }
     return result;
   }
@@ -1596,6 +1952,9 @@
     item.dataset.topicId = topic.id;
     if (topic.pinned || topic.pinned_globally) {
       item.classList.add("sfp-pinned");
+    }
+    if (_isTopicRead(topic)) {
+      item.classList.add("sfp-read");
     }
     if (isNew) {
       item.classList.add("sfp-new-highlight");
@@ -1618,8 +1977,8 @@
       }
     }
 
-    // 未读圆点（unread_posts > 0 表示有新回复）
-    const unseenDot = (topic.unread_posts > 0) ? '<span class="sfp-unseen-dot"></span>' : "";
+    // 未读圆点（首页标题链接不带楼层号的主题）
+    const unseenDot = _hasUnreadMarker(topic) ? '<span class="sfp-unseen-dot"></span>' : "";
 
     // 头像 HTML
     const avatarHtml = avatarUrl
@@ -1694,9 +2053,9 @@
     // 点击跳转
     item.addEventListener("click", (e) => {
       if (e.button !== 0) return;
+      const targetUrl = _topicListUrl(topic);
       markTopicAsRead(topic, item);
-      const slug = topic.slug || "topic";
-      navigateTo(`/t/${slug}/${topic.id}`);
+      navigateTo(targetUrl);
     });
 
     // 中键新标签页
@@ -1704,9 +2063,9 @@
     item.addEventListener("mouseup", (e) => {
       if (e.button === 1) {
         e.preventDefault();
+        const targetUrl = _topicListUrl(topic);
         markTopicAsRead(topic, item);
-        const slug = topic.slug || "topic";
-        window.open(`https://linux.do/t/${slug}/${topic.id}`, "_blank");
+        window.open(`https://linux.do${targetUrl}`, "_blank");
       }
     });
 
@@ -1715,10 +2074,25 @@
 
   // ========== 标记帖子为已读 ==========
   function markTopicAsRead(topic, itemElement) {
-    if (!topic.unread_posts || topic.unread_posts === 0) return;
+    if (!_hasUnreadMarker(topic)) return;
     topic.unread_posts = 0;
+    topic.new_posts = 0;
+    topic.unseen = false;
+    topic.is_seen = true;
+    if (topic.highest_post_number) {
+      topic.last_read_post_number = topic.highest_post_number;
+    }
     const existing = allTopics.find((t) => t.id === topic.id);
-    if (existing) existing.unread_posts = 0;
+    if (existing) {
+      existing.unread_posts = 0;
+      existing.new_posts = 0;
+      existing.unseen = false;
+      existing.is_seen = true;
+      if (existing.highest_post_number) {
+        existing.last_read_post_number = existing.highest_post_number;
+      }
+    }
+    itemElement.classList.add("sfp-read");
     const dot = itemElement.querySelector(".sfp-unseen-dot");
     if (dot) dot.remove();
   }
