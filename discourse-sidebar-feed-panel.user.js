@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.20
+// @version      0.6.21
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -1725,7 +1725,7 @@
   async function fetchFeedTopics(order, period, page) {
     let url;
     const effectiveOrder = order === "default" ? "activity" : order;
-    const useTopList = _usesPeriodScopedTopList(order);
+    const useTopList = _usesPeriodScopedTopList(order, period);
 
     if (currentTab !== "all" && currentCategoryId) {
       const cat = CATEGORY_CONFIG[currentCategoryId];
@@ -1776,11 +1776,11 @@
   }
 
   function _needsPeriodForUrl(order) {
-    return _usesPeriodScopedTopList(order);
+    return ["views", "posts", "likes", "op_likes"].includes(order);
   }
 
-  function _usesPeriodScopedTopList(order) {
-    return ["views", "posts", "likes", "op_likes"].includes(order);
+  function _usesPeriodScopedTopList(order, period) {
+    return period !== "all" && _needsPeriodForUrl(order);
   }
 
   async function loadTopics() {
