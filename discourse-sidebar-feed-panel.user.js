@@ -62,6 +62,8 @@
   let autoRefreshTimer = null;
   let autoRefreshSeconds = 0;
   let trackingStateCallbackId = null;
+  let incomingCountPollTimer = null;
+  let lastKnownIncomingCount = 0;
   let routeDebounceTimer = null;
   let toggleBtn = null;
   let feedContainer = null;
@@ -393,28 +395,40 @@
         position: sticky;
         top: 8px;
         z-index: 20;
+        width: 100%;
         height: 0;
         display: flex;
         justify-content: center;
+        font-size: var(--font-down-1-rem, 0.8706rem);
         pointer-events: none;
+        animation: sfp-float-down 250ms ease-in-out;
       }
       .sfp-show-more-overlay .sfp-hint-text {
-        font-size: 11px;
-        color: var(--secondary, #fff);
-        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5em;
+        margin: 0 auto;
+        padding: var(--space-2, 8px) var(--space-4, 16px);
         border: none;
-        background: var(--tertiary, #0088cc);
-        border-radius: 999px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.16);
-        padding: 5px 10px;
+        border-radius: var(--d-border-radius-large, 20px);
+        background: var(--tertiary-low, #fcf3e8);
+        color: var(--tertiary, #d3881f);
+        cursor: pointer;
+        font-size: inherit;
+        line-height: 1.4;
         text-decoration: none;
         white-space: nowrap;
         pointer-events: auto;
-        transition: background 0.2s, transform 0.2s;
+        transition: background 0.2s, color 0.2s;
       }
       .sfp-show-more-overlay .sfp-hint-text:hover {
-        background: var(--tertiary-high, #006699);
-        transform: translateY(-1px);
+        background: var(--highlight-low, var(--tertiary-low, #fcf3e8));
+        color: var(--tertiary-hover, var(--tertiary, #d3881f));
+      }
+      @keyframes sfp-float-down {
+        from { opacity: 0; transform: translateY(-8px); }
+        to { opacity: 1; transform: translateY(0); }
       }
       .sfp-settings-wrap {
         position: relative;
@@ -1481,7 +1495,7 @@
     let hint = overlay.querySelector(".sfp-hint-text");
     if (!hint) {
       hint = document.createElement("button");
-      hint.className = "sfp-hint-text";
+      hint.className = "sfp-hint-text alert alert-info clickable";
       hint.type = "button";
       hint.addEventListener("click", (e) => {
         e.preventDefault();
@@ -1490,7 +1504,7 @@
       overlay.appendChild(hint);
     }
 
-    hint.className = "sfp-hint-text";
+    hint.className = "sfp-hint-text alert alert-info clickable";
     hint.type = "button";
     hint.textContent = `${newCount} 个新的或更新的话题`;
     if (!existing) {
@@ -1509,13 +1523,51 @@
 
     trackingState.trackIncoming?.("latest");
     trackingStateCallbackId = trackingState.onStateChange?.(() => {
-      if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+      _updateShowMoreHint();
       if (autoSilentRefreshEnabled && _isDefaultFeedView() && (trackingState.incomingCount || 0) > 0) {
         _applyNativeIncomingTopics({ requireDefaultView: true, logPrefix: "native push" });
       }
     });
 
-    if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+    // 初始化已知计数
+    lastKnownIncomingCount = trackingState.incomingCount || 0;
+
+    // 启动轮询定时器，每秒检查一次 incomingCount 变化
+    _startIncomingCountPoll();
+
+    // 延迟初始更新，让 trackIncoming 有时间处理
+    setTimeout(() => _updateShowMoreHint(), 100);
+  }
+
+  function _startIncomingCountPoll() {
+    _stopIncomingCountPoll();
+
+    const trackingState = getTopicTrackingState();
+    if (!trackingState) return;
+
+    // 记录初始 messageCount，用于检测状态变化
+    let lastMessageCount = trackingState.messageCount || 0;
+
+    incomingCountPollTimer = setInterval(() => {
+      if (!trackingState || !feedModeEnabled) return;
+
+      const currentMessageCount = trackingState.messageCount || 0;
+      const currentIncomingCount = trackingState.incomingCount || 0;
+
+      // 检查 messageCount 或 incomingCount 是否变化
+      if (currentMessageCount !== lastMessageCount || currentIncomingCount !== lastKnownIncomingCount) {
+        lastMessageCount = currentMessageCount;
+        lastKnownIncomingCount = currentIncomingCount;
+        _updateShowMoreHint();
+      }
+    }, 1000);
+  }
+
+  function _stopIncomingCountPoll() {
+    if (incomingCountPollTimer) {
+      clearInterval(incomingCountPollTimer);
+      incomingCountPollTimer = null;
+    }
   }
 
   function _stopNativeIncomingTracking() {
@@ -1524,6 +1576,7 @@
       trackingState.offStateChange(trackingStateCallbackId);
     }
     trackingStateCallbackId = null;
+    _stopIncomingCountPoll();
   }
 
   function _isDefaultFeedView() {
@@ -1590,7 +1643,7 @@
     hasMorePages = true;
     allTopics = [];
     loadedTopicIds.clear();
-    if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+    _updateShowMoreHint();
 
     if (feedListEl) {
       feedListEl.innerHTML = `<div class="sfp-loading"><div class="sfp-spinner"></div>加载中...</div>`;
@@ -1728,7 +1781,7 @@
       renderTopics(newTopicIds);
       _clearNativeIncoming(nativeIncomingTopicIds.filter((id) => freshMap.has(Number(id))));
 
-      if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+      _updateShowMoreHint();
     } catch (e) {
       console.warn(`[SFP] ${logPrefix} error:`, e);
     } finally {
@@ -1743,7 +1796,7 @@
       return _applyNativeIncomingTopics({ requireDefaultView: true, logPrefix: "silent refresh" });
     }
 
-    if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+    _updateShowMoreHint();
   }
 
   async function _applyNativeIncomingTopics({ requireDefaultView = false, logPrefix = "incoming" } = {}) {
@@ -1754,7 +1807,7 @@
     const trackingState = getTopicTrackingState();
     const incomingTopicIds = Array.from(trackingState?.newIncoming || []);
     if (incomingTopicIds.length === 0) {
-      if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+      _updateShowMoreHint();
       return;
     }
 
@@ -1774,7 +1827,7 @@
 
       renderTopics(Array.from(incomingIdSet));
       _clearNativeIncoming(incomingTopicIds);
-      if (feedHeaderEl) _updateShowMoreHint(feedHeaderEl);
+      _updateShowMoreHint();
     } catch (e) {
       console.warn(`[SFP] ${logPrefix} error:`, e);
     } finally {
@@ -2176,8 +2229,8 @@
       const newUrl = location.href;
       if (newUrl !== lastUrl) {
         lastUrl = newUrl;
-        if (feedModeEnabled && feedHeaderEl) {
-          _updateShowMoreHint(feedHeaderEl);
+        if (feedModeEnabled) {
+          _updateShowMoreHint();
         }
       }
     }
