@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.18
+// @version      0.6.19
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -1045,11 +1045,20 @@
 
   function setupResizer() {
     const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
-    if (!sidebar || resizerEl) return;
+    if (!sidebar) return;
 
-    resizerEl = document.createElement("div");
+    if (resizerEl && !sidebar.contains(resizerEl)) {
+      resizerEl.remove();
+      resizerEl = null;
+    }
+
+    if (resizerEl) return;
+
+    resizerEl = sidebar.querySelector(":scope > .sfp-resizer") || document.createElement("div");
     resizerEl.className = "sfp-resizer";
-    sidebar.appendChild(resizerEl);
+    if (!resizerEl.parentElement) {
+      sidebar.appendChild(resizerEl);
+    }
 
     resizerEl.addEventListener("mousedown", (e) => {
       e.preventDefault();
@@ -1145,6 +1154,8 @@
     sidebar.appendChild(feedContainer);
 
     sidebar.classList.add("sfp-feed-mode");
+    applySidebarWidth(sfpSidebarWidth);
+    setupResizer();
 
     // 恢复当前 tab 筛选的分类
     _restoreTabState();
@@ -2283,6 +2294,22 @@
   // ========== 无限滚动加载 ==========
   function _setupScrollLoadMore() {
     if (!feedScrollEl) return;
+    feedScrollEl.addEventListener("wheel", (e) => {
+      if (!feedScrollEl || e.deltaY === 0) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = feedScrollEl;
+      const canScroll = scrollHeight > clientHeight;
+      const atTop = scrollTop <= 0;
+      const atBottom = Math.ceil(scrollTop + clientHeight) >= scrollHeight;
+      const scrollingUp = e.deltaY < 0;
+      const scrollingDown = e.deltaY > 0;
+
+      if (!canScroll || (scrollingUp && atTop) || (scrollingDown && atBottom)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, { passive: false });
+
     feedScrollEl.addEventListener("scroll", debounce(() => {
       if (!feedScrollEl || !hasMorePages || isLoadingMore) return;
       const { scrollTop, scrollHeight, clientHeight } = feedScrollEl;
@@ -2369,7 +2396,8 @@
 
         if (feedModeEnabled) {
           const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
-          if (sidebar && (!feedContainer || !sidebar.contains(feedContainer) || !sidebar.classList.contains("sfp-feed-mode"))) {
+          const resizerMissing = !resizerEl || !sidebar?.contains(resizerEl);
+          if (sidebar && (!feedContainer || !sidebar.contains(feedContainer) || !sidebar.classList.contains("sfp-feed-mode") || resizerMissing)) {
             activateFeed();
           }
         }
