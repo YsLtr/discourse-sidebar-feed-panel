@@ -33,7 +33,7 @@
 
   // ========== 常量 ==========
   const DEFAULT_WIDTH = 272;
-  const MIN_WIDTH = 48;
+  const MIN_WIDTH = DEFAULT_WIDTH;
   const MAX_WIDTH = 500;
   const DEFAULT_AUTO_REFRESH_INTERVAL = 10;
 
@@ -368,7 +368,6 @@
         top: 0;
         right: 0;
         z-index: 2;
-        background: transparent;
         gap: 3px;
         flex-direction: column;
       }
@@ -390,21 +389,32 @@
       .sfp-settings-wrap.open .sfp-settings-line-3 {
         transform: translateY(-5px) rotate(-45deg);
       }
-      .sfp-feed-header .sfp-hint-text {
-        flex: 0 1 auto;
+      .sfp-show-more-overlay {
+        position: sticky;
+        top: 8px;
+        z-index: 20;
+        height: 0;
+        display: flex;
+        justify-content: center;
+        pointer-events: none;
+      }
+      .sfp-show-more-overlay .sfp-hint-text {
         font-size: 11px;
-        color: var(--tertiary, #0088cc);
+        color: var(--secondary, #fff);
         cursor: pointer;
         border: none;
-        background: transparent;
-        padding: 0 4px;
+        background: var(--tertiary, #0088cc);
+        border-radius: 999px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.16);
+        padding: 5px 10px;
         text-decoration: none;
         white-space: nowrap;
-        transition: color 0.2s;
+        pointer-events: auto;
+        transition: background 0.2s, transform 0.2s;
       }
-      .sfp-feed-header .sfp-hint-text:hover {
-        color: var(--tertiary-high, #006699);
-        text-decoration: underline;
+      .sfp-show-more-overlay .sfp-hint-text:hover {
+        background: var(--tertiary-high, #006699);
+        transform: translateY(-1px);
       }
       .sfp-settings-wrap {
         position: relative;
@@ -419,10 +429,10 @@
         right: 0;
         width: 28px;
         height: 28px;
-        background: var(--secondary, #fff);
-        border: 1px solid var(--primary-low, #e9e9e9);
+        background: transparent;
+        border: none;
         border-radius: 6px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+        box-shadow: none;
         z-index: 10003;
         overflow: hidden;
         transition: width 0.36s cubic-bezier(0.25, 1, 0.5, 1),
@@ -433,16 +443,10 @@
       .sfp-settings-wrap.open .sfp-settings-shell {
         width: 204px;
         height: 128px;
+        background: var(--primary-very-low, #f0f0f0);
+        border: 1px solid var(--primary-low, #e9e9e9);
         border-radius: 8px;
-      }
-      .sfp-settings-shell:hover,
-      .sfp-settings-wrap.open .sfp-settings-shell {
-        background: var(--primary-very-low, #f5f5f5);
-      }
-      .sfp-feed-header .sfp-settings-shell .sfp-settings-btn,
-      .sfp-feed-header .sfp-settings-shell .sfp-settings-btn:hover,
-      .sfp-settings-wrap.open .sfp-settings-btn {
-        background: transparent;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.14);
       }
       .sfp-settings-panel {
         box-sizing: border-box;
@@ -644,6 +648,7 @@
 
       /* ===== Feed 滚动区 ===== */
       .sfp-feed-scroll {
+        position: relative;
         flex: 1;
         overflow-y: auto;
         overflow-x: hidden;
@@ -979,9 +984,7 @@
 
   // ========== 侧边栏宽度控制 ==========
   function getMinSidebarWidth() {
-    const headerToggle = document.querySelector(".header-sidebar-toggle");
-    const width = headerToggle?.getBoundingClientRect().width || headerToggle?.offsetWidth || MIN_WIDTH;
-    return Math.ceil(width) || MIN_WIDTH;
+    return MIN_WIDTH;
   }
 
   function applySidebarWidth(width) {
@@ -1165,9 +1168,6 @@
 
     header.appendChild(orderSelect);
     header.appendChild(periodSelect);
-
-    // 新话题提示（动态更新）
-    _updateShowMoreHint(header);
 
     const spacer = document.createElement("span");
     spacer.className = "sfp-header-spacer";
@@ -1456,16 +1456,18 @@
     }
   }
 
-  function _updateShowMoreHint(header) {
+  function _updateShowMoreHint() {
+    if (!feedScrollEl) return;
+
     // 只在默认模式（全部板块 + 默认排序 + 全部筛选）时刷新提示
     if (currentTab !== "all" || currentOrder !== "default" || currentFilter !== "all") {
       // 非默认模式移除已有提示
-      const existing = header.querySelector(".sfp-hint-text");
+      const existing = feedScrollEl.querySelector(".sfp-show-more-overlay");
       if (existing) existing.remove();
       return;
     }
 
-    const existing = header.querySelector(".sfp-hint-text");
+    const existing = feedScrollEl.querySelector(".sfp-show-more-overlay");
     const trackingState = getTopicTrackingState();
     const newCount = trackingState?.incomingCount || 0;
     if (newCount <= 0) {
@@ -1473,17 +1475,26 @@
       return;
     }
 
-    const hint = existing || document.createElement("button");
-    hint.className = "sfp-hint-text";
-    hint.type = "button";
-    hint.textContent = `${newCount} 个新的或更新的话题`;
-    if (!existing) {
+    const overlay = existing || document.createElement("div");
+    overlay.className = "sfp-show-more-overlay";
+
+    let hint = overlay.querySelector(".sfp-hint-text");
+    if (!hint) {
+      hint = document.createElement("button");
+      hint.className = "sfp-hint-text";
+      hint.type = "button";
       hint.addEventListener("click", (e) => {
         e.preventDefault();
         _applyNativeIncomingTopics({ logPrefix: "show more" });
       });
-      const spacer = header.querySelector(".sfp-header-spacer");
-      header.insertBefore(hint, spacer || null);
+      overlay.appendChild(hint);
+    }
+
+    hint.className = "sfp-hint-text";
+    hint.type = "button";
+    hint.textContent = `${newCount} 个新的或更新的话题`;
+    if (!existing) {
+      feedScrollEl.insertBefore(overlay, feedScrollEl.firstChild);
     }
   }
 
