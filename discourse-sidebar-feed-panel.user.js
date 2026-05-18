@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.11
+// @version      0.6.13
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -1086,6 +1086,7 @@
       sidebar.classList.add("sfp-feed-mode");
       applySidebarWidth(sfpSidebarWidth);
       setupResizer();
+      _syncIncomingCountPollForView();
       _updateShowMoreHint();
       return;
     }
@@ -1204,6 +1205,7 @@
       currentOrder = value;
       GM_setValue(ORDER_KEY, currentOrder);
       _updatePeriodVisibility(periodSelect);
+      _syncIncomingCountPollForView();
       loadTopics();
     });
     orderSelect.classList.add("sfp-order-select");
@@ -1410,6 +1412,7 @@
       currentTab = tabId;
       currentCategoryId = catId;
       GM_setValue(TAB_KEY, currentTab);
+      _syncIncomingCountPollForView();
 
       bar.querySelectorAll(".sfp-tab-item").forEach((t) => {
         t.classList.remove("active");
@@ -1477,6 +1480,7 @@
         if (filterVal === currentFilter) return;
         currentFilter = filterVal;
         GM_setValue(FILTER_KEY, currentFilter);
+        _syncIncomingCountPollForView();
         bar.querySelectorAll(".sfp-filter-item[data-filter]:not([data-filter=\"hide-pinned\"])").forEach((i) => i.classList.remove("active"));
         item.classList.add("active");
       }
@@ -1568,11 +1572,24 @@
     // 初始化已知计数
     lastKnownIncomingCount = trackingState.incomingCount || 0;
 
-    // 启动轮询定时器，每秒检查一次 incomingCount 变化
-    _startIncomingCountPoll();
+    // 只在默认视图启动轮询，避免分类、排序、筛选视图空跑。
+    _syncIncomingCountPollForView();
 
     // 延迟初始更新，让 trackIncoming 有时间处理
-    setTimeout(() => _updateShowMoreHint(), 100);
+    setTimeout(() => _syncIncomingCountPollForView(), 100);
+  }
+
+  function _syncIncomingCountPollForView() {
+    if (!feedModeEnabled || !_isDefaultFeedView()) {
+      _stopIncomingCountPoll();
+      _updateShowMoreHint();
+      return;
+    }
+
+    if (!incomingCountPollTimer) {
+      _startIncomingCountPoll();
+    }
+    _updateShowMoreHint();
   }
 
   function _startIncomingCountPoll() {
@@ -1586,6 +1603,10 @@
 
     incomingCountPollTimer = setInterval(() => {
       if (!trackingState || !feedModeEnabled) return;
+      if (!_isDefaultFeedView()) {
+        _stopIncomingCountPoll();
+        return;
+      }
 
       const currentMessageCount = trackingState.messageCount || 0;
       const currentIncomingCount = trackingState.incomingCount || 0;
