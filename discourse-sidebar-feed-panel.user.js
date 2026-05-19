@@ -567,8 +567,8 @@
         width: 28px;
         height: 28px;
         border: none;
-        background: var(--primary-very-low, #f0f0f0);
-        color: var(--primary-medium, #888);
+        background: var(--primary-very-low);
+        color: var(--primary-medium);
         cursor: pointer;
         border-radius: 6px;
         padding: 0;
@@ -578,12 +578,12 @@
         flex-shrink: 0;
       }
       .sfp-toggle-btn:hover {
-        color: var(--primary, #333);
-        background: var(--primary-low, #eee);
+        color: var(--primary);
+        background: var(--primary-low);
       }
       .sfp-toggle-btn.active {
-        color: #fff;
-        background: var(--tertiary, #0088cc);
+        color: var(--secondary);
+        background: var(--tertiary);
       }
       .sfp-toggle-btn svg {
         width: 18px;
@@ -645,7 +645,7 @@
       }
       .sfp-resizer:hover,
       .sfp-resizer.sfp-resizing {
-        background: var(--tertiary, #08c);
+        background: var(--tertiary);
       }
 
       /* ===== Feed Header ===== */
@@ -653,7 +653,7 @@
         position: relative;
         flex-shrink: 0;
         padding: 8px 12px;
-        border-bottom: 1px solid var(--primary-low, #e9e9e9);
+        border-bottom: 1px solid var(--primary-low);
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
@@ -672,8 +672,8 @@
         width: 28px;
         height: 28px;
         border: none;
-        background: var(--primary-very-low, #f0f0f0);
-        color: var(--primary-medium, #888);
+        background: var(--primary-very-low);
+        color: var(--primary-medium);
         cursor: pointer;
         border-radius: 6px;
         padding: 0;
@@ -683,8 +683,8 @@
       .sfp-feed-header .sfp-refresh-btn:hover,
       .sfp-feed-header .sfp-settings-btn:hover,
       .sfp-settings-wrap.open .sfp-settings-btn {
-        color: var(--tertiary, #0088cc);
-        background: var(--primary-low, #eee);
+        color: var(--tertiary);
+        background: var(--primary-low);
       }
       .sfp-feed-header .sfp-refresh-btn.spinning svg {
         animation: sfp-spin 0.6s linear infinite;
@@ -778,14 +778,14 @@
         animation: sfp-spin 0.75s linear infinite;
       }
       .sfp-show-more-overlay .sfp-hint-text.loading {
-        color: var(--primary-medium, #777);
+        color: var(--primary-medium);
         cursor: default;
       }
       .sfp-show-more-overlay .sfp-hint-text:hover {
-        color: var(--tertiary-hover, var(--tertiary, #d3881f));
+        color: var(--tertiary-hover, var(--tertiary));
       }
       .sfp-show-more-overlay .sfp-hint-text.loading:hover {
-        color: var(--primary-medium, #777);
+        color: var(--primary-medium);
       }
       @keyframes sfp-float-down {
         from { opacity: 0; transform: translateY(-8px); }
@@ -818,10 +818,10 @@
       .sfp-settings-wrap.open .sfp-settings-shell {
         width: 204px;
         height: 128px;
-        background: var(--primary-very-low, #f0f0f0);
-        border: 1px solid var(--primary-low, #e9e9e9);
+        background: var(--primary-very-low);
+        border: 1px solid var(--primary-low);
         border-radius: 8px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+        box-shadow: 0 8px 24px color-mix(in srgb, var(--primary) 14%, transparent);
       }
       .sfp-settings-wrap.sfp-settings-compact.open .sfp-settings-shell {
         height: 118px;
@@ -849,7 +849,7 @@
         justify-content: space-between;
         gap: 10px;
         font-size: 12px;
-        color: var(--primary, #333);
+        color: var(--primary);
         line-height: 1.3;
         padding: 4px 0;
       }
@@ -863,7 +863,7 @@
         gap: 6px;
         margin-top: 6px;
         font-size: 12px;
-        color: var(--primary-medium, #777);
+        color: var(--primary-medium);
       }
       .sfp-setting-interval.visible {
         display: flex;
@@ -872,10 +872,10 @@
         width: 58px;
         height: 26px;
         padding: 2px 6px;
-        border: 1px solid var(--primary-low, #e9e9e9);
+        border: 1px solid var(--primary-low);
         border-radius: 4px;
-        background: var(--secondary, #fff);
-        color: var(--primary, #333);
+        background: var(--secondary);
+        color: var(--primary);
         font-size: 12px;
       }
 
@@ -892,8 +892,8 @@
         font-size: 12px;
         height: 28px;
         border: none;
-        background: var(--primary-very-low, #f0f0f0);
-        color: var(--primary, #333);
+        background: var(--primary-very-low);
+        color: var(--primary);
         border-radius: 6px;
         cursor: pointer;
         white-space: nowrap;
@@ -901,7 +901,7 @@
         transition: background 0.2s, color 0.2s;
       }
       .sfp-custom-select-btn:hover {
-        background: var(--primary-low, #eee);
+        background: var(--primary-low);
       }
       .sfp-custom-select-btn::after {
         content: "";
@@ -914,10 +914,10 @@
       .sfp-custom-select-dropdown {
         position: fixed;
         min-width: 100%;
-        background: var(--secondary, #fff);
-        border: 1px solid var(--primary-low, #e9e9e9);
+        background: var(--secondary);
+        border: 1px solid var(--primary-low);
         border-radius: 6px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 10%, transparent);
         z-index: 10002;
         display: none;
         overflow: hidden;
@@ -932,17 +932,17 @@
         font-size: 12px;
         border: none;
         background: none;
-        color: var(--primary, #333);
+        color: var(--primary);
         cursor: pointer;
         text-align: left;
         white-space: nowrap;
         transition: background 0.15s;
       }
       .sfp-custom-select-option:hover {
-        background: var(--primary-very-low, #f5f5f5);
+        background: var(--primary-very-low);
       }
       .sfp-custom-select-option.selected {
-        color: var(--tertiary, #08c);
+        color: var(--tertiary);
         font-weight: 600;
       }
 
@@ -959,9 +959,9 @@
         max-width: 100%;
         padding: 8px 12px;
         margin: 0;
-        border-bottom: 1px solid var(--primary-low, #e9e9e9);
+        border-bottom: 1px solid var(--primary-low);
         flex-shrink: 0;
-        background: var(--d-content-background, var(--secondary, #fff));
+        background: var(--d-content-background, var(--secondary));
       }
       .sfp-tab-bar::-webkit-scrollbar { display: none; }
       .sfp-tab-item {
@@ -970,24 +970,24 @@
         gap: 3px;
         padding: 4px 12px;
         font-size: 13px;
-        color: var(--primary-medium, #888);
+        color: var(--primary-medium);
         cursor: pointer;
         white-space: nowrap;
         border-radius: 16px;
-        background: var(--primary-very-low, #f0f0f0);
+        background: var(--primary-very-low);
         transition: all 0.2s;
         border: 1px solid transparent;
         flex-shrink: 0;
         user-select: none;
       }
       .sfp-tab-item:hover {
-        color: var(--primary, #222);
-        background: var(--primary-low, #e9e9e9);
+        color: var(--primary);
+        background: var(--primary-low);
       }
       .sfp-tab-item.active {
-        color: white;
-        background: var(--tertiary, #08c);
-        border-color: var(--tertiary, #08c);
+        color: var(--secondary);
+        background: var(--tertiary);
+        border-color: var(--tertiary);
       }
       .sfp-tab-item svg {
         width: 12px;
@@ -1006,10 +1006,10 @@
         max-width: 100%;
         padding: 8px 16px;
         margin: 0;
-        background: var(--primary-very-low, #f8f8f8);
-        border-bottom: 1px solid var(--primary-low, #e9e9e9);
+        background: var(--primary-very-low);
+        border-bottom: 1px solid var(--primary-low);
         font-size: 12px;
-        color: var(--primary-medium, #888);
+        color: var(--primary-medium);
         flex-shrink: 0;
       }
       .sfp-filter-item {
@@ -1020,12 +1020,12 @@
         user-select: none;
       }
       .sfp-filter-item:hover {
-        color: var(--tertiary, #08c);
-        background: var(--primary-low, #eee);
+        color: var(--tertiary);
+        background: var(--primary-low);
       }
       .sfp-filter-item.active {
-        color: #fff;
-        background: var(--tertiary, #08c);
+        color: var(--secondary);
+        background: var(--tertiary);
       }
 
       /* ===== Feed 滚动区 ===== */
@@ -1048,7 +1048,7 @@
       /* ===== 帖子列表项 ===== */
       .sfp-topic-item {
         padding: 12px 20px;
-        border-bottom: 1px solid var(--primary-very-low, #f0f0f0);
+        border-bottom: 1px solid var(--primary-very-low);
         cursor: pointer;
         transition: background 0.2s;
         position: relative;
@@ -1058,19 +1058,27 @@
         word-break: break-word;
       }
       .sfp-topic-item:hover {
-        background: var(--primary-very-low, #f8f8f8);
+        background: var(--primary-very-low);
       }
       .sfp-topic-item.sfp-pinned {
         /* 只保留置顶 badge 标记，不加背景色 */
       }
       .sfp-topic-item.sfp-new-highlight {
+        --sfp-new-highlight-color: var(
+          --tertiary-med-or-tertiary,
+          var(--tertiary)
+        );
         animation: sfp-new-pulse 10s ease-out forwards;
         position: relative;
       }
       @keyframes sfp-new-pulse {
         0% {
-          box-shadow: inset 0 0 0 2px #fcca04;
-          background: rgba(252, 202, 4, 0.15);
+          box-shadow: inset 0 0 0 2px var(--sfp-new-highlight-color);
+          background: color-mix(
+            in srgb,
+            var(--sfp-new-highlight-color) 15%,
+            transparent
+          );
         }
         100% {
           box-shadow: inset 0 0 0 0px transparent;
@@ -1081,7 +1089,7 @@
       /* 未读圆点 — 紧跟在时间后 */
       .sfp-topic-item .sfp-topic-time {
         font-size: 12px;
-        color: var(--primary-medium, #888);
+        color: var(--primary-medium);
         white-space: nowrap;
         margin-left: auto;
         flex-shrink: 0;
@@ -1096,7 +1104,7 @@
         flex: 0 0 8px;
         display: inline-block;
         border-radius: 50%;
-        color: var(--tertiary-med-or-tertiary, var(--tertiary, #0088cc));
+        color: var(--tertiary-med-or-tertiary, var(--tertiary));
         background: currentColor;
         opacity: 0.75;
         vertical-align: middle;
@@ -1131,7 +1139,7 @@
       }
       .sfp-topic-item .sfp-topic-username {
         font-size: 13px;
-        color: var(--primary, #222);
+        color: var(--primary);
         font-weight: 500;
         cursor: pointer;
         transition: color 0.2s;
@@ -1140,11 +1148,11 @@
         text-overflow: ellipsis;
       }
       .sfp-topic-item .sfp-topic-username:hover {
-        color: var(--tertiary, #08c);
+        color: var(--tertiary);
       }
       .sfp-topic-item .sfp-topic-name {
         font-size: 12px;
-        color: var(--primary-medium, #888);
+        color: var(--primary-medium);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -1153,7 +1161,7 @@
       .sfp-topic-item .sfp-topic-title {
         font-size: 14px;
         font-weight: bold;
-        color: var(--primary, #222);
+        color: var(--primary);
         line-height: 1.4;
         margin: 0;
         word-break: break-word;
@@ -1165,10 +1173,10 @@
         transition: color 0.2s;
       }
       .sfp-topic-item .sfp-topic-title:hover {
-        color: var(--tertiary, #08c);
+        color: var(--tertiary);
       }
       .sfp-topic-item.sfp-read .sfp-topic-title {
-        color: var(--title-color--read, var(--primary-medium, #8d8d8d));
+        color: var(--title-color--read, var(--primary-medium));
       }
       .sfp-topic-item .sfp-topic-title-line {
         display: inline;
@@ -1181,9 +1189,9 @@
         flex-shrink: 0;
       }
       .sfp-topic-item .topic-status-card {
-        --badge-accent: var(--primary-medium, #8d8d8d);
-        --badge-bg: var(--primary-very-low, #f8f8f8);
-        --badge-border: var(--primary-low, #e9e9e9);
+        --badge-accent: var(--primary-medium);
+        --badge-bg: var(--primary-very-low);
+        --badge-border: var(--primary-low);
         display: inline-flex;
         align-items: center;
         gap: 3px;
@@ -1201,14 +1209,14 @@
         box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--badge-accent) 8%, transparent);
       }
       .sfp-topic-item .topic-status-card.--hot {
-        --badge-accent: var(--danger, #c80001);
-        --badge-bg: var(--danger-low, var(--d-hover, var(--tertiary-low, #f8e8d5)));
-        --badge-border: color-mix(in srgb, var(--danger, #c80001) 28%, transparent);
+        --badge-accent: var(--danger);
+        --badge-bg: var(--danger-low, var(--d-hover, var(--tertiary-low)));
+        --badge-border: color-mix(in srgb, var(--danger) 28%, transparent);
       }
       .sfp-topic-item .topic-status-card.--pinned {
-        --badge-accent: var(--primary-medium, #8d8d8d);
-        --badge-bg: var(--primary-very-low, #f8f8f8);
-        --badge-border: var(--primary-low, #e9e9e9);
+        --badge-accent: var(--primary-medium);
+        --badge-bg: var(--primary-very-low);
+        --badge-border: var(--primary-low);
       }
       .sfp-topic-item .topic-status-card__name {
         color: var(--badge-accent);
@@ -1229,7 +1237,7 @@
       .sfp-topic-item .topic-statuses .topic-status {
         display: inline-flex;
         align-items: center;
-        color: var(--primary-medium, #888);
+        color: var(--primary-medium);
         margin: 0 0.18em 0 0;
         --icon-size: 0.86em;
       }
@@ -1262,8 +1270,8 @@
         font-size: 11px;
         padding: 2px 6px;
         border-radius: var(--d-border-radius, 4px);
-        background-color: var(--badge-category-bg, var(--primary-very-low, #f0f0f0));
-        color: var(--badge-category-text, var(--primary-medium, #666));
+        background-color: var(--badge-category-bg, var(--primary-very-low));
+        color: var(--badge-category-text, var(--primary-medium));
         flex-shrink: 0;
         max-width: 120px;
         overflow: hidden;
@@ -1278,7 +1286,7 @@
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
-        color: var(--badge-category-text, var(--primary-medium, #666));
+        color: var(--badge-category-text, var(--primary-medium));
       }
       .sfp-topic-item .sfp-category-badge .d-icon {
         width: 0.9em;
@@ -1288,7 +1296,7 @@
       @supports not (color: light-dark(tan, tan)) {
         .sfp-topic-item .sfp-category-badge {
           --badge-category-bg: color-mix(in srgb, var(--category-badge-color) 16%, transparent);
-          --badge-category-text: var(--primary-high, #444);
+          --badge-category-text: var(--primary-high);
         }
       }
 
@@ -1320,7 +1328,7 @@
         gap: 12px;
         margin-top: 8px;
         font-size: 12px;
-        color: var(--primary-medium, #888);
+        color: var(--primary-medium);
       }
       .sfp-topic-item .sfp-topic-stat {
         display: flex;
@@ -1335,41 +1343,41 @@
         align-items: center;
         justify-content: center;
         padding: 40px 20px;
-        color: var(--primary-medium, #999);
+        color: var(--primary-medium);
         font-size: 13px;
         gap: 12px;
       }
       .sfp-spinner {
         width: 28px;
         height: 28px;
-        border: 3px solid var(--primary-low, #e9e9e9);
-        border-top-color: var(--tertiary, #0088cc);
+        border: 3px solid var(--primary-low);
+        border-top-color: var(--tertiary);
         border-radius: 50%;
         animation: sfp-spin 0.8s linear infinite;
       }
       .sfp-empty {
         text-align: center;
         padding: 40px 10px;
-        color: var(--primary-medium, #999);
+        color: var(--primary-medium);
         font-size: 13px;
       }
       .sfp-load-more {
         padding: 14px 10px;
         text-align: center;
         font-size: 12px;
-        color: var(--primary-medium, #888);
+        color: var(--primary-medium);
         cursor: pointer;
         transition: color 0.2s;
       }
       .sfp-load-more:hover {
-        color: var(--tertiary, #08c);
+        color: var(--tertiary);
       }
       .sfp-load-more .sfp-load-more-spinner {
         display: inline-block;
         width: 14px;
         height: 14px;
-        border: 2px solid var(--primary-low, #e9e9e9);
-        border-top-color: var(--tertiary, #0088cc);
+        border: 2px solid var(--primary-low);
+        border-top-color: var(--tertiary);
         border-radius: 50%;
         animation: sfp-spin 0.8s linear infinite;
         vertical-align: middle;
@@ -1379,18 +1387,18 @@
         padding: 14px 10px;
         text-align: center;
         font-size: 11px;
-        color: var(--primary-low-mid, #aaa);
+        color: var(--primary-low-mid);
       }
       .sfp-load-more-note {
         padding: 10px 10px 0;
         text-align: center;
         font-size: 12px;
-        color: var(--primary-medium, #888);
+        color: var(--primary-medium);
       }
       .sfp-error {
         padding: 40px 20px;
         text-align: center;
-        color: var(--danger, #e45735);
+        color: var(--danger);
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -1405,14 +1413,14 @@
       }
       .sfp-error-detail {
         font-size: 12px;
-        color: var(--primary-medium, #888);
+        color: var(--primary-medium);
         word-break: break-word;
       }
       .sfp-error .sfp-retry-btn {
         margin-top: 6px;
         padding: 6px 16px;
-        background: var(--tertiary, #08c);
-        color: white;
+        background: var(--tertiary);
+        color: var(--secondary);
         border: none;
         border-radius: 4px;
         cursor: pointer;

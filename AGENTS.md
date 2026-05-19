@@ -1,8 +1,8 @@
 # Discourse Sidebar Feed Panel — Active Handoff
 
-**Updated**: 2026-05-19 12:02:24 +08:00
+**Updated**: 2026-05-19 12:24:05 +08:00
 **Project root**: `C:/Users/28676/builds/discourse/userscript`
-**Current objective**: 下一步做 `discourse-sidebar-feed-panel.user.js` 的完全 review。
+**Current objective**: 下一步处理更好看的竖向滚动条和原侧边栏横向滚动条修复。
 
 ## Current State
 
@@ -17,12 +17,8 @@
 
 ## Just Finished
 
-- Unread dot has been moved to the native-style implementation:
-  - no SVG
-  - inline CSS circle after time text
-  - uses `8px` size and `var(--tertiary-med-or-tertiary, var(--tertiary, #0088cc))`
-- The dot is now inserted as `<span class="sfp-unread-dot" aria-hidden="true"></span>` inside `.sfp-topic-time`.
-- `markTopicAsRead()` now removes `.sfp-unread-dot`.
+- Current cleanup focus was theme-driven styling; the script now avoids the obvious hardcoded UI colors in the main feed shell, tabs, filters, badges, and loading/error states.
+- `discourse-sidebar-feed-panel.user.js` still carries the native-style unread dot from the previous step.
 - Validation run:
   - `node --check discourse-sidebar-feed-panel.user.js`
   - `git diff --check -- discourse-sidebar-feed-panel.user.js` passed with only the repo LF/CRLF warning.
@@ -38,9 +34,9 @@
 
 ## Next Steps
 
-1. Do a full code review of `discourse-sidebar-feed-panel.user.js`.
-2. Focus on regressions, hidden state coupling, CSS layout risks, and missing tests.
-3. Do not start with refactors unless a bug or maintainability issue is concrete.
+1. Fix the sidebar's vertical scrollbar styling.
+2. Repair the original sidebar horizontal scrollbar regression.
+3. Keep the fix narrow and avoid regressing the intentional `.sfp-tab-bar` internal scroll.
 
 ## Suggested Skills
 
