@@ -1,20 +1,23 @@
 # Discourse Sidebar Feed Panel — Active Handoff
 
-**Updated**: 2026-05-19 21:45:21 +08:00
+**Updated**: 2026-05-19 23:20:50 +08:00
 **Project root**: `C:/Users/28676/builds/discourse/userscript`
-**Current objective**: 下一轮从零开始审查 `discourse-sidebar-feed-panel.user.js`，重点找潜在 bug、状态耦合、布局/刷新回归，并提出代码结构优化方案。
+**Current objective**: 下一轮修复“最新活动”筛选下，自动静默刷新与自动刷新设置分配不正确的问题。
 
 ## Current State
 
 - Main file: `discourse-sidebar-feed-panel.user.js`
 - Current branch: `master`
-- Current userscript version in file: `0.6.42`
-- Latest work fixed board/category expanded picker regressions:
-  - Header order/period custom selects, auto-refresh settings, and board expanded panel are now mutually exclusive.
-  - Expanded-grid category selection scrolls the horizontal tab bar to the active tab.
-  - The scroll now uses computed `scrollLeft` and preserves the pre-rerender position, so both forward and backward smooth scrolling behave correctly.
-  - `_refreshCategoryTabs()` preserves tab-bar scroll unless an explicit pending active-tab scroll is requested.
-- User confirmed the current effect is good and asked to commit before the next review pass.
+- Current userscript version in file: `0.6.43`
+- Latest review/fix pass completed:
+  - `FeedQuery` snapshot added; load/refresh/incoming paths now drop stale responses by token and view-key.
+  - `loadMoreTopics()` now commits `currentPage` only after a successful response.
+  - Pagination failure shows a retry footer; sparse-filter auto-load helper was removed.
+  - Incoming queue now has a direct-apply cap and overflow fallback to manual refresh in default view.
+  - `deactivateFeed()` now cancels in-flight work by invalidating tokens and clearing busy flags.
+- Browser verification during review:
+  - Current live linux.do tab showed the script working before the new patch set was injected.
+  - Discourse source `frontend/discourse/app/models/topic-tracking-state.js` and `frontend/discourse/app/components/discovery/topics.gjs` were checked; upstream incoming queue is unbounded and `showInserted` uses `loadBefore(topicIds)` then `clearIncoming(topicIds)`.
 - Existing unrelated untracked/reference files remain: `CLAUDE.md`, `CLAUDE_old.md`, `LINUX DO Timeline-1.29.1.user.js`, `discourse-content-preserver.user.js`, `show-more-layout-test.html`, `展开.md`.
 
 ## Validation Run
@@ -33,15 +36,13 @@
 
 ## Next Review Focus
 
-1. Start from a clean read of `discourse-sidebar-feed-panel.user.js`; do not assume the previous feature work is the only risk.
-2. Map global state, persistence keys, timers, message-bus subscriptions, route changes, and render/update flows.
-3. Look for hidden coupling around `loadTopics()`, `_refreshCategoryTabs()`, `_syncDefaultViewControls()`, auto refresh, silent refresh, and infinite loading.
-4. Review UI layering/overflow, mobile/touch behavior, drag sorting, and custom dropdown/settings/panel interactions.
-5. Identify low-risk structure improvements, especially small helpers or state ownership cleanup that reduce future regressions.
+1. Fix the settings split for latest-activity mode: silent refresh vs auto refresh should be assigned to the correct view/state.
+2. Recheck `_buildSettingsControl()`, `_syncDefaultViewControls()`, `_startAutoSilentRefresh()`, `_startAutoRefresh()`, and the default-view predicate.
+3. Verify the settings UI only exposes the correct control in each view and that toggling one mode does not leak into the other.
 
 ## Suggested Skills
 
 - `$agent-browser-cli` for live linux.do DOM/state checks and computed-style/layout measurements.
-- `/diagnose` when a specific reproducible bug is found.
+- `/diagnose` if the settings split exposes a reproducible bug.
 - `$improve-codebase-architecture` if the review turns into a refactor plan.
-- `$handoff` again after the review if work remains.
+- `$handoff` again after the next fix pass if work remains.

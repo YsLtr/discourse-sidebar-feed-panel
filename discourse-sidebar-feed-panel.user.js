@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.42
+// @version      0.6.43
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -43,6 +43,7 @@
   const AUTO_LOAD_RATE_WINDOW_MS = 5000;
   const AUTO_LOAD_MAX_REQUESTS_PER_WINDOW = 3;
   const AUTO_LOAD_MAX_EMPTY_FILTER_RESULTS = 3;
+  const MAX_INCOMING_TOPIC_IDS_DIRECT_APPLY = 100;
   const TAG_STYLE_CACHE_VERSION = 1;
 
   // ========== 全局状态 ==========
@@ -82,11 +83,14 @@
   let autoLoadSessionKey = "";
   let sidebarIncomingTopicIds = [];
   let sidebarIncomingTopicIdSet = new Set();
+  let sidebarIncomingOverflowed = false;
   let sidebarMessageBus = null;
   let sidebarLatestMessageBusCallback = null;
   let sidebarNewMessageBusCallback = null;
   let sidebarIncomingApplyQueued = false;
-  let routeDebounceTimer = null;
+  let activeLoadToken = 0;
+  let activeLoadMoreToken = 0;
+  let activeRefreshToken = 0;
   let categoryMetaPromise = null;
   let categoryMetaLoaded = false;
   let tagStylePromise = null;
@@ -101,8 +105,6 @@
   let isResizing = false;
   let originalSidebarWidthBeforeFeed = null;
   let widthAnimationTimer = null;
-
-  const isSmallScreen = () => window.innerWidth <= 768;
 
   // ========== 工具函数 ==========
   function getCsrfToken() {
@@ -1604,6 +1606,22 @@
         cursor: pointer;
         transition: color 0.2s;
       }
+      .sfp-load-more-error {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        cursor: default;
+      }
+      .sfp-load-more-error .sfp-load-more-retry {
+        padding: 4px 10px;
+        border: none;
+        border-radius: 4px;
+        background: var(--tertiary);
+        color: var(--secondary);
+        cursor: pointer;
+        font-size: 12px;
+      }
       .sfp-load-more:hover {
         color: var(--tertiary);
       }
@@ -1907,6 +1925,15 @@
   function deactivateFeed() {
     const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
     if (!sidebar) return;
+
+    activeLoadToken++;
+    activeLoadMoreToken++;
+    activeRefreshToken++;
+    isLoading = false;
+    isLoadingMore = false;
+    isRefreshing = false;
+    _pendingReload = false;
+    sidebarIncomingApplyQueued = false;
 
     _stopAutoRefresh();
     _stopAutoSilentRefresh();
@@ -2473,7 +2500,7 @@
 
     const existing = contentWrapper.querySelector(".sfp-show-more-overlay");
     const newCount = sidebarIncomingTopicIds.length;
-    if (newCount <= 0) {
+    if (newCount <= 0 && !sidebarIncomingOverflowed) {
       if (existing) existing.remove();
       contentWrapper.classList.remove("sfp-has-show-more");
       return;
@@ -2508,7 +2535,9 @@
       hint.appendChild(label);
     }
 
-    label.textContent = `查看 ${newCount} 个新的或更新的话题`;
+    label.textContent = sidebarIncomingOverflowed
+      ? "有大量新的或更新的话题，点击刷新"
+      : `查看 ${newCount} 个新的或更新的话题`;
     contentWrapper.classList.add("sfp-has-show-more");
     if (!existing) {
       contentWrapper.insertBefore(overlay, contentWrapper.firstChild);
@@ -2533,7 +2562,7 @@
   }
 
   function _isDefaultFeedView() {
-    return currentTab === "all" && currentOrder === "activity" && currentFilter === "all";
+    return FeedQuery.isDefault();
   }
 
   function _syncDefaultViewControls() {
@@ -2541,6 +2570,10 @@
     _updateShowMoreHint();
     _startAutoSilentRefresh();
     _startAutoRefresh();
+    if (sidebarIncomingOverflowed && _isDefaultFeedView()) {
+      _queueSidebarIncomingApply();
+      return;
+    }
     if (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0 && _isDefaultFeedView() && sidebarIncomingTopicIds.length > 0) {
       _queueSidebarIncomingApply();
     }
@@ -2602,7 +2635,7 @@
 
     _addSidebarIncomingTopicId(data.topic_id);
 
-    if (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0 && _isDefaultFeedView()) {
+    if (_isDefaultFeedView() && (sidebarIncomingOverflowed || (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0))) {
       _queueSidebarIncomingApply();
     } else {
       _updateShowMoreHint();
@@ -2612,6 +2645,11 @@
   function _addSidebarIncomingTopicId(topicId) {
     const numericId = Number(topicId);
     if (!Number.isFinite(numericId) || sidebarIncomingTopicIdSet.has(numericId)) return;
+
+    if (sidebarIncomingTopicIds.length >= MAX_INCOMING_TOPIC_IDS_DIRECT_APPLY) {
+      sidebarIncomingOverflowed = true;
+      return;
+    }
 
     sidebarIncomingTopicIdSet.add(numericId);
     sidebarIncomingTopicIds.push(numericId);
@@ -2625,10 +2663,20 @@
 
     sidebarIncomingTopicIds = sidebarIncomingTopicIds.filter((id) => !toRemove.has(Number(id)));
     sidebarIncomingTopicIdSet = new Set(sidebarIncomingTopicIds);
+    if (sidebarIncomingTopicIds.length === 0) {
+      sidebarIncomingOverflowed = false;
+    }
+  }
+
+  function _clearSidebarIncomingTopicIds() {
+    sidebarIncomingTopicIds = [];
+    sidebarIncomingTopicIdSet = new Set();
+    sidebarIncomingOverflowed = false;
   }
 
   function _queueSidebarIncomingApply() {
-    if (!autoSilentRefreshEnabled || autoSilentRefreshInterval > 0) return;
+    if (!_isDefaultFeedView()) return;
+    if (!sidebarIncomingOverflowed && (!autoSilentRefreshEnabled || autoSilentRefreshInterval > 0)) return;
     if (sidebarIncomingApplyQueued) return;
 
     sidebarIncomingApplyQueued = true;
@@ -2641,7 +2689,7 @@
   function _flushQueuedSidebarIncomingApply() {
     if (!sidebarIncomingApplyQueued) return;
 
-    if (!autoSilentRefreshEnabled || autoSilentRefreshInterval > 0 || !_isDefaultFeedView()) {
+    if (!_isDefaultFeedView() || (!sidebarIncomingOverflowed && (!autoSilentRefreshEnabled || autoSilentRefreshInterval > 0))) {
       sidebarIncomingApplyQueued = false;
       return;
     }
@@ -2702,42 +2750,77 @@
     }
   }
 
-  // ========== 数据加载 ==========
-  async function fetchFeedTopics(order, period, page) {
-    let url;
-    const effectiveOrder = order;
-    const useTopList = _usesPeriodScopedTopList(order, period);
+  const FeedQuery = {
+    snapshot() {
+      return {
+        tab: currentTab,
+        categoryId: currentCategoryId,
+        order: currentOrder,
+        period: currentPeriod,
+        filter: currentFilter,
+        hidePinned,
+      };
+    },
 
-    if (currentTab !== "all" && currentCategoryId) {
-      const cat = CATEGORY_CONFIG[currentCategoryId];
-      const tabId = cat?.tabId || currentTab;
-      const params = [];
-      params.push(`page=${page}`);
+    key(query) {
+      return [
+        query.tab,
+        query.categoryId || "",
+        query.order,
+        query.period,
+        query.filter,
+        query.hidePinned ? "hide-pinned" : "show-pinned",
+      ].join("|");
+    },
+
+    isCurrent(query) {
+      return this.key(query) === this.key(this.snapshot());
+    },
+
+    isDefault(query = this.snapshot()) {
+      return query.tab === "all" && query.order === "activity" && query.filter === "all";
+    },
+
+    buildUrl(query, page) {
+      const useTopList = _usesPeriodScopedTopList(query.order, query.period);
+
+      if (query.tab !== "all" && query.categoryId) {
+        const cat = CATEGORY_CONFIG[query.categoryId];
+        const tabId = cat?.tabId || query.tab;
+        const params = [`page=${page}`];
+        if (useTopList) {
+          params.push(`period=${encodeURIComponent(query.period)}`);
+          params.push(`order=${encodeURIComponent(query.order)}`);
+          return `/c/${tabId}/${query.categoryId}/l/top.json?${params.join("&")}`;
+        }
+
+        params.push(`order=${encodeURIComponent(query.order)}`);
+        return `/c/${tabId}/${query.categoryId}/l/latest.json?${params.join("&")}`;
+      }
+
       if (useTopList) {
-        params.push(`period=${encodeURIComponent(period)}`);
-        params.push(`order=${encodeURIComponent(effectiveOrder)}`);
-        url = `/c/${tabId}/${currentCategoryId}/l/top.json?${params.join("&")}`;
-      } else {
-        params.push(`order=${encodeURIComponent(effectiveOrder)}`);
-        url = `/c/${tabId}/${currentCategoryId}/l/latest.json?${params.join("&")}`;
+        const params = [
+          `period=${encodeURIComponent(query.period)}`,
+          `order=${encodeURIComponent(query.order)}`,
+          `page=${page}`,
+        ];
+        return `/top.json?${params.join("&")}`;
       }
-    } else if (useTopList) {
-      const params = [];
-      params.push(`period=${encodeURIComponent(period)}`);
-      params.push(`order=${encodeURIComponent(effectiveOrder)}`);
-      params.push(`page=${page}`);
-      url = `/top.json?${params.join("&")}`;
-    } else {
-      url = "/latest.json?";
-      const params = [];
-      params.push(`order=${encodeURIComponent(effectiveOrder)}`);
-      params.push(`page=${page}`);
-      if (period !== "all" && _needsPeriodForUrl(order)) {
-        params.push(`period=${encodeURIComponent(period)}`);
-      }
-      url += params.join("&");
-    }
 
+      const params = [
+        `order=${encodeURIComponent(query.order)}`,
+        `page=${page}`,
+      ];
+      if (query.period !== "all" && _needsPeriodForUrl(query.order)) {
+        params.push(`period=${encodeURIComponent(query.period)}`);
+      }
+      return `/latest.json?${params.join("&")}`;
+    },
+  };
+
+  // ========== 数据加载 ==========
+  async function fetchFeedTopics(query, page) {
+    const url = FeedQuery.buildUrl(query, page);
     const csrfToken = getCsrfToken();
     const headers = { "X-CSRF-Token": csrfToken };
     const resp = await fetch(url, { headers });
@@ -2778,7 +2861,14 @@
       _pendingReload = true;
       return;
     }
+
+    const requestQuery = FeedQuery.snapshot();
+    const requestToken = ++activeLoadToken;
+    activeLoadMoreToken++;
+    activeRefreshToken++;
     isLoading = true;
+    isLoadingMore = false;
+    isRefreshing = false;
     _pendingReload = false;
 
     currentPage = 0;
@@ -2795,26 +2885,31 @@
     try {
       _startTagStyleIndexLoad();
       await loadCategoryMetadata();
+      if (requestToken !== activeLoadToken || !FeedQuery.isCurrent(requestQuery)) return;
       _refreshCategoryTabs();
 
-      const data = await fetchFeedTopics(currentOrder, currentPeriod, 0);
+      const data = await fetchFeedTopics(requestQuery, 0);
+      if (requestToken !== activeLoadToken || !FeedQuery.isCurrent(requestQuery)) return;
       _processUsers(data);
 
       if (data?.topic_list?.topics) {
         const topics = data.topic_list.topics;
         topics.forEach((t) => loadedTopicIds.add(t.id));
         allTopics = topics;
-        hasMorePages = topics.length > 0;
+        hasMorePages = !!data.topic_list.more_topics_url;
         renderTopics();
         _removeSidebarIncomingTopicIds(topics.map((topic) => topic.id));
+        sidebarIncomingOverflowed = false;
         _updateShowMoreHint();
       } else {
         if (feedListEl) feedListEl.innerHTML = `<div class="sfp-empty">暂无话题</div>`;
         hasMorePages = false;
+        sidebarIncomingOverflowed = false;
       }
 
       _startAutoRefresh();
     } catch (e) {
+      if (requestToken !== activeLoadToken || !FeedQuery.isCurrent(requestQuery)) return;
       console.error("[SFP] loadTopics error:", e);
       if (feedListEl) {
         feedListEl.innerHTML = `
@@ -2827,42 +2922,55 @@
         feedListEl.querySelector(".sfp-retry-btn")?.addEventListener("click", () => loadTopics());
       }
     } finally {
-      isLoading = false;
-      _flushQueuedSidebarIncomingApply();
-      if (_pendingReload) {
-        _pendingReload = false;
-        loadTopics();
+      if (requestToken === activeLoadToken) {
+        isLoading = false;
+        _flushQueuedSidebarIncomingApply();
+        if (_pendingReload) {
+          _pendingReload = false;
+          loadTopics();
+        }
       }
     }
   }
 
   async function loadMoreTopics({ source = "manual" } = {}) {
-    if (isLoadingMore || !hasMorePages) return;
+    if (isLoading || isLoadingMore || !hasMorePages) return;
     const isAutoLoad = source === "auto";
     if (isAutoLoad && !_canRunAutoLoad()) return;
 
+    const requestQuery = FeedQuery.snapshot();
+    const requestToken = ++activeLoadMoreToken;
+    const nextPage = currentPage + 1;
     isLoadingMore = true;
-    currentPage++;
     if (isAutoLoad) _recordAutoLoadRequest();
 
     _showLoadMoreSpinner();
 
     try {
       await loadCategoryMetadata();
-      const data = await fetchFeedTopics(currentOrder, currentPeriod, currentPage);
+      if (requestToken !== activeLoadMoreToken || !FeedQuery.isCurrent(requestQuery)) return;
+      const data = await fetchFeedTopics(requestQuery, nextPage);
+      if (requestToken !== activeLoadMoreToken || !FeedQuery.isCurrent(requestQuery)) return;
       _processUsers(data);
 
       if (data?.topic_list?.topics) {
         const topics = data.topic_list.topics;
+        currentPage = nextPage;
         const newTopics = topics.filter((t) => {
           if (loadedTopicIds.has(t.id)) return false;
           loadedTopicIds.add(t.id);
           return true;
         });
 
+        hasMorePages = !!data.topic_list.more_topics_url;
         if (newTopics.length === 0) {
-          hasMorePages = false;
-          _showNoMore();
+          if (hasMorePages) {
+            _renderPaginationFooter({
+              note: !isAutoLoad ? "下一页无符合条件的话题" : "",
+            });
+          } else {
+            _showNoMore();
+          }
         } else {
           allTopics = allTopics.concat(newTopics);
           // 增量追加，应用当前筛选，保留滚动位置
@@ -2882,11 +2990,14 @@
         _showNoMore();
       }
     } catch (e) {
+      if (requestToken !== activeLoadMoreToken || !FeedQuery.isCurrent(requestQuery)) return;
       console.error("[SFP] loadMoreTopics error:", e);
-      _renderPaginationFooter();
+      _showLoadMoreError(e);
     } finally {
-      isLoadingMore = false;
-      _flushQueuedSidebarIncomingApply();
+      if (requestToken === activeLoadMoreToken) {
+        isLoadingMore = false;
+        _flushQueuedSidebarIncomingApply();
+      }
     }
   }
 
@@ -2897,21 +3008,28 @@
   }
 
   async function refreshCurrentView() {
-    return _refreshCurrentView({ logPrefix: "manual refresh" });
+    return _refreshCurrentView({
+      logPrefix: "manual refresh",
+      clearIncomingOnSuccess: sidebarIncomingOverflowed && _isDefaultFeedView(),
+    });
   }
 
-  async function _refreshCurrentView({ requireDefaultView = false, logPrefix = "refresh" } = {}) {
-    if (isLoading || isLoadingMore || isRefreshing) return;
-    if (requireDefaultView && !_isDefaultFeedView()) return;
-    if (!feedListEl) return;
+  async function _refreshCurrentView({ requireDefaultView = false, logPrefix = "refresh", clearIncomingOnSuccess = false } = {}) {
+    if (isLoading || isLoadingMore || isRefreshing) return false;
+    if (requireDefaultView && !_isDefaultFeedView()) return false;
+    if (!feedListEl) return false;
 
+    const requestQuery = FeedQuery.snapshot();
+    const requestToken = ++activeRefreshToken;
     isRefreshing = true;
     try {
       await loadCategoryMetadata();
-      const data = await fetchFeedTopics(currentOrder, currentPeriod, 0);
+      if (requestToken !== activeRefreshToken || !FeedQuery.isCurrent(requestQuery)) return false;
+      const data = await fetchFeedTopics(requestQuery, 0);
+      if (requestToken !== activeRefreshToken || !FeedQuery.isCurrent(requestQuery)) return false;
       _processUsers(data);
 
-      if (!data?.topic_list?.topics) return;
+      if (!data?.topic_list?.topics) return false;
 
       const freshTopics = data.topic_list.topics;
       const freshMap = new Map(freshTopics.map((t) => [t.id, t]));
@@ -2923,18 +3041,26 @@
 
       const existingTail = allTopics.filter((topic) => !freshMap.has(topic.id));
       allTopics = freshTopics.concat(existingTail);
-      hasMorePages = freshTopics.length > 0;
+      hasMorePages = !!data.topic_list.more_topics_url;
 
       renderTopics(newTopicIds);
-      _removeSidebarIncomingTopicIds(freshTopics.map((topic) => topic.id));
+      if (clearIncomingOnSuccess) {
+        _clearSidebarIncomingTopicIds();
+      } else {
+        _removeSidebarIncomingTopicIds(freshTopics.map((topic) => topic.id));
+      }
 
       _updateShowMoreHint();
+      return true;
     } catch (e) {
       console.warn(`[SFP] ${logPrefix} error:`, e);
+      return false;
     } finally {
-      isRefreshing = false;
-      _resetAutoRefreshCountdown();
-      _flushQueuedSidebarIncomingApply();
+      if (requestToken === activeRefreshToken) {
+        isRefreshing = false;
+        _resetAutoRefreshCountdown();
+        _flushQueuedSidebarIncomingApply();
+      }
     }
   }
 
@@ -2954,10 +3080,23 @@
       return;
     }
 
+    if (sidebarIncomingOverflowed || incomingTopicIds.length > MAX_INCOMING_TOPIC_IDS_DIRECT_APPLY) {
+      await _refreshCurrentView({
+        requireDefaultView,
+        logPrefix: `${logPrefix} overflow refresh`,
+        clearIncomingOnSuccess: true,
+      });
+      return;
+    }
+
+    const requestQuery = FeedQuery.snapshot();
+    const requestToken = ++activeRefreshToken;
     isRefreshing = true;
     try {
       await loadCategoryMetadata();
+      if (requestToken !== activeRefreshToken || !FeedQuery.isCurrent(requestQuery)) return;
       const data = await fetchFeedTopicsByIds(incomingTopicIds);
+      if (requestToken !== activeRefreshToken || !FeedQuery.isCurrent(requestQuery)) return;
       if (!data?.topic_list?.topics) return;
       _processUsers(data);
 
@@ -2975,8 +3114,10 @@
     } catch (e) {
       console.warn(`[SFP] ${logPrefix} error:`, e);
     } finally {
-      isRefreshing = false;
-      _flushQueuedSidebarIncomingApply();
+      if (requestToken === activeRefreshToken) {
+        isRefreshing = false;
+        _flushQueuedSidebarIncomingApply();
+      }
     }
   }
 
@@ -3138,14 +3279,6 @@
       result = result.filter((t) => !_hasUnreadMarker(t));
     }
     return result;
-  }
-
-  // ========== 筛选结果稀疏时自动加载 ==========
-  function _checkAutoLoadOnSparseFilter() {
-    const filtered = _applyFilter(allTopics);
-    if (filtered.length < 10 && hasMorePages && !isLoadingMore && !isLoading) {
-      loadMoreTopics({ source: "auto" });
-    }
   }
 
   function _buildCategoryBadge(categoryId) {
@@ -3422,6 +3555,21 @@
     el.className = "sfp-no-more";
     el.textContent = "— 已经到底了 —";
     if (feedListEl) feedListEl.appendChild(el);
+  }
+
+  function _showLoadMoreError(error) {
+    _removePaginationFooter();
+    const el = document.createElement("div");
+    el.className = "sfp-load-more sfp-load-more-error";
+    el.innerHTML = `
+      <span>请求失败</span>
+      <button type="button" class="sfp-load-more-retry">重试</button>
+    `;
+    el.querySelector(".sfp-load-more-retry")?.addEventListener("click", () => {
+      loadMoreTopics({ source: "manual" });
+    });
+    if (feedListEl) feedListEl.appendChild(el);
+    console.warn("[SFP] load more failed:", error);
   }
 
   // ========== RouteWatcher（轻量，仅感知路由，不重建 feed） ==========

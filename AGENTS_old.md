@@ -1,5 +1,38 @@
 # Handoff Archive
 
+## 2026-05-19 23:20:50 +08:00 — archived from AGENTS.md
+
+Reason: Previous active handoff focused on script-wide review and board/category picker regressions; that objective is superseded by the next-session focus on latest-activity auto-refresh settings.
+
+Source heading: `# Discourse Sidebar Feed Panel — Active Handoff`
+Source file: `AGENTS.md`
+
+Archived summary:
+
+- Current objective shifted from broad review to fixing the latest-activity settings split.
+- Userscript version advanced from `0.6.42` to `0.6.43`.
+- Recent review/fix pass completed around `discourse-sidebar-feed-panel.user.js`:
+  - request snapshot/token gating for load, refresh, and incoming flows;
+  - delayed page submission on successful pagination only;
+  - pagination failure footer with retry;
+  - sparse-filter auto-load helper removed;
+  - incoming queue capped with overflow fallback to manual refresh;
+  - stale work canceled on feed deactivation by invalidating tokens.
+- Validation already run:
+  - `node --check discourse-sidebar-feed-panel.user.js`
+  - `git diff --check -- discourse-sidebar-feed-panel.user.js`
+- Browser and upstream Discourse references already checked:
+  - live linux.do tab used for pre-patch smoke verification;
+  - `frontend/discourse/app/models/topic-tracking-state.js`
+  - `frontend/discourse/app/components/discovery/topics.gjs`
+
+Preserved constraints from the archived handoff remain in effect:
+
+- Do not commit unrelated untracked files unless explicitly requested.
+- Sidebar minimum width remains `DEFAULT_WIDTH = 272`.
+- Do not claim a page refresh applies userscript code changes; the user must reinstall/update the userscript for metadata/code changes.
+- Preserve `0.6.21+` period behavior and the intended `.sfp-tab-bar` internal horizontal scroll.
+
 ## 2026-05-19 13:02:40 +08:00 — archived from AGENTS.md
 
 Reason: Board/category display expansion and drag sorting were implemented in userscript version 0.6.41; active handoff now shifts to final review.
