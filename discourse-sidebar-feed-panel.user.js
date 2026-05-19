@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.24
+// @version      0.6.25
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -629,7 +629,7 @@
         margin: 0;
         border-bottom: 1px solid var(--primary-low, #e9e9e9);
         flex-shrink: 0;
-        background: var(--secondary, #fff);
+        background: var(--d-content-background, var(--secondary, #fff));
       }
       .sfp-tab-bar::-webkit-scrollbar { display: none; }
       .sfp-tab-item {
@@ -825,28 +825,73 @@
       .sfp-topic-item.sfp-read .sfp-topic-title {
         color: var(--title-color--read, var(--primary-medium, #8d8d8d));
       }
-      .sfp-pinned-badge {
-        font-size: 10px;
-        color: var(--tertiary, #08c);
-        font-weight: 600;
+      .sfp-topic-item .sfp-topic-title-line {
+        display: inline;
+      }
+      .sfp-topic-item .sfp-topic-status-badges {
         display: inline-flex;
         align-items: center;
-        gap: 1px;
-        margin-right: 4px;
-        background: var(--tertiary-very-low, rgba(0,136,204,0.1));
-        padding: 1px 5px;
-        border-radius: 3px;
+        gap: 4px;
+        margin-left: 2px;
+        flex-shrink: 0;
+      }
+      .sfp-topic-item .topic-status-card {
+        --badge-accent: var(--primary-medium, #8d8d8d);
+        --badge-bg: var(--primary-very-low, #f8f8f8);
+        --badge-border: var(--primary-low, #e9e9e9);
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 1px 6px;
+        border: 1px solid var(--badge-border);
+        border-radius: var(--d-border-radius, 8px);
+        background: var(--badge-bg);
+        color: var(--badge-accent);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.45;
+        margin-right: 5px;
         vertical-align: middle;
         white-space: nowrap;
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--badge-accent) 8%, transparent);
       }
-      .sfp-topic-item .sfp-topic-closed {
-        color: var(--danger, #e45735);
-        font-size: 11px;
-        font-weight: bold;
+      .sfp-topic-item .topic-status-card.--hot {
+        --badge-accent: var(--danger, #c80001);
+        --badge-bg: var(--danger-low, var(--d-hover, var(--tertiary-low, #f8e8d5)));
+        --badge-border: color-mix(in srgb, var(--danger, #c80001) 28%, transparent);
+      }
+      .sfp-topic-item .topic-status-card.--pinned {
+        --badge-accent: var(--primary-medium, #8d8d8d);
+        --badge-bg: var(--primary-very-low, #f8f8f8);
+        --badge-border: var(--primary-low, #e9e9e9);
+      }
+      .sfp-topic-item .topic-status-card__name {
+        color: var(--badge-accent);
+        font-size: inherit;
+        font-weight: inherit;
+        line-height: inherit;
+        margin: 0;
+      }
+      .sfp-topic-item .topic-status-card .d-icon {
+        color: var(--badge-accent);
+        width: 0.92em;
+        height: 0.92em;
+        flex-shrink: 0;
+      }
+      .sfp-topic-item .topic-statuses {
+        float: left;
+      }
+      .sfp-topic-item .topic-statuses .topic-status {
         display: inline-flex;
         align-items: center;
-        gap: 2px;
-        margin-left: 4px;
+        color: var(--primary-medium, #888);
+        margin: 0 0.18em 0 0;
+        --icon-size: 0.86em;
+      }
+      .sfp-topic-item .topic-statuses .topic-status .d-icon {
+        width: var(--icon-size);
+        height: var(--icon-size);
+        color: currentColor;
       }
 
       /* 分类 + 标签行 */
@@ -2221,14 +2266,21 @@
     // 时间
     const timeStr = formatRelativeTime(topic.bumped_at || topic.last_posted_at || topic.created_at);
 
-    // 置顶标记
-    const pinnedHtml = (topic.pinned || topic.pinned_globally)
-      ? `<span class="sfp-pinned-badge" title="${topic.pinned_globally ? '全局置顶' : '板块置顶'}">📌置顶</span>`
+    // 状态标记
+    const statusBadges = [];
+    if (topic.is_hot) {
+      statusBadges.push('<span class="topic-status-card --hot"><svg class="fa d-icon d-icon-fire svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#fire"></use></svg><p class="topic-status-card__name">热门</p></span>');
+    }
+    if (topic.pinned || topic.pinned_globally) {
+      statusBadges.push('<span class="topic-status-card --pinned"><svg class="fa d-icon d-icon-thumbtack svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#thumbtack"></use></svg><p class="topic-status-card__name">已置顶</p></span>');
+    }
+    const statusBadgesHtml = statusBadges.length
+      ? `<span class="sfp-topic-status-badges">${statusBadges.join("")}</span>`
       : "";
 
     // 标题
     const closedHtml = topic.closed
-      ? `<span class="sfp-topic-closed" title="已关闭">🔒已关闭</span>`
+      ? '<span class="topic-statuses"><span title="此话题已被关闭；不再接受新回复" class="topic-status --closed"><svg class="fa d-icon d-icon-lock svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#lock"></use></svg></span></span>'
       : "";
 
     // 分类
@@ -2264,9 +2316,10 @@
             <span class="sfp-topic-username">${escapeHtml(username)}</span>
           </div>
         </div>
+        ${statusBadgesHtml}
         <span class="sfp-topic-time">${timeStr}</span>
       </div>
-      <div class="sfp-topic-title">${pinnedHtml}${escapeHtml(topic.unicode_title || topic.title)}${closedHtml}</div>
+      <div class="sfp-topic-title"><span class="sfp-topic-title-line">${closedHtml}${escapeHtml(topic.unicode_title || topic.title)}</span></div>
       <div class="sfp-topic-category-tags">
         ${categoryHtml}
         ${tagsHtml}
