@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.25
+// @version      0.6.27
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -296,8 +296,15 @@
       }
 
       /* ===== 侧边栏 Feed 模式 ===== */
+      .sidebar-wrapper:has(> .sidebar-container.sfp-feed-mode) {
+        overflow-x: hidden !important;
+      }
       .sidebar-container.sfp-feed-mode {
         overflow-x: hidden !important;
+      }
+      .sidebar-container.sfp-feed-mode .sfp-feed-container,
+      .sidebar-container.sfp-feed-mode .sfp-feed-container * {
+        box-sizing: border-box;
       }
       /* 隐藏所有非 feed 的直接子元素 */
       .sidebar-container.sfp-feed-mode > :not(.sfp-feed-container):not(.sfp-resizer) {
@@ -317,8 +324,10 @@
       .sidebar-container.sfp-feed-mode .sfp-feed-container {
         display: flex;
         flex-direction: column;
+        width: 100%;
+        min-width: 0;
         height: 100%;
-        overflow: visible;
+        overflow: hidden;
         max-width: 100%;
       }
 
@@ -625,6 +634,8 @@
         -webkit-overflow-scrolling: touch;
         scrollbar-width: none;
         width: 100%;
+        min-width: 0;
+        max-width: 100%;
         padding: 8px 12px;
         margin: 0;
         border-bottom: 1px solid var(--primary-low, #e9e9e9);
@@ -670,6 +681,8 @@
         align-items: center;
         gap: 12px;
         width: 100%;
+        min-width: 0;
+        max-width: 100%;
         padding: 8px 16px;
         margin: 0;
         background: var(--primary-very-low, #f8f8f8);
@@ -698,12 +711,16 @@
       .sfp-feed-scroll {
         position: relative;
         flex: 1;
+        min-width: 0;
+        max-width: 100%;
         overflow-y: auto;
         overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
       }
       .sfp-content-wrapper {
         position: relative;
+        min-width: 0;
+        max-width: 100%;
         min-height: 100%;
       }
 
@@ -714,6 +731,8 @@
         cursor: pointer;
         transition: background 0.2s;
         position: relative;
+        min-width: 0;
+        max-width: 100%;
         overflow-wrap: break-word;
         word-break: break-word;
       }
