@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.29
+// @version      0.6.30
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -28,6 +28,7 @@
   const FILTER_KEY = "sfp_current_filter";
   const HIDE_PINNED_KEY = "sfp_hide_pinned";
   const AUTO_SILENT_REFRESH_KEY = "sfp_auto_silent_refresh";
+  const AUTO_SILENT_REFRESH_INTERVAL_KEY = "sfp_auto_silent_refresh_interval";
   const AUTO_REFRESH_ENABLED_KEY = "sfp_auto_refresh_enabled";
   const AUTO_REFRESH_INTERVAL_KEY = "sfp_auto_refresh_interval";
   const TAG_STYLE_CACHE_KEY = "sfp_tag_style_cache_v1";
@@ -36,6 +37,7 @@
   const DEFAULT_WIDTH = 272;
   const MIN_WIDTH = DEFAULT_WIDTH;
   const MAX_WIDTH = 500;
+  const DEFAULT_AUTO_SILENT_REFRESH_INTERVAL = 0;
   const DEFAULT_AUTO_REFRESH_INTERVAL = 10;
   const AUTO_LOAD_RATE_WINDOW_MS = 5000;
   const AUTO_LOAD_MAX_REQUESTS_PER_WINDOW = 3;
@@ -55,6 +57,7 @@
   let currentFilter = GM_getValue(FILTER_KEY, "all");
   let hidePinned = GM_getValue(HIDE_PINNED_KEY, false);
   let autoSilentRefreshEnabled = GM_getValue(AUTO_SILENT_REFRESH_KEY, false);
+  let autoSilentRefreshInterval = Math.max(0, Number(GM_getValue(AUTO_SILENT_REFRESH_INTERVAL_KEY, DEFAULT_AUTO_SILENT_REFRESH_INTERVAL)) || DEFAULT_AUTO_SILENT_REFRESH_INTERVAL);
   let autoRefreshEnabled = GM_getValue(AUTO_REFRESH_ENABLED_KEY, false);
   let autoRefreshInterval = Math.max(1, Number(GM_getValue(AUTO_REFRESH_INTERVAL_KEY, DEFAULT_AUTO_REFRESH_INTERVAL)) || DEFAULT_AUTO_REFRESH_INTERVAL);
   let currentCategoryId = null;
@@ -68,6 +71,8 @@
   let isLoadingMore = false;
   let isRefreshing = false;
   let _pendingReload = false;
+  let autoSilentRefreshTimer = null;
+  let autoSilentRefreshSeconds = 0;
   let autoRefreshTimer = null;
   let autoRefreshSeconds = 0;
   let autoLoadTimestamps = [];
@@ -799,7 +804,7 @@
         box-shadow: 0 8px 24px rgba(0,0,0,0.14);
       }
       .sfp-settings-wrap.sfp-settings-compact.open .sfp-settings-shell {
-        height: 82px;
+        height: 118px;
       }
       .sfp-settings-panel {
         box-sizing: border-box;
@@ -1584,6 +1589,7 @@
     if (!sidebar) return;
 
     _stopAutoRefresh();
+    _stopAutoSilentRefresh();
     _stopSidebarIncomingTracking();
 
     if (feedContainer) {
@@ -1701,6 +1707,11 @@
           <span>自动静默刷新</span>
           <input type="checkbox" class="sfp-auto-silent-input"${autoSilentRefreshEnabled ? " checked" : ""}>
         </label>
+        <label class="sfp-setting-interval${autoSilentRefreshEnabled ? " visible" : ""}">
+          <span>静默刷新间隔</span>
+          <input type="number" class="sfp-auto-silent-refresh-interval-input" min="0" step="1" value="${autoSilentRefreshInterval}">
+          <span>s</span>
+        </label>
       `;
     } else {
       panel.innerHTML = `
@@ -1728,12 +1739,29 @@
     panel.addEventListener("click", (e) => e.stopPropagation());
 
     const autoSilentInput = panel.querySelector(".sfp-auto-silent-input");
+    const silentIntervalRow = panel.querySelector(".sfp-setting-interval");
+    const silentIntervalInput = panel.querySelector(".sfp-auto-silent-refresh-interval-input");
     if (autoSilentInput) {
       autoSilentInput.addEventListener("change", () => {
         autoSilentRefreshEnabled = autoSilentInput.checked;
         GM_setValue(AUTO_SILENT_REFRESH_KEY, autoSilentRefreshEnabled);
+        silentIntervalRow?.classList.toggle("visible", autoSilentRefreshEnabled);
+        _startAutoSilentRefresh();
         _updateShowMoreHint();
-        if (autoSilentRefreshEnabled) {
+        if (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0) {
+          _queueSidebarIncomingApply();
+        }
+      });
+    }
+
+    if (silentIntervalInput) {
+      silentIntervalInput.addEventListener("change", () => {
+        const seconds = Math.max(0, Number(silentIntervalInput.value) || DEFAULT_AUTO_SILENT_REFRESH_INTERVAL);
+        autoSilentRefreshInterval = seconds;
+        silentIntervalInput.value = seconds;
+        GM_setValue(AUTO_SILENT_REFRESH_INTERVAL_KEY, autoSilentRefreshInterval);
+        _startAutoSilentRefresh();
+        if (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0) {
           _queueSidebarIncomingApply();
         }
       });
@@ -1979,9 +2007,10 @@
     const contentWrapper = feedScrollEl.querySelector(".sfp-content-wrapper");
     if (!contentWrapper) return;
 
-    // 只在最新活动模式（全部板块 + 最新活动 + 全部筛选）时刷新提示
-    if (!_isDefaultFeedView() || autoSilentRefreshEnabled) {
-      // 非最新活动模式移除已有提示
+    // 只在最新活动模式（全部板块 + 最新活动 + 全部筛选）时刷新提示。
+    // 0 秒静默刷新会立即应用新话题，不需要显示手动提醒；有效间隔会批量应用，
+    // 间隔期间保留数量提示。
+    if (!_isDefaultFeedView() || (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0)) {
       const existing = contentWrapper.querySelector(".sfp-show-more-overlay");
       if (existing) existing.remove();
       contentWrapper.classList.remove("sfp-has-show-more");
@@ -2025,8 +2054,9 @@
   function _syncDefaultViewControls() {
     _updateSettingsControl();
     _updateShowMoreHint();
+    _startAutoSilentRefresh();
     _startAutoRefresh();
-    if (autoSilentRefreshEnabled && _isDefaultFeedView() && sidebarIncomingTopicIds.length > 0) {
+    if (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0 && _isDefaultFeedView() && sidebarIncomingTopicIds.length > 0) {
       _queueSidebarIncomingApply();
     }
   }
@@ -2087,7 +2117,7 @@
 
     _addSidebarIncomingTopicId(data.topic_id);
 
-    if (autoSilentRefreshEnabled && _isDefaultFeedView()) {
+    if (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0 && _isDefaultFeedView()) {
       _queueSidebarIncomingApply();
     } else {
       _updateShowMoreHint();
@@ -2113,6 +2143,7 @@
   }
 
   function _queueSidebarIncomingApply() {
+    if (!autoSilentRefreshEnabled || autoSilentRefreshInterval > 0) return;
     if (sidebarIncomingApplyQueued) return;
 
     sidebarIncomingApplyQueued = true;
@@ -2123,7 +2154,12 @@
   }
 
   function _flushQueuedSidebarIncomingApply() {
-    if (!sidebarIncomingApplyQueued || !autoSilentRefreshEnabled || !_isDefaultFeedView()) return;
+    if (!sidebarIncomingApplyQueued) return;
+
+    if (!autoSilentRefreshEnabled || autoSilentRefreshInterval > 0 || !_isDefaultFeedView()) {
+      sidebarIncomingApplyQueued = false;
+      return;
+    }
 
     sidebarIncomingApplyQueued = false;
     _queueSidebarIncomingApply();
@@ -2419,9 +2455,9 @@
 
   // ========== 静默刷新 ==========
   // 仅在最新活动视图（全部板块 + 最新活动 + 全部筛选）时按 incoming 事件启用
-  async function _applySidebarIncomingTopics({ requireDefaultView = false, logPrefix = "incoming" } = {}) {
+  async function _applySidebarIncomingTopics({ requireDefaultView = false, logPrefix = "incoming", queueIfBusy = true } = {}) {
     if (isLoading || isLoadingMore || isRefreshing) {
-      sidebarIncomingApplyQueued = true;
+      if (queueIfBusy) sidebarIncomingApplyQueued = true;
       return;
     }
     if (requireDefaultView && !_isDefaultFeedView()) return;
@@ -2456,6 +2492,41 @@
     } finally {
       isRefreshing = false;
       _flushQueuedSidebarIncomingApply();
+    }
+  }
+
+  function _startAutoSilentRefresh() {
+    _stopAutoSilentRefresh();
+    if (!autoSilentRefreshEnabled) return;
+    if (autoSilentRefreshInterval <= 0) return;
+    if (!_isDefaultFeedView()) return;
+
+    _resetAutoSilentRefreshCountdown();
+    autoSilentRefreshTimer = setInterval(() => {
+      autoSilentRefreshSeconds--;
+      if (autoSilentRefreshSeconds <= 0) {
+        _resetAutoSilentRefreshCountdown();
+        if (feedModeEnabled && !isLoading && !isLoadingMore && !isRefreshing) {
+          _applySidebarIncomingTopics({
+            requireDefaultView: true,
+            logPrefix: "auto silent refresh interval",
+            queueIfBusy: false,
+          });
+        }
+      }
+    }, 1000);
+  }
+
+  function _resetAutoSilentRefreshCountdown() {
+    if (autoSilentRefreshEnabled && autoSilentRefreshInterval > 0) {
+      autoSilentRefreshSeconds = autoSilentRefreshInterval;
+    }
+  }
+
+  function _stopAutoSilentRefresh() {
+    if (autoSilentRefreshTimer) {
+      clearInterval(autoSilentRefreshTimer);
+      autoSilentRefreshTimer = null;
     }
   }
 
