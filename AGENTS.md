@@ -1,26 +1,21 @@
 # Discourse Sidebar Feed Panel — Active Handoff
 
-**Updated**: 2026-05-19 13:02:40 +08:00
+**Updated**: 2026-05-19 21:45:21 +08:00
 **Project root**: `C:/Users/28676/builds/discourse/userscript`
-**Current objective**: 进入最终 review 环节，重点检查刚加入的板块展开/排序功能是否有状态、拖拽、布局或持久化回归。
+**Current objective**: 下一轮从零开始审查 `discourse-sidebar-feed-panel.user.js`，重点找潜在 bug、状态耦合、布局/刷新回归，并提出代码结构优化方案。
 
 ## Current State
 
 - Main file: `discourse-sidebar-feed-panel.user.js`
 - Current branch: `master`
-- Current userscript version in file: `0.6.41`
-- Pending commit this session: board/category tab expansion and drag sorting, plus this handoff update.
+- Current userscript version in file: `0.6.42`
+- Latest work fixed board/category expanded picker regressions:
+  - Header order/period custom selects, auto-refresh settings, and board expanded panel are now mutually exclusive.
+  - Expanded-grid category selection scrolls the horizontal tab bar to the active tab.
+  - The scroll now uses computed `scrollLeft` and preserves the pre-rerender position, so both forward and backward smooth scrolling behave correctly.
+  - `_refreshCategoryTabs()` preserves tab-bar scroll unless an explicit pending active-tab scroll is requested.
+- User confirmed the current effect is good and asked to commit before the next review pass.
 - Existing unrelated untracked/reference files remain: `CLAUDE.md`, `CLAUDE_old.md`, `LINUX DO Timeline-1.29.1.user.js`, `discourse-content-preserver.user.js`, `show-more-layout-test.html`, `展开.md`.
-
-## Just Finished
-
-- Added a board/category tab shell with a right-side expand button.
-- Expanded panel shows a compact icon grid for all main `TAB_CATEGORIES`; `全部` is fixed and not sortable.
-- Main board categories are draggable in the expanded grid.
-- Sort order is persisted in `GM_setValue("sfp_tab_order", order)` and read by `_getOrderedTabCategories()`.
-- Initial save bug was fixed: final DOM order is now saved on `dragend`, not only on `drop`.
-- Horizontal tab bar and expanded grid now share active state; selecting from the grid scrolls the matching horizontal tab into view.
-- Category metadata refresh now rerenders the whole tab shell so names/icons stay consistent after `/site.json` metadata loads.
 
 ## Validation Run
 
@@ -36,16 +31,17 @@
 - Keep the intended internal horizontal scroll of `.sfp-tab-bar`; do not regress board filter scrolling or the closed-sidebar overflow fix.
 - Prefer Discourse/Horizon CSS variables and native DOM conventions over hardcoded approximations.
 
-## Review Focus
+## Next Review Focus
 
-1. Check drag sorting persistence across close/reopen and userscript reload/update.
-2. Inspect whether HTML5 drag behavior works acceptably in the target browser and whether touch support is needed.
-3. Verify expanded panel z-index/overflow does not block filter controls, topic list clicks, or custom selects.
-4. Review `_getOrderedTabCategories()`, `_saveTabOrderFromGrid()`, `_buildTabBar()`, `_rerenderTabBar()`, and `_refreshCategoryTabs()` for hidden state coupling.
-5. Confirm tab click semantics still preserve `TAB_KEY`, `currentTab`, `currentCategoryId`, and current category id mapping.
+1. Start from a clean read of `discourse-sidebar-feed-panel.user.js`; do not assume the previous feature work is the only risk.
+2. Map global state, persistence keys, timers, message-bus subscriptions, route changes, and render/update flows.
+3. Look for hidden coupling around `loadTopics()`, `_refreshCategoryTabs()`, `_syncDefaultViewControls()`, auto refresh, silent refresh, and infinite loading.
+4. Review UI layering/overflow, mobile/touch behavior, drag sorting, and custom dropdown/settings/panel interactions.
+5. Identify low-risk structure improvements, especially small helpers or state ownership cleanup that reduce future regressions.
 
 ## Suggested Skills
 
-- `$agent-browser-cli` for live DOM/computed-style and persistence checks on linux.do.
-- `/diagnose` only if final review finds a reproducible layout/state bug.
-- `$handoff` again after the final review if new work remains.
+- `$agent-browser-cli` for live linux.do DOM/state checks and computed-style/layout measurements.
+- `/diagnose` when a specific reproducible bug is found.
+- `$improve-codebase-architecture` if the review turns into a refactor plan.
+- `$handoff` again after the review if work remains.

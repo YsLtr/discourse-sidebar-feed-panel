@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.41
+// @version      0.6.42
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -91,6 +91,7 @@
   let categoryMetaLoaded = false;
   let tagStylePromise = null;
   let tagStyleLoaded = false;
+  let pendingTabBarScrollTab = null;
   let toggleBtn = null;
   let feedContainer = null;
   let feedScrollEl = null;
@@ -375,6 +376,28 @@
 
   function _cssEscape(value) {
     return window.CSS?.escape ? CSS.escape(String(value)) : String(value).replace(/["\\]/g, "\\$&");
+  }
+
+  function _closeFloatingPanels(exceptEl = null) {
+    document.querySelectorAll(".sfp-custom-select.open, .sfp-settings-wrap.open, .sfp-tab-shell.open").forEach((el) => {
+      if (el !== exceptEl) el.classList.remove("open");
+    });
+  }
+
+  function _scrollTabIntoView(shell, tabId = currentTab, behavior = "auto") {
+    const bar = shell?.querySelector(".sfp-tab-bar");
+    const activeTab = shell?.querySelector(`.sfp-tab-bar .sfp-tab-item[data-tab="${_cssEscape(tabId)}"]`);
+    if (!bar || !activeTab) return;
+
+    const maxScrollLeft = Math.max(0, bar.scrollWidth - bar.clientWidth);
+    const targetLeft = activeTab.offsetLeft - ((bar.clientWidth - activeTab.offsetWidth) / 2);
+    const left = Math.min(maxScrollLeft, Math.max(0, targetLeft));
+
+    if (typeof bar.scrollTo === "function") {
+      bar.scrollTo({ left, behavior });
+    } else {
+      bar.scrollLeft = left;
+    }
   }
 
   async function loadCategoryMetadata() {
@@ -2030,10 +2053,9 @@
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      document.querySelectorAll(".sfp-settings-wrap.open").forEach((el) => {
-        if (el !== wrapper) el.classList.remove("open");
-      });
-      wrapper.classList.toggle("open");
+      const shouldOpen = !wrapper.classList.contains("open");
+      _closeFloatingPanels(wrapper);
+      wrapper.classList.toggle("open", shouldOpen);
     });
 
     panel.addEventListener("click", (e) => e.stopPropagation());
@@ -2134,11 +2156,10 @@
 
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      // 关闭其他打开的下拉
-      document.querySelectorAll(".sfp-custom-select.open").forEach((el) => {
-        if (el !== wrapper) el.classList.remove("open");
-      });
-      const isOpen = wrapper.classList.toggle("open");
+      const shouldOpen = !wrapper.classList.contains("open");
+      _closeFloatingPanels(wrapper);
+      wrapper.classList.toggle("open", shouldOpen);
+      const isOpen = shouldOpen;
       if (isOpen) {
         const btnRect = btn.getBoundingClientRect();
         dropdown.style.top = (btnRect.bottom + 4) + "px";
@@ -2154,9 +2175,7 @@
 
   // 点击页面其他地方关闭下拉
   document.addEventListener("click", () => {
-    document.querySelectorAll(".sfp-custom-select.open").forEach((el) => el.classList.remove("open"));
-    document.querySelectorAll(".sfp-settings-wrap.open").forEach((el) => el.classList.remove("open"));
-    document.querySelectorAll(".sfp-tab-shell.open").forEach((el) => el.classList.remove("open"));
+    _closeFloatingPanels();
   });
 
   // ========== 分类标签栏 ==========
@@ -2225,6 +2244,7 @@
     // 事件代理 — 点击切换
     shell.addEventListener("click", (e) => {
       e.stopPropagation();
+      _closeFloatingPanels(shell);
       const closeBtn = e.target.closest(".sfp-tab-panel-close");
       if (closeBtn) {
         e.stopPropagation();
@@ -2234,7 +2254,7 @@
 
       if (e.target.closest(".sfp-tab-more-btn")) {
         e.stopPropagation();
-        shell.classList.toggle("open");
+        shell.classList.toggle("open", !shell.classList.contains("open"));
         return;
       }
 
@@ -2243,7 +2263,14 @@
 
       const tabId = tab.dataset.tab;
       const catId = tab.dataset.categoryId ? Number(tab.dataset.categoryId) : null;
-      if (tabId === currentTab && catId === currentCategoryId) return;
+      const fromGrid = tab.classList.contains("sfp-tab-grid-item");
+      if (tabId === currentTab && catId === currentCategoryId) {
+        if (fromGrid) {
+          shell.classList.remove("open");
+          _scrollTabIntoView(shell, tabId, "smooth");
+        }
+        return;
+      }
 
       currentTab = tabId;
       currentCategoryId = catId;
@@ -2255,13 +2282,10 @@
         t.classList.remove("active");
       });
       shell.querySelectorAll(`[data-tab="${_cssEscape(tabId)}"]`).forEach((t) => t.classList.add("active"));
-      if (tab.classList.contains("sfp-tab-grid-item")) {
+      if (fromGrid) {
+        pendingTabBarScrollTab = tabId;
         shell.classList.remove("open");
-        shell.querySelector(`.sfp-tab-item[data-tab="${_cssEscape(tabId)}"]`)?.scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-          inline: "center",
-        });
+        _scrollTabIntoView(shell, tabId, "smooth");
       }
 
       loadTopics();
@@ -2308,8 +2332,7 @@
       grid.querySelectorAll(".drop-target").forEach((el) => el.classList.remove("drop-target"));
       if (tabOrderChanged) {
         _saveTabOrderFromGrid(grid);
-        const newShell = _rerenderTabBar(shell);
-        newShell?.classList.add("open");
+        _rerenderTabBar(shell, { keepOpen: true });
       }
       dragItem = null;
       tabOrderChanged = false;
@@ -2329,10 +2352,23 @@
     return shell;
   }
 
-  function _rerenderTabBar(oldShell) {
+  function _rerenderTabBar(oldShell, options = {}) {
     if (!oldShell?.parentNode) return null;
+    const oldBar = oldShell.querySelector(".sfp-tab-bar");
+    const scrollLeft = oldBar?.scrollLeft || 0;
+    const keepOpen = options.keepOpen ?? oldShell.classList.contains("open");
     const newShell = _buildTabBar();
+    if (keepOpen) newShell.classList.add("open");
     oldShell.replaceWith(newShell);
+    const newBar = newShell.querySelector(".sfp-tab-bar");
+    if (options.scrollTabId) {
+      if (newBar) newBar.scrollLeft = scrollLeft;
+      requestAnimationFrame(() => {
+        _scrollTabIntoView(newShell, options.scrollTabId, options.scrollBehavior || "auto");
+      });
+    } else if (newBar) {
+      newBar.scrollLeft = scrollLeft;
+    }
     return newShell;
   }
 
@@ -2412,7 +2448,11 @@
 
   function _refreshCategoryTabs() {
     const shell = feedContainer?.querySelector(".sfp-tab-shell");
-    if (shell) _rerenderTabBar(shell);
+    if (!shell) return;
+
+    const scrollTabId = pendingTabBarScrollTab;
+    pendingTabBarScrollTab = null;
+    _rerenderTabBar(shell, { scrollTabId, scrollBehavior: scrollTabId ? "smooth" : "auto" });
   }
 
   function _updateShowMoreHint() {
