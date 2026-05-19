@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.30
+// @version      0.6.35
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -746,26 +746,46 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        gap: 0.5em;
         max-width: 100%;
         margin: 0;
         padding: var(--space-2, 0.5em) var(--space-4, 1em);
         border: none;
-        background-color: var(--tertiary-low, #f8e8d5);
         border-radius: var(--d-border-radius-large, 20px);
-        color: var(--tertiary, #d3881f);
         cursor: pointer;
         font-size: inherit;
         line-height: 1.35;
         text-decoration: none;
         white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
         pointer-events: auto;
         transition: background-color 0.2s, color 0.2s;
       }
+      .sfp-show-more-overlay .sfp-hint-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .sfp-show-more-overlay .sfp-hint-spinner-custom {
+        box-sizing: border-box;
+        display: inline-block;
+        width: 0.85em;
+        height: 0.85em;
+        border: 0.15em solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        flex: 0 0 auto;
+        align-self: center;
+        animation: sfp-spin 0.75s linear infinite;
+      }
+      .sfp-show-more-overlay .sfp-hint-text.loading {
+        color: var(--primary-medium, #777);
+        cursor: default;
+      }
       .sfp-show-more-overlay .sfp-hint-text:hover {
-        background-color: var(--tertiary-low, #f8e8d5);
         color: var(--tertiary-hover, var(--tertiary, #d3881f));
+      }
+      .sfp-show-more-overlay .sfp-hint-text.loading:hover {
+        color: var(--primary-medium, #777);
       }
       @keyframes sfp-float-down {
         from { opacity: 0; transform: translateY(-8px); }
@@ -2026,24 +2046,55 @@
     }
 
     const overlay = existing || document.createElement("div");
-    overlay.className = "sfp-show-more-overlay";
+    overlay.className = "show-more has-topics sfp-show-more-overlay";
 
     let hint = overlay.querySelector(".sfp-hint-text");
     if (!hint) {
       hint = document.createElement("a");
       hint.className = "sfp-hint-text alert alert-info clickable";
       hint.href = "#";
-      hint.addEventListener("click", (e) => {
+      hint.addEventListener("click", async (e) => {
         e.preventDefault();
-        _applySidebarIncomingTopics({ requireDefaultView: true, logPrefix: "show more" });
+        if (hint.classList.contains("loading")) return;
+
+        _setShowMoreHintLoading(hint, true);
+        try {
+          await _applySidebarIncomingTopics({ requireDefaultView: true, logPrefix: "show more" });
+        } finally {
+          _setShowMoreHintLoading(hint, false);
+        }
       });
       overlay.appendChild(hint);
     }
 
-    hint.textContent = `查看 ${newCount} 个新的或更新的话题`;
+    let label = hint.querySelector(".sfp-hint-label");
+    if (!label) {
+      label = document.createElement("span");
+      label.className = "sfp-hint-label";
+      hint.appendChild(label);
+    }
+
+    label.textContent = `查看 ${newCount} 个新的或更新的话题`;
     contentWrapper.classList.add("sfp-has-show-more");
     if (!existing) {
       contentWrapper.insertBefore(overlay, contentWrapper.firstChild);
+    }
+  }
+
+  function _setShowMoreHintLoading(hint, loading) {
+    hint.classList.toggle("loading", loading);
+    hint.setAttribute("aria-busy", loading ? "true" : "false");
+    hint.setAttribute("aria-disabled", loading ? "true" : "false");
+
+    const existingSpinner = hint.querySelector(".sfp-hint-spinner-custom");
+    if (loading) {
+      if (!existingSpinner) {
+        const spinner = document.createElement("div");
+        spinner.className = "sfp-hint-spinner-custom";
+        hint.appendChild(spinner);
+      }
+    } else if (existingSpinner) {
+      existingSpinner.remove();
     }
   }
 
