@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.22
+// @version      0.6.24
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -72,9 +72,12 @@
   let autoLoadEmptyFilterCount = 0;
   let autoLoadStoppedForSession = false;
   let autoLoadSessionKey = "";
-  let trackingStateCallbackId = null;
-  let incomingCountPollTimer = null;
-  let lastKnownIncomingCount = 0;
+  let sidebarIncomingTopicIds = [];
+  let sidebarIncomingTopicIdSet = new Set();
+  let sidebarMessageBus = null;
+  let sidebarLatestMessageBusCallback = null;
+  let sidebarNewMessageBusCallback = null;
+  let sidebarIncomingApplyQueued = false;
   let routeDebounceTimer = null;
   let toggleBtn = null;
   let feedContainer = null;
@@ -98,9 +101,20 @@
     script.remove();
   }
 
-  function getTopicTrackingState() {
+  function getDiscourse() {
     try {
-      return Discourse.__container__?.lookup("service:topic-tracking-state") || null;
+      return (typeof unsafeWindow !== "undefined" && unsafeWindow.Discourse) ||
+        (typeof window !== "undefined" && window.Discourse) ||
+        (typeof Discourse !== "undefined" && Discourse) ||
+        null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function getMessageBus() {
+    try {
+      return getDiscourse()?.__container__?.lookup("service:message-bus") || null;
     } catch (e) {
       return null;
     }
@@ -150,8 +164,7 @@
     function check() {
       try {
         if (
-          typeof Discourse !== "undefined" &&
-          Discourse.__container__
+          getDiscourse()?.__container__
         ) {
           callback();
           return;
@@ -425,10 +438,10 @@
         justify-content: center;
         max-width: 100%;
         margin: 0;
-        padding: 5px 11px;
+        padding: var(--space-2, 0.5em) var(--space-4, 1em);
         border: none;
-        background-color: rgb(53, 34, 8);
-        border-radius: 16px;
+        background-color: var(--tertiary-low, #f8e8d5);
+        border-radius: var(--d-border-radius-large, 20px);
         color: var(--tertiary, #d3881f);
         cursor: pointer;
         font-size: inherit;
@@ -441,8 +454,8 @@
         transition: background-color 0.2s, color 0.2s;
       }
       .sfp-show-more-overlay .sfp-hint-text:hover {
-        background-color: rgb(63, 44, 18);
-        color: var(--tertiary-hover, var(--tertiary-dark, #b8691a));
+        background-color: var(--tertiary-low, #f8e8d5);
+        color: var(--tertiary-hover, var(--tertiary, #d3881f));
       }
       @keyframes sfp-float-down {
         from { opacity: 0; transform: translateY(-8px); }
@@ -479,6 +492,9 @@
         border: 1px solid var(--primary-low, #e9e9e9);
         border-radius: 8px;
         box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+      }
+      .sfp-settings-wrap.sfp-settings-compact.open .sfp-settings-shell {
+        height: 82px;
       }
       .sfp-settings-panel {
         box-sizing: border-box;
@@ -1112,7 +1128,7 @@
       sidebar.classList.add("sfp-feed-mode");
       applySidebarWidth(sfpSidebarWidth);
       setupResizer();
-      _syncIncomingCountPollForView();
+      _syncDefaultViewControls();
       _updateShowMoreHint();
       return;
     }
@@ -1163,7 +1179,8 @@
 
     // 恢复当前 tab 筛选的分类
     _restoreTabState();
-    _startNativeIncomingTracking();
+    _startSidebarIncomingTracking();
+    _syncDefaultViewControls();
 
     // 始终全量加载，数据已在 deactivateFeed 中清除
     loadTopics();
@@ -1177,7 +1194,7 @@
     if (!sidebar) return;
 
     _stopAutoRefresh();
-    _stopNativeIncomingTracking();
+    _stopSidebarIncomingTracking();
 
     if (feedContainer) {
       feedContainer.remove();
@@ -1234,7 +1251,7 @@
       currentOrder = value;
       GM_setValue(ORDER_KEY, currentOrder);
       _updatePeriodVisibility(periodSelect);
-      _syncIncomingCountPollForView();
+      _syncDefaultViewControls();
       _resetAutoLoadState();
       loadTopics();
     });
@@ -1268,6 +1285,10 @@
   function _buildSettingsControl() {
     const wrapper = document.createElement("span");
     wrapper.className = "sfp-settings-wrap";
+    const isDefaultView = _isDefaultFeedView();
+    if (isDefaultView) {
+      wrapper.classList.add("sfp-settings-compact");
+    }
 
     const shell = document.createElement("span");
     shell.className = "sfp-settings-shell";
@@ -1284,21 +1305,26 @@
 
     const panel = document.createElement("div");
     panel.className = "sfp-settings-panel";
-    panel.innerHTML = `
-      <label class="sfp-setting-row">
-        <span>自动静默刷新</span>
-        <input type="checkbox" class="sfp-auto-silent-input"${autoSilentRefreshEnabled ? " checked" : ""}>
-      </label>
-      <label class="sfp-setting-row">
-        <span>自动刷新</span>
-        <input type="checkbox" class="sfp-auto-refresh-input"${autoRefreshEnabled ? " checked" : ""}>
-      </label>
-      <label class="sfp-setting-interval${autoRefreshEnabled ? " visible" : ""}">
-        <span>自动刷新间隔</span>
-        <input type="number" class="sfp-auto-refresh-interval-input" min="1" step="1" value="${autoRefreshInterval}">
-        <span>s</span>
-      </label>
-    `;
+    if (isDefaultView) {
+      panel.innerHTML = `
+        <label class="sfp-setting-row">
+          <span>自动静默刷新</span>
+          <input type="checkbox" class="sfp-auto-silent-input"${autoSilentRefreshEnabled ? " checked" : ""}>
+        </label>
+      `;
+    } else {
+      panel.innerHTML = `
+        <label class="sfp-setting-row">
+          <span>自动刷新</span>
+          <input type="checkbox" class="sfp-auto-refresh-input"${autoRefreshEnabled ? " checked" : ""}>
+        </label>
+        <label class="sfp-setting-interval${autoRefreshEnabled ? " visible" : ""}">
+          <span>自动刷新间隔</span>
+          <input type="number" class="sfp-auto-refresh-interval-input" min="1" step="1" value="${autoRefreshInterval}">
+          <span>s</span>
+        </label>
+      `;
+    }
 
     btn.addEventListener("click", (e) => {
       e.preventDefault();
@@ -1312,32 +1338,38 @@
     panel.addEventListener("click", (e) => e.stopPropagation());
 
     const autoSilentInput = panel.querySelector(".sfp-auto-silent-input");
-    autoSilentInput.addEventListener("change", () => {
-      autoSilentRefreshEnabled = autoSilentInput.checked;
-      GM_setValue(AUTO_SILENT_REFRESH_KEY, autoSilentRefreshEnabled);
-      const trackingState = getTopicTrackingState();
-      if (autoSilentRefreshEnabled && (trackingState?.incomingCount || 0) > 0) {
-        _applyNativeIncomingTopics({ requireDefaultView: true, logPrefix: "enable auto silent refresh" });
-      }
-    });
+    if (autoSilentInput) {
+      autoSilentInput.addEventListener("change", () => {
+        autoSilentRefreshEnabled = autoSilentInput.checked;
+        GM_setValue(AUTO_SILENT_REFRESH_KEY, autoSilentRefreshEnabled);
+        _updateShowMoreHint();
+        if (autoSilentRefreshEnabled) {
+          _queueSidebarIncomingApply();
+        }
+      });
+    }
 
     const autoRefreshInput = panel.querySelector(".sfp-auto-refresh-input");
     const intervalRow = panel.querySelector(".sfp-setting-interval");
     const intervalInput = panel.querySelector(".sfp-auto-refresh-interval-input");
-    autoRefreshInput.addEventListener("change", () => {
-      autoRefreshEnabled = autoRefreshInput.checked;
-      GM_setValue(AUTO_REFRESH_ENABLED_KEY, autoRefreshEnabled);
-      intervalRow.classList.toggle("visible", autoRefreshEnabled);
-      _startAutoRefresh();
-    });
+    if (autoRefreshInput) {
+      autoRefreshInput.addEventListener("change", () => {
+        autoRefreshEnabled = autoRefreshInput.checked;
+        GM_setValue(AUTO_REFRESH_ENABLED_KEY, autoRefreshEnabled);
+        intervalRow.classList.toggle("visible", autoRefreshEnabled);
+        _startAutoRefresh();
+      });
+    }
 
-    intervalInput.addEventListener("change", () => {
-      const seconds = Math.max(1, Number(intervalInput.value) || DEFAULT_AUTO_REFRESH_INTERVAL);
-      autoRefreshInterval = seconds;
-      intervalInput.value = seconds;
-      GM_setValue(AUTO_REFRESH_INTERVAL_KEY, autoRefreshInterval);
-      _startAutoRefresh();
-    });
+    if (intervalInput) {
+      intervalInput.addEventListener("change", () => {
+        const seconds = Math.max(1, Number(intervalInput.value) || DEFAULT_AUTO_REFRESH_INTERVAL);
+        autoRefreshInterval = seconds;
+        intervalInput.value = seconds;
+        GM_setValue(AUTO_REFRESH_INTERVAL_KEY, autoRefreshInterval);
+        _startAutoRefresh();
+      });
+    }
 
     shell.appendChild(btn);
     shell.appendChild(panel);
@@ -1442,7 +1474,7 @@
       currentTab = tabId;
       currentCategoryId = catId;
       GM_setValue(TAB_KEY, currentTab);
-      _syncIncomingCountPollForView();
+      _syncDefaultViewControls();
       _resetAutoLoadState();
 
       bar.querySelectorAll(".sfp-tab-item").forEach((t) => {
@@ -1512,7 +1544,7 @@
         if (filterVal === currentFilter) return;
         currentFilter = filterVal;
         GM_setValue(FILTER_KEY, currentFilter);
-        _syncIncomingCountPollForView();
+        _syncDefaultViewControls();
         _resetAutoLoadState();
         bar.querySelectorAll(".sfp-filter-item[data-filter]:not([data-filter=\"hide-pinned\"])").forEach((i) => i.classList.remove("active"));
         item.classList.add("active");
@@ -1545,7 +1577,7 @@
     if (!contentWrapper) return;
 
     // 只在最新活动模式（全部板块 + 最新活动 + 全部筛选）时刷新提示
-    if (currentTab !== "all" || currentOrder !== "activity" || currentFilter !== "all") {
+    if (!_isDefaultFeedView() || autoSilentRefreshEnabled) {
       // 非最新活动模式移除已有提示
       const existing = contentWrapper.querySelector(".sfp-show-more-overlay");
       if (existing) existing.remove();
@@ -1554,8 +1586,7 @@
     }
 
     const existing = contentWrapper.querySelector(".sfp-show-more-overlay");
-    const trackingState = getTopicTrackingState();
-    const newCount = trackingState?.incomingCount || 0;
+    const newCount = sidebarIncomingTopicIds.length;
     if (newCount <= 0) {
       if (existing) existing.remove();
       contentWrapper.classList.remove("sfp-has-show-more");
@@ -1568,11 +1599,11 @@
     let hint = overlay.querySelector(".sfp-hint-text");
     if (!hint) {
       hint = document.createElement("a");
-      hint.className = "sfp-hint-text";
+      hint.className = "sfp-hint-text alert alert-info clickable";
       hint.href = "#";
       hint.addEventListener("click", (e) => {
         e.preventDefault();
-        _applyNativeIncomingTopics({ logPrefix: "show more" });
+        _applySidebarIncomingTopics({ requireDefaultView: true, logPrefix: "show more" });
       });
       overlay.appendChild(hint);
     }
@@ -1584,92 +1615,115 @@
     }
   }
 
-  function _startNativeIncomingTracking() {
-    const trackingState = getTopicTrackingState();
-    if (!trackingState) return;
-
-    if (trackingStateCallbackId) {
-      trackingState.offStateChange?.(trackingStateCallbackId);
-      trackingStateCallbackId = null;
-    }
-
-    trackingState.trackIncoming?.("latest");
-    trackingStateCallbackId = trackingState.onStateChange?.(() => {
-      _updateShowMoreHint();
-      if (autoSilentRefreshEnabled && _isDefaultFeedView() && (trackingState.incomingCount || 0) > 0) {
-        _applyNativeIncomingTopics({ requireDefaultView: true, logPrefix: "native push" });
-      }
-    });
-
-    // 初始化已知计数
-    lastKnownIncomingCount = trackingState.incomingCount || 0;
-
-    // 只在最新活动视图启动轮询，避免分类、排序、筛选视图空跑。
-    _syncIncomingCountPollForView();
-
-    // 延迟初始更新，让 trackIncoming 有时间处理
-    setTimeout(() => _syncIncomingCountPollForView(), 100);
+  function _isDefaultFeedView() {
+    return currentTab === "all" && currentOrder === "activity" && currentFilter === "all";
   }
 
-  function _syncIncomingCountPollForView() {
-    if (!feedModeEnabled || !_isDefaultFeedView()) {
-      _stopIncomingCountPoll();
-      _updateShowMoreHint();
+  function _syncDefaultViewControls() {
+    _updateSettingsControl();
+    _updateShowMoreHint();
+    _startAutoRefresh();
+    if (autoSilentRefreshEnabled && _isDefaultFeedView() && sidebarIncomingTopicIds.length > 0) {
+      _queueSidebarIncomingApply();
+    }
+  }
+
+  function _updateSettingsControl() {
+    if (!feedHeaderEl) return;
+
+    const oldSettings = feedHeaderEl.querySelector(".sfp-settings-wrap");
+    if (!oldSettings) return;
+
+    const isOpen = oldSettings.classList.contains("open");
+    const nextSettings = _buildSettingsControl();
+    if (isOpen) nextSettings.classList.add("open");
+    oldSettings.replaceWith(nextSettings);
+  }
+
+  function _startSidebarIncomingTracking() {
+    if (sidebarLatestMessageBusCallback || sidebarNewMessageBusCallback) return;
+
+    const messageBus = getMessageBus();
+    if (!messageBus?.subscribe) {
+      console.warn("[SFP] message-bus service unavailable; incoming topics will not auto-update");
       return;
     }
 
-    if (!incomingCountPollTimer) {
-      _startIncomingCountPoll();
-    }
-    _updateShowMoreHint();
+    sidebarMessageBus = messageBus;
+    sidebarLatestMessageBusCallback = (data) => _handleSidebarIncomingMessage(data);
+    sidebarNewMessageBusCallback = (data) => _handleSidebarIncomingMessage(data);
+    messageBus.subscribe("/latest", sidebarLatestMessageBusCallback, _getMessageBusLastId("/latest"));
+    messageBus.subscribe("/new", sidebarNewMessageBusCallback, _getMessageBusLastId("/new"));
   }
 
-  function _startIncomingCountPoll() {
-    _stopIncomingCountPoll();
+  function _getMessageBusLastId(channel) {
+    const lastId = sidebarMessageBus?.callbacks?.find((callback) => callback.channel === channel)?.last_id;
+    return Number.isFinite(lastId) ? lastId : -1;
+  }
 
-    const trackingState = getTopicTrackingState();
-    if (!trackingState) return;
-
-    // 记录初始 messageCount，用于检测状态变化
-    let lastMessageCount = trackingState.messageCount || 0;
-
-    incomingCountPollTimer = setInterval(() => {
-      if (!trackingState || !feedModeEnabled) return;
-      if (!_isDefaultFeedView()) {
-        _stopIncomingCountPoll();
-        return;
+  function _stopSidebarIncomingTracking() {
+    if (sidebarMessageBus?.unsubscribe) {
+      if (sidebarLatestMessageBusCallback) {
+        sidebarMessageBus.unsubscribe("/latest", sidebarLatestMessageBusCallback);
       }
-
-      const currentMessageCount = trackingState.messageCount || 0;
-      const currentIncomingCount = trackingState.incomingCount || 0;
-
-      // 检查 messageCount 或 incomingCount 是否变化
-      if (currentMessageCount !== lastMessageCount || currentIncomingCount !== lastKnownIncomingCount) {
-        lastMessageCount = currentMessageCount;
-        lastKnownIncomingCount = currentIncomingCount;
-        _updateShowMoreHint();
+      if (sidebarNewMessageBusCallback) {
+        sidebarMessageBus.unsubscribe("/new", sidebarNewMessageBusCallback);
       }
-    }, 1000);
+    }
+
+    sidebarMessageBus = null;
+    sidebarLatestMessageBusCallback = null;
+    sidebarNewMessageBusCallback = null;
+    sidebarIncomingApplyQueued = false;
   }
 
-  function _stopIncomingCountPoll() {
-    if (incomingCountPollTimer) {
-      clearInterval(incomingCountPollTimer);
-      incomingCountPollTimer = null;
+  function _handleSidebarIncomingMessage(data) {
+    if (!data || !["latest", "new_topic"].includes(data.message_type)) return;
+    if (!data.topic_id) return;
+    if (data.payload?.archetype && data.payload.archetype !== "regular") return;
+
+    _addSidebarIncomingTopicId(data.topic_id);
+
+    if (autoSilentRefreshEnabled && _isDefaultFeedView()) {
+      _queueSidebarIncomingApply();
+    } else {
+      _updateShowMoreHint();
     }
   }
 
-  function _stopNativeIncomingTracking() {
-    const trackingState = getTopicTrackingState();
-    if (trackingStateCallbackId && trackingState?.offStateChange) {
-      trackingState.offStateChange(trackingStateCallbackId);
-    }
-    trackingStateCallbackId = null;
-    _stopIncomingCountPoll();
+  function _addSidebarIncomingTopicId(topicId) {
+    const numericId = Number(topicId);
+    if (!Number.isFinite(numericId) || sidebarIncomingTopicIdSet.has(numericId)) return;
+
+    sidebarIncomingTopicIdSet.add(numericId);
+    sidebarIncomingTopicIds.push(numericId);
   }
 
-  function _isDefaultFeedView() {
-    return currentTab === "all" && currentOrder === "activity" && currentFilter === "all";
+  function _removeSidebarIncomingTopicIds(topicIds) {
+    if (!topicIds?.length) return;
+
+    const toRemove = new Set(topicIds.map((id) => Number(id)).filter(Number.isFinite));
+    if (toRemove.size === 0) return;
+
+    sidebarIncomingTopicIds = sidebarIncomingTopicIds.filter((id) => !toRemove.has(Number(id)));
+    sidebarIncomingTopicIdSet = new Set(sidebarIncomingTopicIds);
+  }
+
+  function _queueSidebarIncomingApply() {
+    if (sidebarIncomingApplyQueued) return;
+
+    sidebarIncomingApplyQueued = true;
+    Promise.resolve().then(async () => {
+      sidebarIncomingApplyQueued = false;
+      await _applySidebarIncomingTopics({ requireDefaultView: true, logPrefix: "auto silent refresh" });
+    });
+  }
+
+  function _flushQueuedSidebarIncomingApply() {
+    if (!sidebarIncomingApplyQueued || !autoSilentRefreshEnabled || !_isDefaultFeedView()) return;
+
+    sidebarIncomingApplyQueued = false;
+    _queueSidebarIncomingApply();
   }
 
   function _getAutoLoadSessionKey() {
@@ -1815,9 +1869,8 @@
         allTopics = topics;
         hasMorePages = topics.length > 0;
         renderTopics();
-        const topicIdSet = new Set(topics.map((topic) => topic.id));
-        const nativeIncomingTopicIds = Array.from(getTopicTrackingState()?.newIncoming || []);
-        _clearNativeIncoming(nativeIncomingTopicIds.filter((id) => topicIdSet.has(Number(id))));
+        _removeSidebarIncomingTopicIds(topics.map((topic) => topic.id));
+        _updateShowMoreHint();
       } else {
         if (feedListEl) feedListEl.innerHTML = `<div class="sfp-empty">暂无话题</div>`;
         hasMorePages = false;
@@ -1838,6 +1891,7 @@
       }
     } finally {
       isLoading = false;
+      _flushQueuedSidebarIncomingApply();
       if (_pendingReload) {
         _pendingReload = false;
         loadTopics();
@@ -1894,6 +1948,7 @@
       _renderPaginationFooter();
     } finally {
       isLoadingMore = false;
+      _flushQueuedSidebarIncomingApply();
     }
   }
 
@@ -1914,7 +1969,6 @@
 
     isRefreshing = true;
     try {
-      const nativeIncomingTopicIds = Array.from(getTopicTrackingState()?.newIncoming || []);
       const data = await fetchFeedTopics(currentOrder, currentPeriod, 0);
       _processUsers(data);
 
@@ -1933,7 +1987,7 @@
       hasMorePages = freshTopics.length > 0;
 
       renderTopics(newTopicIds);
-      _clearNativeIncoming(nativeIncomingTopicIds.filter((id) => freshMap.has(Number(id))));
+      _removeSidebarIncomingTopicIds(freshTopics.map((topic) => topic.id));
 
       _updateShowMoreHint();
     } catch (e) {
@@ -1941,26 +1995,21 @@
     } finally {
       isRefreshing = false;
       _resetAutoRefreshCountdown();
+      _flushQueuedSidebarIncomingApply();
     }
   }
 
   // ========== 静默刷新 ==========
-  // 仅在最新活动视图（全部板块 + 最新活动 + 全部筛选）时启用
-  async function _silentRefresh() {
-    if (autoSilentRefreshEnabled) {
-      return _applyNativeIncomingTopics({ requireDefaultView: true, logPrefix: "silent refresh" });
+  // 仅在最新活动视图（全部板块 + 最新活动 + 全部筛选）时按 incoming 事件启用
+  async function _applySidebarIncomingTopics({ requireDefaultView = false, logPrefix = "incoming" } = {}) {
+    if (isLoading || isLoadingMore || isRefreshing) {
+      sidebarIncomingApplyQueued = true;
+      return;
     }
-
-    _updateShowMoreHint();
-  }
-
-  async function _applyNativeIncomingTopics({ requireDefaultView = false, logPrefix = "incoming" } = {}) {
-    if (isLoading || isLoadingMore || isRefreshing) return;
     if (requireDefaultView && !_isDefaultFeedView()) return;
     if (!feedListEl) return;
 
-    const trackingState = getTopicTrackingState();
-    const incomingTopicIds = Array.from(trackingState?.newIncoming || []);
+    const incomingTopicIds = sidebarIncomingTopicIds.slice();
     if (incomingTopicIds.length === 0) {
       _updateShowMoreHint();
       return;
@@ -1981,25 +2030,20 @@
       hasMorePages = hasMorePages || incomingTopics.length > 0;
 
       renderTopics(Array.from(incomingIdSet));
-      _clearNativeIncoming(incomingTopicIds);
+      _removeSidebarIncomingTopicIds(incomingTopicIds);
       _updateShowMoreHint();
     } catch (e) {
       console.warn(`[SFP] ${logPrefix} error:`, e);
     } finally {
       isRefreshing = false;
-    }
-  }
-
-  function _clearNativeIncoming(topicIds) {
-    const trackingState = getTopicTrackingState();
-    if (topicIds?.length > 0 && trackingState?.clearIncoming) {
-      trackingState.clearIncoming(topicIds);
+      _flushQueuedSidebarIncomingApply();
     }
   }
 
   // ========== 自动刷新 ==========
   function _startAutoRefresh() {
     _stopAutoRefresh();
+    if (_isDefaultFeedView()) return;
     if (!autoRefreshEnabled) return;
 
     _resetAutoRefreshCountdown();
