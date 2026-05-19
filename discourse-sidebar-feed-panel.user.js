@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.35
+// @version      0.6.37
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -1078,15 +1078,28 @@
         }
       }
 
-      /* 未读圆点 — 绝对定位右上角 */
-      .sfp-topic-item .sfp-unseen-dot {
-        position: absolute;
-        top: 10px;
-        right: 10px;
+      /* 未读圆点 — 紧跟在时间后 */
+      .sfp-topic-item .sfp-topic-time {
+        font-size: 12px;
+        color: var(--primary-medium, #888);
+        white-space: nowrap;
+        margin-left: auto;
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        line-height: 1;
+      }
+      .sfp-topic-item .sfp-unread-dot {
         width: 8px;
         height: 8px;
+        flex: 0 0 8px;
+        display: inline-block;
         border-radius: 50%;
-        background: var(--tertiary, #0088cc);
+        color: var(--tertiary-med-or-tertiary, var(--tertiary, #0088cc));
+        background: currentColor;
+        opacity: 0.75;
+        vertical-align: middle;
       }
 
       /* 头像 + 用户信息行 */
@@ -1136,14 +1149,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .sfp-topic-item .sfp-topic-time {
-        font-size: 12px;
-        color: var(--primary-medium, #888);
-        white-space: nowrap;
-        margin-left: auto;
-        flex-shrink: 0;
-      }
-
       /* 标题 */
       .sfp-topic-item .sfp-topic-title {
         font-size: 14px;
@@ -2791,9 +2796,6 @@
       }
     }
 
-    // 未读圆点（首页标题链接不带楼层号的主题）
-    const unseenDot = _hasUnreadMarker(topic) ? '<span class="sfp-unseen-dot"></span>' : "";
-
     // 头像 HTML
     const avatarHtml = avatarUrl
       ? `<img class="sfp-topic-avatar" src="${avatarUrl}" alt="${escapeHtml(username)}" loading="lazy">`
@@ -2806,6 +2808,9 @@
 
     // 时间
     const timeStr = formatRelativeTime(topic.bumped_at || topic.last_posted_at || topic.created_at);
+    const unreadDotHtml = _hasUnreadMarker(topic)
+      ? '<span class="sfp-unread-dot" aria-hidden="true"></span>'
+      : "";
 
     // 状态标记
     const statusBadges = [];
@@ -2842,7 +2847,6 @@
     const likes = topic.like_count || 0;
 
     item.innerHTML = `
-      ${unseenDot}
       <div class="sfp-topic-header">
         ${avatarHtml}
         <div class="sfp-topic-meta-col">
@@ -2852,7 +2856,7 @@
           </div>
         </div>
         ${statusBadgesHtml}
-        <span class="sfp-topic-time">${timeStr}</span>
+        <span class="sfp-topic-time">${timeStr}${unreadDotHtml}</span>
       </div>
       <div class="sfp-topic-title"><span class="sfp-topic-title-line">${closedHtml}${escapeHtml(topic.unicode_title || topic.title)}</span></div>
       <div class="sfp-topic-category-tags">
@@ -2909,7 +2913,7 @@
       }
     }
     itemElement.classList.add("sfp-read");
-    const dot = itemElement.querySelector(".sfp-unseen-dot");
+    const dot = itemElement.querySelector(".sfp-unread-dot");
     if (dot) dot.remove();
   }
 
