@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.39
+// @version      0.6.41
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -25,6 +25,7 @@
   const PERIOD_KEY = "sfp_current_period";
   const WIDTH_KEY = "sfp_sidebar_width";
   const TAB_KEY = "sfp_current_tab";
+  const TAB_ORDER_KEY = "sfp_tab_order";
   const FILTER_KEY = "sfp_current_filter";
   const HIDE_PINNED_KEY = "sfp_hide_pinned";
   const AUTO_SILENT_REFRESH_KEY = "sfp_auto_silent_refresh";
@@ -337,6 +338,43 @@
       icon: meta?.icon || cat.icon,
       color: meta?.color ? `#${meta.color}` : cat.color,
     };
+  }
+
+  function _getSavedTabOrder() {
+    const savedOrder = GM_getValue(TAB_ORDER_KEY, []);
+    if (!Array.isArray(savedOrder)) return [];
+    return savedOrder.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+  }
+
+  function _getOrderedTabCategories() {
+    const savedOrder = _getSavedTabOrder();
+    if (!savedOrder.length) return [...TAB_CATEGORIES];
+
+    const orderedIds = new Set(savedOrder);
+    return [...TAB_CATEGORIES].sort((a, b) => {
+      const idxA = savedOrder.indexOf(a.id);
+      const idxB = savedOrder.indexOf(b.id);
+      if (idxA === -1 && idxB === -1) return 0;
+      if (idxA === -1) return 1;
+      if (idxB === -1) return -1;
+      return idxA - idxB;
+    }).filter((cat) => orderedIds.has(cat.id) || CATEGORY_CONFIG[cat.id]?.tabId);
+  }
+
+  function _saveTabOrderFromGrid(grid) {
+    const order = Array.from(grid.querySelectorAll(".sfp-tab-grid-item[data-category-id]"))
+      .map((item) => Number(item.dataset.categoryId))
+      .filter((id) => Number.isFinite(id));
+    GM_setValue(TAB_ORDER_KEY, order);
+  }
+
+  function _buildCategoryTabContent(cat) {
+    const tabMeta = getCategoryTabMeta(cat);
+    return `${_svgIcon(tabMeta.icon)}<span>${escapeHtml(tabMeta.name)}</span>`;
+  }
+
+  function _cssEscape(value) {
+    return window.CSS?.escape ? CSS.escape(String(value)) : String(value).replace(/["\\]/g, "\\$&");
   }
 
   async function loadCategoryMetadata() {
@@ -954,6 +992,18 @@
       }
 
       /* ===== 分类标签栏 ===== */
+      .sfp-tab-shell {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 36px;
+        align-items: stretch;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        border-bottom: 1px solid var(--primary-low);
+        flex-shrink: 0;
+        background: var(--d-content-background, var(--secondary));
+      }
       .sfp-tab-bar {
         display: flex;
         gap: 8px;
@@ -966,9 +1016,8 @@
         max-width: 100%;
         padding: 8px 12px;
         margin: 0;
-        border-bottom: 1px solid var(--primary-low);
         flex-shrink: 0;
-        background: var(--d-content-background, var(--secondary));
+        background: transparent;
       }
       .sfp-tab-bar::-webkit-scrollbar { display: none; }
       .sfp-tab-item {
@@ -1001,6 +1050,139 @@
         height: 12px;
         fill: currentColor;
         flex-shrink: 0;
+      }
+      .sfp-tab-more-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        min-width: 36px;
+        padding: 0;
+        border: none;
+        border-left: 1px solid var(--primary-low);
+        background: var(--d-content-background, var(--secondary));
+        color: var(--primary-medium);
+        cursor: pointer;
+        transition: background 0.2s, color 0.2s;
+      }
+      .sfp-tab-more-btn:hover,
+      .sfp-tab-shell.open .sfp-tab-more-btn {
+        background: var(--primary-very-low);
+        color: var(--primary);
+      }
+      .sfp-tab-more-btn svg {
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
+      }
+      .sfp-tab-panel {
+        position: absolute;
+        top: 100%;
+        right: 8px;
+        left: 8px;
+        display: none;
+        padding: 10px;
+        max-height: min(58vh, 420px);
+        overflow-y: auto;
+        background: var(--secondary);
+        border: 1px solid var(--primary-low);
+        border-radius: 8px;
+        box-shadow: 0 10px 28px color-mix(in srgb, var(--primary) 16%, transparent);
+        z-index: 10002;
+      }
+      .sfp-tab-shell.open .sfp-tab-panel {
+        display: block;
+      }
+      .sfp-tab-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+        font-size: 12px;
+        color: var(--primary-medium);
+        line-height: 1.3;
+      }
+      .sfp-tab-panel-title {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .sfp-tab-panel-title svg {
+        width: 13px;
+        height: 13px;
+        fill: currentColor;
+        flex-shrink: 0;
+      }
+      .sfp-tab-panel-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--primary-medium);
+        cursor: pointer;
+      }
+      .sfp-tab-panel-close:hover {
+        background: var(--primary-very-low);
+        color: var(--primary);
+      }
+      .sfp-tab-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+        gap: 6px;
+      }
+      .sfp-tab-grid-item {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        min-width: 0;
+        min-height: 32px;
+        padding: 6px 8px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: var(--primary-very-low);
+        color: var(--primary-medium);
+        cursor: pointer;
+        font-size: 12px;
+        line-height: 1.2;
+        text-align: center;
+        user-select: none;
+        transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+      }
+      .sfp-tab-grid-item svg {
+        width: 12px;
+        height: 12px;
+        fill: currentColor;
+        flex: 0 0 auto;
+      }
+      .sfp-tab-grid-item span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .sfp-tab-grid-item:hover {
+        background: var(--primary-low);
+        color: var(--primary);
+      }
+      .sfp-tab-grid-item.active {
+        background: var(--tertiary);
+        border-color: var(--tertiary);
+        color: var(--secondary);
+      }
+      .sfp-tab-grid-item.dragging {
+        opacity: 0.45;
+      }
+      .sfp-tab-grid-item.drop-target {
+        border-color: var(--tertiary);
+        box-shadow: inset 0 0 0 1px var(--tertiary);
       }
 
       /* ===== 筛选栏 ===== */
@@ -1974,34 +2156,89 @@
   document.addEventListener("click", () => {
     document.querySelectorAll(".sfp-custom-select.open").forEach((el) => el.classList.remove("open"));
     document.querySelectorAll(".sfp-settings-wrap.open").forEach((el) => el.classList.remove("open"));
+    document.querySelectorAll(".sfp-tab-shell.open").forEach((el) => el.classList.remove("open"));
   });
 
   // ========== 分类标签栏 ==========
   function _buildTabBar() {
+    const shell = document.createElement("div");
+    shell.className = "sfp-tab-shell";
+
     const bar = document.createElement("div");
     bar.className = "sfp-tab-bar";
+
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "sfp-tab-more-btn";
+    moreBtn.title = "展开板块 / 排序";
+    moreBtn.setAttribute("aria-label", "展开板块 / 排序");
+    moreBtn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M7 10a2 2 0 1 1 .01 0H7zm5 0a2 2 0 1 1 .01 0H12zm5 0a2 2 0 1 1 .01 0H17zM7 16a2 2 0 1 1 .01 0H7zm5 0a2 2 0 1 1 .01 0H12zm5 0a2 2 0 1 1 .01 0H17z"/></svg>`;
+
+    const panel = document.createElement("div");
+    panel.className = "sfp-tab-panel";
+    panel.innerHTML = `
+      <div class="sfp-tab-panel-header">
+        <span class="sfp-tab-panel-title">
+          <svg viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M10 4h10v2H10V4zM4 3.5h4v3H4v-3zM10 11h10v2H10v-2zM4 10.5h4v3H4v-3zM10 18h10v2H10v-2zM4 17.5h4v3H4v-3z"/></svg>
+          <span>拖动板块调整顺序</span>
+        </span>
+        <button type="button" class="sfp-tab-panel-close" title="关闭" aria-label="关闭">
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4 6.4 5z"/></svg>
+        </button>
+      </div>
+      <div class="sfp-tab-grid"></div>
+    `;
+    const grid = panel.querySelector(".sfp-tab-grid");
 
     // "全部" 标签
     const allTab = document.createElement("span");
     allTab.className = "sfp-tab-item" + (currentTab === "all" ? " active" : "");
     allTab.dataset.tab = "all";
-    allTab.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>全部`;
+    allTab.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg><span>全部</span>`;
     bar.appendChild(allTab);
 
+    const allGridItem = document.createElement("span");
+    allGridItem.className = "sfp-tab-grid-item" + (currentTab === "all" ? " active" : "");
+    allGridItem.dataset.tab = "all";
+    allGridItem.innerHTML = allTab.innerHTML;
+    grid.appendChild(allGridItem);
+
     // 各板块标签
-    TAB_CATEGORIES.forEach((cat) => {
-      const tabMeta = getCategoryTabMeta(cat);
+    _getOrderedTabCategories().forEach((cat) => {
       const tab = document.createElement("span");
       tab.className = "sfp-tab-item" + (currentTab === cat.tabId ? " active" : "");
       tab.dataset.tab = cat.tabId;
       tab.dataset.categoryId = cat.id;
-      tab.innerHTML = `${_svgIcon(tabMeta.icon)}${escapeHtml(tabMeta.name)}`;
+      tab.innerHTML = _buildCategoryTabContent(cat);
       bar.appendChild(tab);
+
+      const gridItem = document.createElement("span");
+      gridItem.className = "sfp-tab-grid-item" + (currentTab === cat.tabId ? " active" : "");
+      gridItem.draggable = true;
+      gridItem.dataset.tab = cat.tabId;
+      gridItem.dataset.categoryId = cat.id;
+      gridItem.title = getCategoryTabMeta(cat).name;
+      gridItem.innerHTML = _buildCategoryTabContent(cat);
+      grid.appendChild(gridItem);
     });
 
     // 事件代理 — 点击切换
-    bar.addEventListener("click", (e) => {
-      const tab = e.target.closest(".sfp-tab-item");
+    shell.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const closeBtn = e.target.closest(".sfp-tab-panel-close");
+      if (closeBtn) {
+        e.stopPropagation();
+        shell.classList.remove("open");
+        return;
+      }
+
+      if (e.target.closest(".sfp-tab-more-btn")) {
+        e.stopPropagation();
+        shell.classList.toggle("open");
+        return;
+      }
+
+      const tab = e.target.closest(".sfp-tab-item, .sfp-tab-grid-item");
       if (!tab) return;
 
       const tabId = tab.dataset.tab;
@@ -2014,12 +2251,68 @@
       _syncDefaultViewControls();
       _resetAutoLoadState();
 
-      bar.querySelectorAll(".sfp-tab-item").forEach((t) => {
+      shell.querySelectorAll(".sfp-tab-item, .sfp-tab-grid-item").forEach((t) => {
         t.classList.remove("active");
       });
-      tab.classList.add("active");
+      shell.querySelectorAll(`[data-tab="${_cssEscape(tabId)}"]`).forEach((t) => t.classList.add("active"));
+      if (tab.classList.contains("sfp-tab-grid-item")) {
+        shell.classList.remove("open");
+        shell.querySelector(`.sfp-tab-item[data-tab="${_cssEscape(tabId)}"]`)?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+          inline: "center",
+        });
+      }
 
       loadTopics();
+    });
+
+    moreBtn.addEventListener("mousedown", (e) => e.preventDefault());
+
+    let dragItem = null;
+    let tabOrderChanged = false;
+    grid.addEventListener("dragstart", (e) => {
+      const item = e.target.closest(".sfp-tab-grid-item[data-category-id]");
+      if (!item) return;
+      dragItem = item;
+      tabOrderChanged = false;
+      item.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", item.dataset.categoryId);
+    });
+
+    grid.addEventListener("dragover", (e) => {
+      if (!dragItem) return;
+      const target = e.target.closest(".sfp-tab-grid-item[data-category-id]");
+      if (!target || target === dragItem) return;
+      e.preventDefault();
+      grid.querySelectorAll(".drop-target").forEach((el) => el.classList.remove("drop-target"));
+      target.classList.add("drop-target");
+
+      const rect = target.getBoundingClientRect();
+      const before = e.clientY < rect.top + rect.height / 2;
+      const nextNode = before ? target : target.nextSibling;
+      if (dragItem !== nextNode) {
+        grid.insertBefore(dragItem, nextNode);
+        tabOrderChanged = true;
+      }
+    });
+
+    grid.addEventListener("drop", (e) => {
+      if (!dragItem) return;
+      e.preventDefault();
+    });
+
+    grid.addEventListener("dragend", () => {
+      if (dragItem) dragItem.classList.remove("dragging");
+      grid.querySelectorAll(".drop-target").forEach((el) => el.classList.remove("drop-target"));
+      if (tabOrderChanged) {
+        _saveTabOrderFromGrid(grid);
+        const newShell = _rerenderTabBar(shell);
+        newShell?.classList.add("open");
+      }
+      dragItem = null;
+      tabOrderChanged = false;
     });
 
     // 滚轮横向滚动
@@ -2030,7 +2323,17 @@
       }
     });
 
-    return bar;
+    shell.appendChild(bar);
+    shell.appendChild(moreBtn);
+    shell.appendChild(panel);
+    return shell;
+  }
+
+  function _rerenderTabBar(oldShell) {
+    if (!oldShell?.parentNode) return null;
+    const newShell = _buildTabBar();
+    oldShell.replaceWith(newShell);
+    return newShell;
   }
 
   // ========== 筛选栏 ==========
@@ -2108,15 +2411,8 @@
   }
 
   function _refreshCategoryTabs() {
-    const bar = feedContainer?.querySelector(".sfp-tab-bar");
-    if (!bar) return;
-
-    TAB_CATEGORIES.forEach((cat) => {
-      const tab = bar.querySelector(`.sfp-tab-item[data-category-id="${cat.id}"]`);
-      if (!tab) return;
-      const tabMeta = getCategoryTabMeta(cat);
-      tab.innerHTML = `${_svgIcon(tabMeta.icon)}${escapeHtml(tabMeta.name)}`;
-    });
+    const shell = feedContainer?.querySelector(".sfp-tab-shell");
+    if (shell) _rerenderTabBar(shell);
   }
 
   function _updateShowMoreHint() {
