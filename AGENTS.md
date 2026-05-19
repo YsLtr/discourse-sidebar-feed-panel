@@ -1,61 +1,46 @@
 # Discourse Sidebar Feed Panel — Active Handoff
 
-**Updated**: 2026-05-19 09:42:26 +08:00
+**Updated**: 2026-05-19 10:33:31 +08:00
 **Project root**: `C:/Users/28676/builds/discourse/userscript`
-**Current objective**: 下次处理“部分标签图标未显示，板块背景颜色未复刻”。
+**Current objective**: 下次“完全 review 脚本”，重点做代码审查、风险排查和回归测试建议，不要先重构。
 
 ## Current State
 
 - Main file: `discourse-sidebar-feed-panel.user.js`
 - Current branch: `master`
-- Current userscript version in file: `0.6.27`
-- Pending commit for this handoff: sidebar horizontal-scrollbar repair plus this `AGENTS.md` / `AGENTS_old.md` update.
+- Current userscript version in file: `0.6.29`
+- Pending commit this session: category/tag native badge rendering, tag icon persistent cache, and this handoff update.
 - Existing unrelated untracked/reference files remain: `CLAUDE.md`, `CLAUDE_old.md`, `LINUX DO Timeline-1.29.1.user.js`, `discourse-content-preserver.user.js`, `show-more-layout-test.html`, `展开.md`.
 
 ## Just Finished
 
-- Fixed the extra horizontal scrollbar at the bottom of the sidebar.
-- Diagnosis with `$agent-browser-cli` found `.sidebar-wrapper` had `overflow-x: auto` and `.sfp-resizer { right: -2px; width: 5px; }`, creating a 2px wrapper overflow.
-- Added feed-mode scoped wrapper rule: `.sidebar-wrapper:has(> .sidebar-container.sfp-feed-mode) { overflow-x: hidden !important; }`.
-- Restored `.sfp-feed-container` to `overflow: hidden`, matching the key intent of old commit `1eacf36129fb4c7b33b347bf1c46d222c0020c6c`.
-- Kept the previous fix for category tab scrolling to the end: feed children use `box-sizing: border-box`, and key wrappers/bars use `min-width: 0` / `max-width: 100%`.
-- User confirmed the scrollbar issue is solved.
-- Validation run this session:
-  - `node --check discourse-sidebar-feed-panel.user.js`
-  - `git diff --check -- discourse-sidebar-feed-panel.user.js`
-  - `$agent-browser-cli` measured `.sidebar-wrapper`, `.sfp-resizer`, `.sfp-tab-bar`, and feed wrappers on `https://linux.do/`.
+- Replaced hardcoded category badge rendering with Discourse-compatible `badge-category__wrapper` / `badge-category` markup.
+- Category metadata now loads from `/site.json`, so Lv1/Lv2/Lv3 subcategory colors use the site’s real `0088CC / 874EFE / FF0000` style instead of inheriting parent category colors.
+- Tag badges now render as native-compatible `discourse-tag box` markup.
+- Tag icons are discovered once from a hidden same-origin `/tags` iframe, then persisted with `GM_setValue("sfp_tag_style_cache_v1", ...)`; refreshes use the userscript cache and do not refetch `/tags` unless the user clears script storage or cache version changes.
+- Version bumped from `0.6.27` to `0.6.29`.
+
+## Validation Run
+
+- `node --check discourse-sidebar-feed-panel.user.js`
+- `git diff --check -- discourse-sidebar-feed-panel.user.js` passed with only the repo’s LF/CRLF warning.
+- `$agent-browser-cli` verified:
+  - `/site.json` has the expected subcategory colors and icons.
+  - Hidden iframe `/tags` can read 1169 tag anchors, 53 with icons.
+  - Generated samples produce native category background color and tag icon/style for `开发调优, Lv2` and `快问快答`.
 
 ## Constraints
 
 - Do not commit unrelated untracked files unless explicitly requested.
 - Sidebar minimum width remains `DEFAULT_WIDTH = 272`.
-- Do not claim a page refresh applies userscript changes; the user must reinstall/update the userscript for metadata/code changes.
-- Prefer Discourse/Horizon CSS variables and native category/tag DOM conventions where possible.
+- Do not claim a page refresh applies userscript code changes; the user must reinstall/update the userscript for metadata/code changes.
 - Preserve `0.6.21+` period behavior: `period=all` ranked orders stay on `/latest.json?order=...`; non-`all` ranked periods use `/top.json?period=...&order=...`.
-- Keep the intended internal horizontal scroll of `.sfp-tab-bar`; do not regress the just-fixed ability to scroll board filters to the end.
+- Keep the intended internal horizontal scroll of `.sfp-tab-bar`; do not regress board filter scrolling or the previous sidebar overflow fix.
+- Prefer Discourse/Horizon CSS variables and native category/tag DOM conventions over hardcoded approximations.
 
-## Next Issue
+## Next Steps
 
-User request for next session: “部分标签图标未显示，板块背景颜色未复刻”.
-
-Likely areas to inspect:
-
-- `CATEGORY_CONFIG` near the top of `discourse-sidebar-feed-panel.user.js`; some configured icon names may not exist in linux.do's loaded SVG sprite.
-- `getCategoryIcon(id)`, `getCategoryColor(id)`, `_buildTabBar()`, and `createTopicItem()`.
-- Current rendering uses `<svg><use href="#${cat.icon}"></use></svg>` in tabs and `<svg class="sfp-category-icon"><use href="#${catIcon}"></use></svg>` in topic category badges.
-- CSS around `.sfp-category-badge`, `.sfp-category-icon`, `.sfp-tab-item`, and native Discourse category badge classes.
-- Native Discourse/Horizon category badge DOM and styles may use more than a simple foreground icon color; compare background/border/text treatment.
-
-## Suggested Next Steps
-
-1. Use `$agent-browser-cli` on `https://linux.do/` to inspect native category/tag badges for affected boards and the userscript sidebar equivalents.
-2. Enumerate missing icon IDs: compare configured `CATEGORY_CONFIG[*].icon` against existing `svg symbol` / `use` targets in the live page.
-3. Inspect linux.do/Discourse source or live computed styles for category badge background color, border, text color, and icon color.
-4. Prefer reusing native Discourse category badge classes/markup or CSS variables over hardcoded approximations.
-5. Patch narrowly, bump userscript version, then run `node --check discourse-sidebar-feed-panel.user.js` and `git diff --check -- discourse-sidebar-feed-panel.user.js`.
-
-## Suggested Skills
-
-- `$agent-browser-cli` for live DOM/SVG symbol/computed-style inspection.
-- `/diagnose` if missing icons vary by route/theme/load timing.
-- `$handoff` when updating this active handoff again.
+1. Complete a review of `discourse-sidebar-feed-panel.user.js` in code-review mode: lead with bugs, regressions, maintainability risks, and missing tests.
+2. Pay special attention to the new metadata/cache code around category/tag helpers, hidden iframe lifecycle, `GM_getValue`/`GM_setValue` payload shape, and async rendering refresh.
+3. Re-check existing behavior: sidebar activation/deactivation, tab switching, sorting/period URLs, unread/read filtering, pagination, silent refresh, horizontal overflow, and tag/category rendering after reinstall.
+4. Suggested skills: `$agent-browser-cli` for live DOM/API verification; `/diagnose` only if review finds a reproducible bug; `$handoff` after the review session.

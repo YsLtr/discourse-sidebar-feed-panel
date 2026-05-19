@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.27
+// @version      0.6.29
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -30,6 +30,7 @@
   const AUTO_SILENT_REFRESH_KEY = "sfp_auto_silent_refresh";
   const AUTO_REFRESH_ENABLED_KEY = "sfp_auto_refresh_enabled";
   const AUTO_REFRESH_INTERVAL_KEY = "sfp_auto_refresh_interval";
+  const TAG_STYLE_CACHE_KEY = "sfp_tag_style_cache_v1";
 
   // ========== 常量 ==========
   const DEFAULT_WIDTH = 272;
@@ -39,6 +40,7 @@
   const AUTO_LOAD_RATE_WINDOW_MS = 5000;
   const AUTO_LOAD_MAX_REQUESTS_PER_WINDOW = 3;
   const AUTO_LOAD_MAX_EMPTY_FILTER_RESULTS = 3;
+  const TAG_STYLE_CACHE_VERSION = 1;
 
   // ========== 全局状态 ==========
   let feedModeEnabled = GM_getValue(STATE_KEY, false);
@@ -79,6 +81,10 @@
   let sidebarNewMessageBusCallback = null;
   let sidebarIncomingApplyQueued = false;
   let routeDebounceTimer = null;
+  let categoryMetaPromise = null;
+  let categoryMetaLoaded = false;
+  let tagStylePromise = null;
+  let tagStyleLoaded = false;
   let toggleBtn = null;
   let feedContainer = null;
   let feedScrollEl = null;
@@ -133,6 +139,10 @@
     const div = document.createElement("div");
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  function escapeAttr(text) {
+    return escapeHtml(text).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   function formatRelativeTime(dateStr) {
@@ -251,9 +261,295 @@
     .filter(([, v]) => v.tabId)
     .map(([id, v]) => ({ id: Number(id), ...v }));
 
-  function getCategoryName(id) { return CATEGORY_CONFIG[id]?.name || ""; }
-  function getCategoryColor(id) { return CATEGORY_CONFIG[id]?.color || "#888"; }
-  function getCategoryIcon(id) { return CATEGORY_CONFIG[id]?.icon || "folder"; }
+  const categoryMetaById = new Map();
+  const tagStyleByKey = new Map();
+  const SAFE_ICON_RE = /^[A-Za-z0-9_-]+$/;
+  const SAFE_COLOR_RE = /^#?[A-Fa-f0-9]{3,8}$/;
+
+  function _normalizeHexColor(color, fallback = "888") {
+    if (!color) return fallback;
+    const raw = String(color).trim();
+    if (!SAFE_COLOR_RE.test(raw)) return fallback;
+    return raw.startsWith("#") ? raw.slice(1) : raw;
+  }
+
+  function _isSafeIconName(icon) {
+    return typeof icon === "string" && SAFE_ICON_RE.test(icon);
+  }
+
+  function _safeIconName(icon) {
+    return _isSafeIconName(icon) ? icon : "";
+  }
+
+  function _safeCategoryStyleType(styleType, hasIcon) {
+    return ["icon", "emoji", "square"].includes(styleType)
+      ? styleType
+      : (hasIcon ? "icon" : "square");
+  }
+
+  function _svgIcon(icon, extraClass = "") {
+    const safeIcon = _safeIconName(icon);
+    if (!safeIcon) return "";
+    const className = `fa d-icon d-icon-${safeIcon} svg-icon fa-width-auto svg-string${extraClass ? ` ${extraClass}` : ""}`;
+    return `<svg class="${className}" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#${safeIcon}"></use></svg>`;
+  }
+
+  function _categoryFallbackMeta(id) {
+    const config = CATEGORY_CONFIG[id];
+    if (!config) return null;
+    const parent = config.parent_category_id ? _getCategoryMeta(config.parent_category_id) : null;
+    const icon = _safeIconName(config.icon || "folder");
+    return {
+      id: Number(id),
+      name: config.name || "",
+      color: _normalizeHexColor(config.color, "888"),
+      text_color: _normalizeHexColor(config.text_color, "FFFFFF"),
+      icon,
+      style_type: _safeCategoryStyleType(config.style_type, !!icon),
+      slug: config.tabId || "",
+      parent_category_id: config.parent_category_id || null,
+      parent_color: parent?.color || null,
+      parent_text_color: parent?.text_color || null,
+      read_restricted: !!config.read_restricted,
+      description_text: "",
+      description_excerpt: "",
+    };
+  }
+
+  function _getCategoryMeta(id) {
+    const numericId = Number(id);
+    if (!Number.isFinite(numericId)) return null;
+    return categoryMetaById.get(numericId) || _categoryFallbackMeta(numericId);
+  }
+
+  function getCategoryTabMeta(cat) {
+    const meta = _getCategoryMeta(cat.id);
+    return {
+      ...cat,
+      name: meta?.name || cat.name,
+      icon: meta?.icon || cat.icon,
+      color: meta?.color ? `#${meta.color}` : cat.color,
+    };
+  }
+
+  async function loadCategoryMetadata() {
+    if (categoryMetaLoaded) return;
+    if (categoryMetaPromise) return categoryMetaPromise;
+
+    categoryMetaPromise = (async () => {
+      try {
+        const resp = await fetch("/site.json", { headers: { "X-CSRF-Token": getCsrfToken() } });
+        if (!resp.ok) throw new Error(`site.json ${resp.status}`);
+        const site = await resp.json();
+        const categories = Array.isArray(site?.categories) ? site.categories : [];
+        const rawById = new Map(categories.map((cat) => [Number(cat.id), cat]));
+
+        categories.forEach((cat) => {
+          const id = Number(cat.id);
+          if (!Number.isFinite(id)) return;
+          const parent = cat.parent_category_id ? rawById.get(Number(cat.parent_category_id)) : null;
+          const fallback = CATEGORY_CONFIG[id] || {};
+          const icon = _safeIconName(cat.icon || fallback.icon || parent?.icon || "");
+          categoryMetaById.set(id, {
+            id,
+            name: cat.name || fallback.name || "",
+            color: _normalizeHexColor(cat.color || fallback.color, "888"),
+            text_color: _normalizeHexColor(cat.text_color || fallback.text_color, "FFFFFF"),
+            icon,
+            style_type: _safeCategoryStyleType(cat.style_type || fallback.style_type, !!icon),
+            slug: cat.slug || fallback.tabId || "",
+            parent_category_id: cat.parent_category_id || null,
+            parent_color: parent ? _normalizeHexColor(parent.color, "888") : null,
+            parent_text_color: parent ? _normalizeHexColor(parent.text_color, "FFFFFF") : null,
+            read_restricted: !!cat.read_restricted,
+            description_text: cat.description_text || cat.description_excerpt || cat.description || "",
+            description_excerpt: cat.description_excerpt || cat.description_text || cat.description || "",
+          });
+        });
+
+        categoryMetaLoaded = true;
+      } catch (e) {
+        console.warn("[SFP] load category metadata failed:", e);
+      } finally {
+        categoryMetaPromise = null;
+      }
+    })();
+
+    return categoryMetaPromise;
+  }
+
+  function _tagIndexKeys(tag) {
+    const keys = [];
+    const add = (value) => {
+      if (value === null || value === undefined) return;
+      const key = String(value).trim().toLowerCase();
+      if (key && !keys.includes(key)) keys.push(key);
+    };
+    if (typeof tag === "string") {
+      add(tag);
+      return keys;
+    }
+    add(tag?.name);
+    add(tag?.slug);
+    add(tag?.text);
+    add(tag?.id);
+    return keys;
+  }
+
+  function _tagDisplayName(tag) {
+    return typeof tag === "string" ? tag : (tag?.name || tag?.text || tag?.slug || "");
+  }
+
+  function _getTagStyle(tag) {
+    for (const key of _tagIndexKeys(tag)) {
+      const style = tagStyleByKey.get(key);
+      if (style) return style;
+    }
+    return null;
+  }
+
+  function _sanitizeTagStyle(styleText) {
+    const pairs = [];
+    String(styleText || "").split(";").forEach((part) => {
+      const [rawName, rawValue] = part.split(":");
+      const name = rawName?.trim();
+      const value = rawValue?.trim();
+      if ((name === "--color1" || name === "--color2") && /^#[A-Fa-f0-9]{3,8}$/.test(value)) {
+        pairs.push(`${name}: ${value}`);
+      }
+    });
+    return pairs.join("; ");
+  }
+
+  function _cacheTagStyle(keys, style) {
+    keys.forEach((key) => {
+      const normalized = String(key || "").trim().toLowerCase();
+      if (normalized) tagStyleByKey.set(normalized, style);
+    });
+  }
+
+  function _loadTagStyleCache() {
+    if (tagStyleByKey.size > 0) return true;
+
+    try {
+      const cache = GM_getValue(TAG_STYLE_CACHE_KEY, null);
+      if (!cache || cache.version !== TAG_STYLE_CACHE_VERSION || !Array.isArray(cache.entries)) {
+        return false;
+      }
+
+      cache.entries.forEach(([key, style]) => {
+        if (!key || !style || typeof style !== "object") return;
+        const icon = _safeIconName(style.icon || "");
+        const cssText = _sanitizeTagStyle(style.cssText || "");
+        if (!icon && !cssText) return;
+        tagStyleByKey.set(String(key), {
+          icon,
+          cssText,
+          hasIcon: !!icon,
+        });
+      });
+
+      return tagStyleByKey.size > 0;
+    } catch (e) {
+      console.warn("[SFP] load tag style cache failed:", e);
+      return false;
+    }
+  }
+
+  function _saveTagStyleCache() {
+    if (tagStyleByKey.size === 0) return;
+
+    try {
+      GM_setValue(TAG_STYLE_CACHE_KEY, {
+        version: TAG_STYLE_CACHE_VERSION,
+        savedAt: Date.now(),
+        entries: Array.from(tagStyleByKey.entries()),
+      });
+    } catch (e) {
+      console.warn("[SFP] save tag style cache failed:", e);
+    }
+  }
+
+  function _extractTagStylesFromDocument(doc) {
+    const anchors = Array.from(doc.querySelectorAll("a.discourse-tag[data-tag-name]"));
+    anchors.forEach((anchor) => {
+      const use = anchor.querySelector("svg use");
+      const icon = _safeIconName((use?.getAttribute("href") || use?.getAttribute("xlink:href") || "").replace(/^#/, ""));
+      const style = {
+        icon,
+        cssText: _sanitizeTagStyle(anchor.getAttribute("style") || ""),
+        hasIcon: !!icon,
+      };
+      if (!style.hasIcon && !style.cssText) return;
+
+      const hrefParts = (anchor.getAttribute("href") || "").split("/").filter(Boolean);
+      _cacheTagStyle([
+        anchor.dataset.tagName,
+        anchor.textContent,
+        hrefParts[1],
+        hrefParts[2],
+      ], style);
+    });
+  }
+
+  function _waitForIframeTags(iframe, timeoutMs = 12000) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const tick = () => {
+        let doc = null;
+        try {
+          doc = iframe.contentDocument;
+          if (doc && doc.querySelector("a.discourse-tag[data-tag-name]")) {
+            resolve(doc);
+            return;
+          }
+        } catch (e) {
+          resolve(null);
+          return;
+        }
+        if (Date.now() - start >= timeoutMs) {
+          resolve(doc);
+          return;
+        }
+        setTimeout(tick, 250);
+      };
+      tick();
+    });
+  }
+
+  async function loadTagStyleIndex() {
+    if (tagStyleLoaded) return;
+    if (tagStylePromise) return tagStylePromise;
+
+    tagStylePromise = (async () => {
+      let iframe = null;
+      try {
+        if (_loadTagStyleCache()) {
+          tagStyleLoaded = true;
+          return;
+        }
+
+        _extractTagStylesFromDocument(document);
+        iframe = document.createElement("iframe");
+        iframe.src = "/tags";
+        iframe.setAttribute("aria-hidden", "true");
+        iframe.style.cssText = "position:absolute;width:1px;height:1px;left:-10000px;top:-10000px;border:0;visibility:hidden;pointer-events:none;";
+        document.body.appendChild(iframe);
+        const doc = await _waitForIframeTags(iframe);
+        if (doc) _extractTagStylesFromDocument(doc);
+
+        _saveTagStyleCache();
+        tagStyleLoaded = true;
+      } catch (e) {
+        console.warn("[SFP] load tag style index failed:", e);
+      } finally {
+        if (iframe) iframe.remove();
+        tagStylePromise = null;
+      }
+    })();
+
+    return tagStylePromise;
+  }
 
   // ========== CSS 注入 ==========
   function injectStyles() {
@@ -922,25 +1218,48 @@
         margin-top: 5px;
       }
       .sfp-topic-item .sfp-category-badge {
+        --badge-category-bg: light-dark(
+          oklch(from var(--category-badge-color) 97% calc(c * 0.3) h),
+          oklch(from var(--category-badge-color) 45% calc(c * 0.5) h)
+        );
+        --badge-category-text: light-dark(
+          oklch(from var(--category-badge-color) 35% calc(c * 0.6) h),
+          oklch(from var(--category-badge-color) 95% calc(c * 0.2) h)
+        );
         display: inline-flex;
         align-items: center;
-        gap: 4px;
+        gap: 0.33em;
         font-size: 11px;
         padding: 2px 6px;
-        border-radius: 3px;
-        background: var(--primary-very-low, #f0f0f0);
-        color: var(--primary-medium, #666);
+        border-radius: var(--d-border-radius, 4px);
+        background-color: var(--badge-category-bg, var(--primary-very-low, #f0f0f0));
+        color: var(--badge-category-text, var(--primary-medium, #666));
         flex-shrink: 0;
         max-width: 120px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .sfp-topic-item .sfp-category-icon {
-        width: 12px;
-        height: 12px;
-        fill: var(--category-color, #888);
+      .sfp-topic-item .sfp-category-badge .badge-category {
+        min-width: 0;
+        align-items: center;
+      }
+      .sfp-topic-item .sfp-category-badge .badge-category__name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--badge-category-text, var(--primary-medium, #666));
+      }
+      .sfp-topic-item .sfp-category-badge .d-icon {
+        width: 0.9em;
+        height: 0.9em;
         flex-shrink: 0;
+      }
+      @supports not (color: light-dark(tan, tan)) {
+        .sfp-topic-item .sfp-category-badge {
+          --badge-category-bg: color-mix(in srgb, var(--category-badge-color) 16%, transparent);
+          --badge-category-text: var(--primary-high, #444);
+        }
       }
 
       /* 标签 */
@@ -952,10 +1271,17 @@
       .sfp-topic-item .sfp-tag {
         font-size: 11px;
         padding: 2px 6px;
-        border-radius: 3px;
-        background: var(--primary-very-low, #f0f0f0);
-        color: var(--primary-medium, #666);
+        border-radius: var(--d-border-radius, 4px);
         line-height: 1.4;
+        max-width: 96px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex-shrink: 1;
+      }
+      .sfp-topic-item .sfp-tag .tag-icon .d-icon {
+        width: 0.9em;
+        height: 0.9em;
       }
 
       /* 统计行 */
@@ -1518,11 +1844,12 @@
 
     // 各板块标签
     TAB_CATEGORIES.forEach((cat) => {
+      const tabMeta = getCategoryTabMeta(cat);
       const tab = document.createElement("span");
       tab.className = "sfp-tab-item" + (currentTab === cat.tabId ? " active" : "");
       tab.dataset.tab = cat.tabId;
       tab.dataset.categoryId = cat.id;
-      tab.innerHTML = `<svg><use href="#${cat.icon}"></use></svg>${escapeHtml(cat.name)}`;
+      tab.innerHTML = `${_svgIcon(tabMeta.icon)}${escapeHtml(tabMeta.name)}`;
       bar.appendChild(tab);
     });
 
@@ -1632,6 +1959,18 @@
       currentTab = "all";
       currentCategoryId = null;
     }
+  }
+
+  function _refreshCategoryTabs() {
+    const bar = feedContainer?.querySelector(".sfp-tab-bar");
+    if (!bar) return;
+
+    TAB_CATEGORIES.forEach((cat) => {
+      const tab = bar.querySelector(`.sfp-tab-item[data-category-id="${cat.id}"]`);
+      if (!tab) return;
+      const tabMeta = getCategoryTabMeta(cat);
+      tab.innerHTML = `${_svgIcon(tabMeta.icon)}${escapeHtml(tabMeta.name)}`;
+    });
   }
 
   function _updateShowMoreHint() {
@@ -1904,6 +2243,15 @@
     return period !== "all" && _needsPeriodForUrl(order);
   }
 
+  function _startTagStyleIndexLoad() {
+    if (tagStyleLoaded || tagStylePromise) return;
+    loadTagStyleIndex().then(() => {
+      if (feedModeEnabled && feedListEl && allTopics.length > 0) {
+        renderTopics();
+      }
+    });
+  }
+
   async function loadTopics() {
     if (isLoading) {
       _pendingReload = true;
@@ -1924,6 +2272,10 @@
     }
 
     try {
+      _startTagStyleIndexLoad();
+      await loadCategoryMetadata();
+      _refreshCategoryTabs();
+
       const data = await fetchFeedTopics(currentOrder, currentPeriod, 0);
       _processUsers(data);
 
@@ -1975,6 +2327,7 @@
     _showLoadMoreSpinner();
 
     try {
+      await loadCategoryMetadata();
       const data = await fetchFeedTopics(currentOrder, currentPeriod, currentPage);
       _processUsers(data);
 
@@ -2033,6 +2386,7 @@
 
     isRefreshing = true;
     try {
+      await loadCategoryMetadata();
       const data = await fetchFeedTopics(currentOrder, currentPeriod, 0);
       _processUsers(data);
 
@@ -2081,6 +2435,7 @@
 
     isRefreshing = true;
     try {
+      await loadCategoryMetadata();
       const data = await fetchFeedTopicsByIds(incomingTopicIds);
       if (!data?.topic_list?.topics) return;
       _processUsers(data);
@@ -2237,6 +2592,51 @@
     }
   }
 
+  function _buildCategoryBadge(categoryId) {
+    const meta = _getCategoryMeta(categoryId);
+    if (!meta?.name) return "";
+
+    const styleParts = [
+      `--category-badge-color: #${_normalizeHexColor(meta.color, "888")}`,
+      `--category-badge-text-color: #${_normalizeHexColor(meta.text_color, "FFFFFF")}`,
+    ];
+    if (meta.parent_category_id && meta.parent_color) {
+      styleParts.push(`--parent-category-badge-color: #${_normalizeHexColor(meta.parent_color, "888")}`);
+      styleParts.push(`--parent-category-badge-text-color: #${_normalizeHexColor(meta.parent_text_color, "FFFFFF")}`);
+    }
+
+    const styleType = _safeCategoryStyleType(meta.style_type, !!meta.icon);
+    const categoryClasses = ["badge-category"];
+    if (meta.read_restricted) categoryClasses.push("restricted");
+    if (meta.parent_category_id) categoryClasses.push("--has-parent");
+    categoryClasses.push(`--style-${styleType}`);
+
+    const dataParent = meta.parent_category_id
+      ? ` data-parent-category-id="${Number(meta.parent_category_id)}"`
+      : "";
+    const title = meta.description_text || meta.description_excerpt || "";
+    const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
+    const iconHtml = styleType === "icon" && meta.icon ? _svgIcon(meta.icon) : "";
+    const lockHtml = meta.read_restricted ? _svgIcon("lock") : "";
+
+    return `<span class="badge-category__wrapper sfp-category-badge" style="${styleParts.join("; ")}"><span data-category-id="${Number(meta.id)}"${dataParent} data-drop-close="true" class="${categoryClasses.join(" ")}"${titleAttr}>${iconHtml}${lockHtml}<span class="badge-category__name" dir="auto">${escapeHtml(meta.name)}</span></span></span>`;
+  }
+
+  function _buildTagBadge(tag) {
+    const tagName = _tagDisplayName(tag);
+    if (!tagName) return "";
+
+    const tagStyle = _getTagStyle(tag);
+    const classes = ["discourse-tag", "box", "sfp-tag"];
+    if (tagStyle?.hasIcon) classes.push("discourse-tag--tag-icons-style");
+    const styleAttr = tagStyle?.cssText ? ` style="${tagStyle.cssText}"` : "";
+    const iconHtml = tagStyle?.hasIcon
+      ? `<span class="tag-icon">${_svgIcon(tagStyle.icon)}</span>`
+      : "";
+
+    return `<span class="${classes.join(" ")}"${styleAttr}>${iconHtml}${escapeHtml(tagName)}</span>`;
+  }
+
   // ========== 创建帖子项 ==========
   function createTopicItem(topic, isNew = false) {
     const item = document.createElement("div");
@@ -2303,19 +2703,13 @@
       : "";
 
     // 分类
-    const catName = getCategoryName(topic.category_id);
-    const catColor = getCategoryColor(topic.category_id);
-    const catIcon = getCategoryIcon(topic.category_id);
-    const categoryHtml = catName
-      ? `<span class="sfp-category-badge" style="--category-color:${catColor}"><svg class="sfp-category-icon"><use href="#${catIcon}"></use></svg>${escapeHtml(catName)}</span>`
-      : "";
+    const categoryHtml = _buildCategoryBadge(topic.category_id);
 
     // 标签
     let tagsHtml = "";
     if (topic.tags && topic.tags.length > 0) {
       const tagItems = topic.tags.slice(0, 3).map((tag) => {
-        const tagName = typeof tag === "string" ? tag : tag.name;
-        return `<span class="sfp-tag">${escapeHtml(tagName)}</span>`;
+        return _buildTagBadge(tag);
       }).join("");
       tagsHtml = `<span class="sfp-topic-tags">${tagItems}</span>`;
     }
