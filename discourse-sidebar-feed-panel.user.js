@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.37
+// @version      0.6.39
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -97,6 +97,8 @@
   let feedHeaderEl = null;
   let resizerEl = null;
   let isResizing = false;
+  let originalSidebarWidthBeforeFeed = null;
+  let widthAnimationTimer = null;
 
   const isSmallScreen = () => window.innerWidth <= 768;
 
@@ -631,6 +633,11 @@
         overflow: hidden;
         max-width: 100%;
       }
+      .sidebar-wrapper.sfp-width-animating,
+      .sidebar-container.sfp-width-animating,
+      #d-sidebar.sfp-width-animating {
+        transition: width 220ms ease, max-width 220ms ease;
+      }
 
       /* ===== 拖拽调整宽度 ===== */
       .sfp-resizer {
@@ -1037,6 +1044,29 @@
         overflow-y: auto;
         overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
+        --scrollbarBg: transparent;
+        --scrollbarThumbBg: var(--d-selected, var(--token-color-surface-hovered));
+        --scrollbarWidth: var(--space-2, 0.5em);
+        scrollbar-color: transparent var(--scrollbarBg);
+        transition: scrollbar-color 0.25s ease-in-out;
+        transition-delay: 0.5s;
+      }
+      .sfp-feed-scroll::-webkit-scrollbar {
+        width: var(--scrollbarWidth);
+      }
+      .sfp-feed-scroll::-webkit-scrollbar-thumb {
+        background-color: transparent;
+        border-radius: calc(var(--scrollbarWidth) / 2);
+      }
+      .sfp-feed-scroll::-webkit-scrollbar-track {
+        background-color: transparent;
+      }
+      .sfp-feed-scroll:hover {
+        scrollbar-color: var(--scrollbarThumbBg) var(--scrollbarBg);
+        transition-delay: 0s;
+      }
+      .sfp-feed-scroll:hover::-webkit-scrollbar-thumb {
+        background-color: var(--scrollbarThumbBg);
       }
       .sfp-content-wrapper {
         position: relative;
@@ -1483,6 +1513,50 @@
     document.documentElement.style.setProperty("--d-sidebar-width", clampedWidth + "px");
   }
 
+  function getSidebarWidthTransitionElements(sidebar) {
+    const wrapper = sidebar?.classList?.contains("sidebar-wrapper")
+      ? sidebar
+      : sidebar?.closest?.(".sidebar-wrapper");
+    return [sidebar, wrapper].filter(Boolean);
+  }
+
+  function setSidebarWidthForAnimation(sidebar, width, { enforceMin = true } = {}) {
+    const minWidth = enforceMin ? getMinSidebarWidth() : 0;
+    const clampedWidth = Math.min(MAX_WIDTH, Math.max(minWidth, width));
+    sidebar.style.setProperty("width", clampedWidth + "px", "important");
+    document.documentElement.style.setProperty("--d-sidebar-width", clampedWidth + "px");
+  }
+
+  function animateSidebarWidth(targetWidth, { cleanupAfter = false, enforceMin = true } = {}) {
+    const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+    if (!sidebar) return;
+
+    if (widthAnimationTimer) {
+      window.clearTimeout(widthAnimationTimer);
+      widthAnimationTimer = null;
+    }
+
+    const startWidth = sidebar.getBoundingClientRect().width || DEFAULT_WIDTH;
+    const minWidth = enforceMin ? getMinSidebarWidth() : 0;
+    const clampedTarget = Math.min(MAX_WIDTH, Math.max(minWidth, targetWidth));
+    const transitionEls = getSidebarWidthTransitionElements(sidebar);
+
+    setSidebarWidthForAnimation(sidebar, startWidth, { enforceMin: false });
+    transitionEls.forEach((el) => el.classList.add("sfp-width-animating"));
+
+    window.requestAnimationFrame(() => {
+      setSidebarWidthForAnimation(sidebar, clampedTarget, { enforceMin });
+
+      widthAnimationTimer = window.setTimeout(() => {
+        widthAnimationTimer = null;
+        transitionEls.forEach((el) => el.classList.remove("sfp-width-animating"));
+        if (cleanupAfter) {
+          restoreSidebarWidth();
+        }
+      }, 260);
+    });
+  }
+
   function restoreSidebarWidth() {
     const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
     if (sidebar) {
@@ -1515,6 +1589,7 @@
       const startX = e.clientX;
       const startWidth = sidebar.offsetWidth;
       resizerEl.classList.add("sfp-resizing");
+      getSidebarWidthTransitionElements(sidebar).forEach((el) => el.classList.remove("sfp-width-animating"));
       document.body.style.cursor = "ew-resize";
       document.body.style.userSelect = "none";
 
@@ -1545,6 +1620,9 @@
       resizerEl.remove();
       resizerEl = null;
     }
+
+    const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+    sidebar?.querySelectorAll(":scope > .sfp-resizer").forEach((el) => el.remove());
   }
 
   // ========== 激活 / 停用 ==========
@@ -1552,9 +1630,13 @@
     const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
     if (!sidebar) return;
 
+    if (!sidebar.classList.contains("sfp-feed-mode") || originalSidebarWidthBeforeFeed === null) {
+      originalSidebarWidthBeforeFeed = sidebar.getBoundingClientRect().width || DEFAULT_WIDTH;
+    }
+
     if (feedContainer && sidebar.contains(feedContainer)) {
       sidebar.classList.add("sfp-feed-mode");
-      applySidebarWidth(sfpSidebarWidth);
+      animateSidebarWidth(sfpSidebarWidth);
       setupResizer();
       _syncDefaultViewControls();
       _updateShowMoreHint();
@@ -1602,7 +1684,7 @@
     sidebar.appendChild(feedContainer);
 
     sidebar.classList.add("sfp-feed-mode");
-    applySidebarWidth(sfpSidebarWidth);
+    animateSidebarWidth(sfpSidebarWidth);
     setupResizer();
 
     // 恢复当前 tab 筛选的分类
@@ -1642,6 +1724,9 @@
     _resetAutoLoadState();
 
     sidebar.classList.remove("sfp-feed-mode");
+    removeResizer();
+    animateSidebarWidth(originalSidebarWidthBeforeFeed || DEFAULT_WIDTH, { cleanupAfter: true, enforceMin: false });
+    originalSidebarWidthBeforeFeed = null;
   }
 
   // ========== Header 控件 ==========
@@ -3061,16 +3146,15 @@
     injectStyles();
 
     waitForEmber(() => {
-      // 始终应用保存的宽度，避免切换 feed 模式时宽度跳动
-      applySidebarWidth(sfpSidebarWidth);
-      setupResizer();
-
       createToggle();
 
       RouteWatcher.start();
 
       if (feedModeEnabled) {
         setTimeout(() => activateFeed(), 300);
+      } else {
+        removeResizer();
+        restoreSidebarWidth();
       }
     });
   }
