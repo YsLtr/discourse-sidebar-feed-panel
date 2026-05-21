@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.46
+// @version      0.6.49
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -104,6 +104,7 @@
   let isResizing = false;
   let originalSidebarWidthBeforeFeed = null;
   let widthAnimationTimer = null;
+  const topicHighlightTimers = new WeakMap();
 
   // ========== 工具函数 ==========
   function getCsrfToken() {
@@ -1344,6 +1345,13 @@
       }
       .sfp-topic-item.sfp-pinned {
         /* 只保留置顶 badge 标记，不加背景色 */
+      }
+      .sfp-topic-item.sfp-filter-mismatch {
+        opacity: 0.48;
+        filter: grayscale(0.85);
+      }
+      .sfp-topic-item.sfp-topic-unavailable .sfp-topic-title-line {
+        text-decoration: line-through;
       }
       .sfp-topic-item.sfp-new-highlight {
         --sfp-new-highlight-color: var(
@@ -2712,7 +2720,7 @@
     sidebarIncomingApplyQueued = true;
     Promise.resolve().then(async () => {
       sidebarIncomingApplyQueued = false;
-      await _applySidebarIncomingTopics({ requireDefaultView: true, logPrefix: "auto silent refresh" });
+      await _applySidebarIncomingTopics({ requireDefaultView: true, logPrefix: "auto silent refresh", preserveViewport: true });
     });
   }
 
@@ -3042,7 +3050,58 @@
     });
   }
 
-  async function _refreshCurrentView({ requireDefaultView = false, logPrefix = "refresh" } = {}) {
+  function _captureFeedScrollAnchor() {
+    if (!feedScrollEl || !feedListEl) return null;
+    if (feedScrollEl.scrollTop <= 1) return null;
+
+    const scrollRect = feedScrollEl.getBoundingClientRect();
+    const items = feedListEl.querySelectorAll(".sfp-topic-item[data-topic-id]");
+    for (const item of items) {
+      const itemRect = item.getBoundingClientRect();
+      if (itemRect.bottom > scrollRect.top + 1) {
+        return {
+          topicId: item.dataset.topicId,
+          offsetTop: itemRect.top - scrollRect.top,
+          scrollTop: feedScrollEl.scrollTop,
+          scrollHeight: feedScrollEl.scrollHeight,
+        };
+      }
+    }
+
+    return {
+      topicId: null,
+      offsetTop: 0,
+      scrollTop: feedScrollEl.scrollTop,
+      scrollHeight: feedScrollEl.scrollHeight,
+    };
+  }
+
+  function _restoreFeedScrollAnchor(anchor) {
+    if (!anchor || !feedScrollEl || !feedListEl) return;
+
+    const restore = () => {
+      if (!feedScrollEl || !feedListEl) return;
+
+      if (anchor.topicId) {
+        const item = feedListEl.querySelector(`.sfp-topic-item[data-topic-id="${anchor.topicId}"]`);
+        if (item) {
+          const scrollRect = feedScrollEl.getBoundingClientRect();
+          const itemRect = item.getBoundingClientRect();
+          feedScrollEl.scrollTop += itemRect.top - scrollRect.top - anchor.offsetTop;
+          _updateBackTopButton();
+          return;
+        }
+      }
+
+      feedScrollEl.scrollTop = anchor.scrollTop + (feedScrollEl.scrollHeight - anchor.scrollHeight);
+      _updateBackTopButton();
+    };
+
+    restore();
+    requestAnimationFrame(restore);
+  }
+
+  async function _refreshCurrentView({ requireDefaultView = false, logPrefix = "refresh", preserveViewport = false } = {}) {
     if (isLoading || isLoadingMore || isRefreshing) return false;
     if (requireDefaultView && !_isDefaultFeedView()) return false;
     if (!feedListEl) return false;
@@ -3061,8 +3120,8 @@
 
       const freshTopics = data.topic_list.topics;
       const freshMap = new Map(freshTopics.map((t) => [t.id, t]));
-      const newTopicIds = freshTopics
-        .filter((topic) => !loadedTopicIds.has(topic.id))
+      const refreshHighlightTopicIds = freshTopics
+        .filter((topic) => !loadedTopicIds.has(topic.id) || sidebarIncomingTopicIdSet.has(Number(topic.id)))
         .map((topic) => topic.id);
 
       freshTopics.forEach((topic) => loadedTopicIds.add(topic.id));
@@ -3071,10 +3130,12 @@
       allTopics = freshTopics.concat(existingTail);
       hasMorePages = !!data.topic_list.more_topics_url;
 
-      renderTopics(newTopicIds);
+      const scrollAnchor = _captureFeedScrollAnchor();
+      renderTopics(refreshHighlightTopicIds, { preserveProtected: preserveViewport });
       _removeSidebarIncomingTopicIds(freshTopics.map((topic) => topic.id));
 
       _updateShowMoreHint();
+      _restoreFeedScrollAnchor(scrollAnchor);
       return true;
     } catch (e) {
       console.warn(`[SFP] ${logPrefix} error:`, e);
@@ -3090,7 +3151,7 @@
 
   // ========== 静默刷新 ==========
   // 仅在最新活动视图（全部板块 + 最新活动 + 全部筛选）时按 incoming 事件启用
-  async function _applySidebarIncomingTopics({ requireDefaultView = false, logPrefix = "incoming", queueIfBusy = true } = {}) {
+  async function _applySidebarIncomingTopics({ requireDefaultView = false, logPrefix = "incoming", queueIfBusy = true, preserveViewport = false } = {}) {
     if (isLoading || isLoadingMore || isRefreshing) {
       if (queueIfBusy) sidebarIncomingApplyQueued = true;
       return;
@@ -3123,9 +3184,11 @@
       allTopics = incomingTopics.concat(allTopics.filter((topic) => !incomingMap.has(topic.id)));
       hasMorePages = hasMorePages || incomingTopics.length > 0;
 
-      renderTopics(Array.from(incomingIdSet));
+      const scrollAnchor = _captureFeedScrollAnchor();
+      renderTopics(Array.from(incomingIdSet), { preserveProtected: preserveViewport });
       _removeSidebarIncomingTopicIds(incomingTopicIds);
       _updateShowMoreHint();
+      _restoreFeedScrollAnchor(scrollAnchor);
     } catch (e) {
       console.warn(`[SFP] ${logPrefix} error:`, e);
     } finally {
@@ -3152,6 +3215,7 @@
             requireDefaultView: true,
             logPrefix: "auto silent refresh interval",
             queueIfBusy: false,
+            preserveViewport: true,
           });
         }
       }
@@ -3183,7 +3247,7 @@
       if (autoRefreshSeconds <= 0) {
         _resetAutoRefreshCountdown();
         if (feedModeEnabled && !isLoading && !isLoadingMore) {
-          _refreshCurrentView({ logPrefix: "auto refresh" });
+          _refreshCurrentView({ logPrefix: "auto refresh", preserveViewport: true });
         }
       }
     }, 1000);
@@ -3202,9 +3266,173 @@
     }
   }
 
+  function _getVisibleOrHoveredTopicItems() {
+    if (!feedScrollEl || !feedListEl) return [];
+    if (feedScrollEl.scrollTop <= 1) return [];
+
+    const scrollRect = feedScrollEl.getBoundingClientRect();
+    const protectedItems = [];
+    const protectedIds = new Set();
+    feedListEl.querySelectorAll(".sfp-topic-item[data-topic-id]").forEach((item) => {
+      const itemRect = item.getBoundingClientRect();
+      const isVisible = itemRect.bottom > scrollRect.top && itemRect.top < scrollRect.bottom;
+      const isHovered = item.matches(":hover");
+      if (!isVisible && !isHovered) return;
+
+      const topicId = Number(item.dataset.topicId);
+      if (!Number.isFinite(topicId) || protectedIds.has(topicId)) return;
+      protectedIds.add(topicId);
+      protectedItems.push({ topicId, element: item });
+    });
+
+    return protectedItems;
+  }
+
+  function _triggerTopicHighlight(item) {
+    if (!item) return;
+
+    const oldTimer = topicHighlightTimers.get(item);
+    if (oldTimer) clearTimeout(oldTimer);
+
+    item.classList.remove("sfp-new-highlight");
+    void item.offsetWidth;
+    item.classList.add("sfp-new-highlight");
+
+    const timer = setTimeout(() => {
+      item.classList.remove("sfp-new-highlight");
+      topicHighlightTimers.delete(item);
+    }, 10000);
+    topicHighlightTimers.set(item, timer);
+  }
+
+  function _topicStatsHtml(topic) {
+    const replies = Math.max(0, (topic.posts_count || 1) - 1);
+    const views = topic.views >= 1000 ? (topic.views / 1000).toFixed(1) + "k" : (topic.views || 0);
+    const likes = topic.like_count || 0;
+    return `
+        <span class="sfp-topic-stat">💬 ${replies}</span>
+        <span class="sfp-topic-stat">👁 ${views}</span>
+        <span class="sfp-topic-stat">❤️ ${likes}</span>
+      `;
+  }
+
+  function _topicStatusBadgesHtml(topic) {
+    const statusBadges = [];
+    if (topic.is_hot) {
+      statusBadges.push('<span class="topic-status-card --hot"><svg class="fa d-icon d-icon-fire svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#fire"></use></svg><p class="topic-status-card__name">热门</p></span>');
+    }
+    if (topic.pinned || topic.pinned_globally) {
+      statusBadges.push('<span class="topic-status-card --pinned"><svg class="fa d-icon d-icon-thumbtack svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#thumbtack"></use></svg><p class="topic-status-card__name">已置顶</p></span>');
+    }
+    return statusBadges.length
+      ? `<span class="sfp-topic-status-badges">${statusBadges.join("")}</span>`
+      : "";
+  }
+
+  function _topicTimeHtml(topic) {
+    const timeStr = formatRelativeTime(topic.bumped_at || topic.last_posted_at || topic.created_at);
+    const unreadDotHtml = _hasUnreadMarker(topic)
+      ? '<span class="sfp-unread-dot" aria-hidden="true"></span>'
+      : "";
+    return `${timeStr}${unreadDotHtml}`;
+  }
+
+  function _isTopicExplicitlyUnavailable(topic) {
+    return !!topic && (
+      topic.deleted_at ||
+      topic.deleted ||
+      topic.hidden ||
+      topic.visible === false
+    );
+  }
+
+  function _patchProtectedTopicItem(item, topic, { isNew = false, filterMatched = true } = {}) {
+    if (!item || !topic) return;
+
+    item.classList.toggle("sfp-pinned", !!(topic.pinned || topic.pinned_globally));
+    item.classList.toggle("sfp-read", _isTopicRead(topic));
+    item.classList.toggle("sfp-filter-mismatch", !filterMatched || _isTopicExplicitlyUnavailable(topic));
+    item.classList.toggle("sfp-topic-unavailable", _isTopicExplicitlyUnavailable(topic));
+
+    const header = item.querySelector(".sfp-topic-header");
+    const time = item.querySelector(".sfp-topic-time");
+    if (time) time.innerHTML = _topicTimeHtml(topic);
+
+    const badgesHtml = _topicStatusBadgesHtml(topic);
+    const existingBadges = item.querySelector(".sfp-topic-status-badges");
+    if (badgesHtml) {
+      if (existingBadges) {
+        existingBadges.outerHTML = badgesHtml;
+      } else if (header && time) {
+        time.insertAdjacentHTML("beforebegin", badgesHtml);
+      }
+    } else if (existingBadges) {
+      existingBadges.remove();
+    }
+
+    const stats = item.querySelector(".sfp-topic-stats");
+    if (stats) stats.innerHTML = _topicStatsHtml(topic);
+
+    if (isNew) _triggerTopicHighlight(item);
+  }
+
+  function _renderTopicsPreservingProtected(newTopicIds = []) {
+    if (!feedListEl) return false;
+
+    const protectedItems = _getVisibleOrHoveredTopicItems();
+    if (protectedItems.length === 0) return false;
+
+    const newTopicIdSet = new Set(newTopicIds.map((id) => Number(id)).filter(Number.isFinite));
+    const protectedIds = new Set(protectedItems.map(({ topicId }) => topicId));
+    const filtered = _applyFilter(allTopics);
+    const filteredIds = new Set(filtered.map((topic) => Number(topic.id)));
+    const topicById = new Map(allTopics.map((topic) => [Number(topic.id), topic]));
+    const nonProtectedTopics = filtered.filter((topic) => !protectedIds.has(Number(topic.id)));
+    let nextNonProtectedIndex = 0;
+    const currentItems = Array.from(feedListEl.querySelectorAll(".sfp-topic-item[data-topic-id]"));
+
+    _removePaginationFooter();
+
+    currentItems.forEach((oldItem) => {
+      const oldTopicId = Number(oldItem.dataset.topicId);
+      if (protectedIds.has(oldTopicId)) {
+        const topic = topicById.get(oldTopicId);
+        if (topic) {
+          _patchProtectedTopicItem(oldItem, topic, {
+            isNew: newTopicIdSet.has(oldTopicId),
+            filterMatched: filteredIds.has(oldTopicId),
+          });
+        }
+        return;
+      }
+
+      if (nextNonProtectedIndex >= nonProtectedTopics.length) {
+        oldItem.remove();
+        return;
+      }
+
+      const topic = nonProtectedTopics[nextNonProtectedIndex++];
+      const topicId = Number(topic.id);
+      oldItem.replaceWith(createTopicItem(topic, newTopicIdSet.has(topicId)));
+    });
+
+    while (nextNonProtectedIndex < nonProtectedTopics.length) {
+      const topic = nonProtectedTopics[nextNonProtectedIndex++];
+      const topicId = Number(topic.id);
+      feedListEl.appendChild(createTopicItem(topic, newTopicIdSet.has(topicId)));
+    }
+
+    _renderPaginationFooter();
+    _updateBackTopButton();
+    return true;
+  }
+
   // ========== 渲染 ==========
-  function renderTopics(newTopicIds = []) {
+  function renderTopics(newTopicIds = [], { preserveProtected = false } = {}) {
     if (!feedListEl) return;
+
+    if (preserveProtected && _renderTopicsPreservingProtected(newTopicIds)) return;
+
     feedListEl.innerHTML = "";
 
     if (allTopics.length === 0) {
@@ -3355,8 +3583,7 @@
       item.classList.add("sfp-read");
     }
     if (isNew) {
-      item.classList.add("sfp-new-highlight");
-      setTimeout(() => item.classList.remove("sfp-new-highlight"), 10000);
+      _triggerTopicHighlight(item);
     }
 
     // 获取用户信息
@@ -3385,23 +3612,7 @@
       ? `<span class="sfp-topic-name">${escapeHtml(name)}</span>`
       : "";
 
-    // 时间
-    const timeStr = formatRelativeTime(topic.bumped_at || topic.last_posted_at || topic.created_at);
-    const unreadDotHtml = _hasUnreadMarker(topic)
-      ? '<span class="sfp-unread-dot" aria-hidden="true"></span>'
-      : "";
-
-    // 状态标记
-    const statusBadges = [];
-    if (topic.is_hot) {
-      statusBadges.push('<span class="topic-status-card --hot"><svg class="fa d-icon d-icon-fire svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#fire"></use></svg><p class="topic-status-card__name">热门</p></span>');
-    }
-    if (topic.pinned || topic.pinned_globally) {
-      statusBadges.push('<span class="topic-status-card --pinned"><svg class="fa d-icon d-icon-thumbtack svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#thumbtack"></use></svg><p class="topic-status-card__name">已置顶</p></span>');
-    }
-    const statusBadgesHtml = statusBadges.length
-      ? `<span class="sfp-topic-status-badges">${statusBadges.join("")}</span>`
-      : "";
+    const statusBadgesHtml = _topicStatusBadgesHtml(topic);
 
     // 标题
     const closedHtml = topic.closed
@@ -3420,11 +3631,6 @@
       tagsHtml = `<span class="sfp-topic-tags">${tagItems}</span>`;
     }
 
-    // 统计
-    const replies = Math.max(0, (topic.posts_count || 1) - 1);
-    const views = topic.views >= 1000 ? (topic.views / 1000).toFixed(1) + "k" : (topic.views || 0);
-    const likes = topic.like_count || 0;
-
     item.innerHTML = `
       <div class="sfp-topic-header">
         ${avatarHtml}
@@ -3435,7 +3641,7 @@
           </div>
         </div>
         ${statusBadgesHtml}
-        <span class="sfp-topic-time">${timeStr}${unreadDotHtml}</span>
+        <span class="sfp-topic-time">${_topicTimeHtml(topic)}</span>
       </div>
       <div class="sfp-topic-title"><span class="sfp-topic-title-line">${closedHtml}${escapeHtml(topic.unicode_title || topic.title)}</span></div>
       <div class="sfp-topic-category-tags">
@@ -3443,9 +3649,7 @@
         ${tagsHtml}
       </div>
       <div class="sfp-topic-stats">
-        <span class="sfp-topic-stat">💬 ${replies}</span>
-        <span class="sfp-topic-stat">👁 ${views}</span>
-        <span class="sfp-topic-stat">❤️ ${likes}</span>
+        ${_topicStatsHtml(topic)}
       </div>
     `;
 

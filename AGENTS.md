@@ -1,31 +1,33 @@
 # Discourse Sidebar Feed Panel — Active Handoff
 
-**Updated**: 2026-05-21 21:40:00 +08:00
+**Updated**: 2026-05-21 22:41:53 +08:00
 **Project root**: `C:/Users/28676/builds/discourse/userscript`
-**Current objective**: 下一轮修复“自动刷新挤下条目”问题，重点看静默/自动刷新应用新话题时是否改变滚动视口中的现有条目位置。
+**Current objective**: 下一步优化“最新活动”下叠加其他筛选项时的自动静默刷新设置与计数语义，重点让新话题/更新提示符合当前筛选。
 
 ## Current State
 
 - Main file: `discourse-sidebar-feed-panel.user.js`
 - Current branch: `master`
-- Current userscript version in file: `0.6.46`
-- Latest completed request: 新话题提醒已改为完全独占布局空间，出现时从上往下展开，并由 `.sfp-filter-bar` 覆盖其进入动效；用户反馈“没有问题”。
-- Current new-topic hint behavior:
-  - `_updateShowMoreHint()` still creates `.sfp-show-more-overlay` as the first child of `.sfp-content-wrapper`.
-  - `.sfp-show-more-overlay` is now normal document flow, `display:flex`, `overflow:hidden`, with `sfp-show-more-enter` animation.
-  - `.sfp-content-wrapper.sfp-has-show-more .sfp-topic-list { padding-top: ... }` was removed, so rows are pushed only by the hint's own layout box.
-  - `.sfp-filter-bar` now has `position: relative; z-index: 3` so the hint enters underneath it.
-- Current back-to-top behavior remains as previously approved:
-  - Button is created by `_buildBackTopButton()` and stored in `feedBackTopBtn`.
-  - Button is appended to `.sfp-feed-container` and positioned absolute at the lower-right.
-  - Visibility threshold is `feedScrollEl.scrollTop > feedScrollEl.clientHeight`.
-  - Click scrolls `.sfp-feed-scroll` to top with smooth behavior.
+- Current userscript version in file: `0.6.49`
+- Latest completed request: 自动/静默刷新时保护当前可视话题和 hover 话题，避免新话题或活动更新导致瀑布流视口突变；用户反馈“现在效果不错”。
+- Current automatic refresh behavior:
+  - Only auto refresh / auto silent refresh passes `preserveViewport: true`.
+  - Manual refresh, clicking the “查看新的或更新的话题” hint, switching filter/order/category, initial load, and load-more still use full render/reorder semantics.
+  - Non-top auto refresh protects visible or hovered `.sfp-topic-item[data-topic-id]` nodes.
+  - Protected items are not removed, reinserted, or rebuilt; `_renderTopicsPreservingProtected()` patches them in place and only replaces surrounding unprotected items.
+  - Protected items keep DOM position and relative order, and only lightweight fields are patched: time/unread dot, read class, stats, hot/pinned badges.
+  - If a protected item no longer matches the active filter, it gets `.sfp-filter-mismatch` and is shown gray until it leaves protection or the user performs an active refresh.
+  - If a protected item is explicitly unavailable (`deleted_at`, `deleted`, `hidden`, `visible === false`), it also gets `.sfp-topic-unavailable`; the title line is struck through.
+  - Incoming/highlighted protected items retrigger `.sfp-new-highlight` in place via `_triggerTopicHighlight()` so hover/focus should not reset.
+- Current new-topic hint behavior remains:
+  - `_updateShowMoreHint()` creates `.sfp-show-more-overlay` as normal document flow at the top of `.sfp-content-wrapper`.
+  - Hint is hidden for default-view 0-second auto silent refresh because queued incoming topics are applied immediately.
 
 ## Validation Run
 
 - `node --check discourse-sidebar-feed-panel.user.js`
 - `git diff --check -- discourse-sidebar-feed-panel.user.js` passed with only the repo LF/CRLF warning.
-- No live browser verification was run after the 0.6.46 hint-layout change; user tested visually and approved.
+- No live browser automation was run. User visually tested the 0.6.49 behavior and said it is good.
 
 ## Constraints
 
@@ -39,13 +41,14 @@
 
 ## Next Review Focus
 
-1. Diagnose automatic refresh behavior around `_applySidebarIncomingTopics()`, auto silent refresh, and any full refresh path that inserts newer topics above the current list.
-2. Preserve the user's visible scroll anchor when new topics are applied automatically, so existing visible rows are not visually pushed downward unless the user explicitly clicks the manual hint.
-3. Recheck interactions with `autoSilentRefreshInterval === 0`, loading state, and default-view gating in `_updateShowMoreHint()`.
-4. Optional follow-up still open: verify latest-activity settings split for auto silent refresh vs auto refresh.
+1. Optimize auto silent refresh settings for “最新活动” plus non-`all` filters such as unread/read and hide-pinned.
+2. Make the incoming topic count/hint match the active filter when latest-activity is combined with other filters.
+3. Recheck default-view gating in `_isDefaultFeedView()`, `_updateShowMoreHint()`, `_queueSidebarIncomingApply()`, and `_startAutoSilentRefresh()`; current code mostly treats only all-category + activity + all-filter as default.
+4. Preserve the just-approved protected viewport behavior while changing filter-aware refresh logic.
+5. If changing incoming filtering, verify interactions with `autoSilentRefreshInterval === 0`, interval-based silent refresh, and manual hint click.
 
 ## Suggested Skills
 
 - `$agent-browser-cli` for live linux.do DOM/state checks and computed-style/layout measurements.
-- `/diagnose` if the auto-refresh scroll-position bug needs reproduction and instrumentation.
+- `/diagnose` if filter-aware incoming counts are hard to reproduce deterministically.
 - `$handoff` again after the next fix pass if work remains.
