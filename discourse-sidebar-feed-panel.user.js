@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.44
+// @version      0.6.45
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -99,6 +99,7 @@
   let feedScrollEl = null;
   let feedListEl = null;
   let feedHeaderEl = null;
+  let feedBackTopBtn = null;
   let resizerEl = null;
   let isResizing = false;
   let originalSidebarWidthBeforeFeed = null;
@@ -688,6 +689,7 @@
       .sidebar-container.sfp-feed-mode .sfp-feed-container {
         display: flex;
         flex-direction: column;
+        position: relative;
         width: 100%;
         min-width: 0;
         height: 100%;
@@ -1279,6 +1281,44 @@
         max-width: 100%;
         min-height: 100%;
       }
+      .sfp-back-top-btn {
+        position: absolute;
+        right: 14px;
+        bottom: 14px;
+        z-index: 4;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: 1px solid var(--primary-low);
+        border-radius: 50%;
+        background: var(--secondary);
+        color: var(--primary-medium);
+        box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 14%, transparent);
+        cursor: pointer;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(8px);
+        pointer-events: none;
+        transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s, color 0.18s, background 0.18s;
+      }
+      .sfp-back-top-btn.visible {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+        pointer-events: auto;
+      }
+      .sfp-back-top-btn:hover {
+        background: var(--primary-very-low);
+        color: var(--tertiary);
+      }
+      .sfp-back-top-btn svg {
+        width: 18px;
+        height: 18px;
+        fill: currentColor;
+      }
 
       /* ===== 帖子列表项 ===== */
       .sfp-topic-item {
@@ -1861,6 +1901,7 @@
       setupResizer();
       _syncDefaultViewControls();
       _updateShowMoreHint();
+      _updateBackTopButton();
       return;
     }
 
@@ -1870,6 +1911,7 @@
       feedHeaderEl = null;
       feedScrollEl = null;
       feedListEl = null;
+      feedBackTopBtn = null;
     }
 
     // 创建 feed 容器
@@ -1902,6 +1944,8 @@
     contentWrapper.appendChild(feedListEl);
     feedScrollEl.appendChild(contentWrapper);
     feedContainer.appendChild(feedScrollEl);
+    feedBackTopBtn = _buildBackTopButton();
+    feedContainer.appendChild(feedBackTopBtn);
     sidebar.appendChild(feedContainer);
 
     sidebar.classList.add("sfp-feed-mode");
@@ -1943,6 +1987,7 @@
       feedHeaderEl = null;
       feedScrollEl = null;
       feedListEl = null;
+      feedBackTopBtn = null;
     }
 
     // 清除数据缓存，避免下次激活时显示旧数据
@@ -2859,6 +2904,7 @@
     if (feedListEl) {
       feedListEl.innerHTML = `<div class="sfp-loading"><div class="sfp-spinner"></div>加载中...</div>`;
     }
+    _updateBackTopButton();
 
     try {
       _startTagStyleIndexLoad();
@@ -3156,6 +3202,7 @@
 
     if (allTopics.length === 0) {
       feedListEl.innerHTML = `<div class="sfp-empty">暂无话题</div>`;
+      _updateBackTopButton();
       return;
     }
 
@@ -3185,6 +3232,7 @@
     }
 
     _renderPaginationFooter();
+    _updateBackTopButton();
   }
 
   // ========== 客户端筛选 ==========
@@ -3441,6 +3489,32 @@
     if (dot) dot.remove();
   }
 
+  // ========== 回到顶部 ==========
+  function _buildBackTopButton() {
+    const btn = document.createElement("button");
+    btn.className = "sfp-back-top-btn";
+    btn.type = "button";
+    btn.title = "回到顶部";
+    btn.setAttribute("aria-label", "回到顶部");
+    btn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M12 5.5 5.5 12l1.4 1.4 4.1-4.1V20h2V9.3l4.1 4.1 1.4-1.4L12 5.5z"/></svg>`;
+    btn.addEventListener("click", () => {
+      if (!feedScrollEl) return;
+      if (typeof feedScrollEl.scrollTo === "function") {
+        feedScrollEl.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        feedScrollEl.scrollTop = 0;
+      }
+      _updateBackTopButton();
+    });
+    return btn;
+  }
+
+  function _updateBackTopButton() {
+    if (!feedBackTopBtn || !feedScrollEl) return;
+    const show = feedScrollEl.scrollTop > feedScrollEl.clientHeight;
+    feedBackTopBtn.classList.toggle("visible", show);
+  }
+
   // ========== 无限滚动加载 ==========
   function _setupScrollLoadMore() {
     if (!feedScrollEl) return;
@@ -3459,6 +3533,8 @@
         e.stopPropagation();
       }
     }, { passive: false });
+
+    feedScrollEl.addEventListener("scroll", _updateBackTopButton, { passive: true });
 
     feedScrollEl.addEventListener("scroll", debounce(() => {
       if (!feedScrollEl || !hasMorePages || isLoadingMore) return;
