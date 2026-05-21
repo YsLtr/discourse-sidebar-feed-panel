@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.45
+// @version      0.6.46
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -796,29 +796,26 @@
         transform: translateY(-5px) rotate(-45deg);
       }
       .sfp-show-more-overlay {
-        position: absolute;
-        top: 4px;
-        left: 0;
-        right: 0;
-        z-index: 2;
-        width: fit-content;
-        max-width: calc(100% - 24px);
-        margin: auto;
+        position: relative;
+        z-index: 1;
+        display: flex;
+        justify-content: center;
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
         padding: 0;
         font-size: 12px;
         pointer-events: none;
-        animation: sfp-float-down 250ms ease-in-out;
-      }
-      .sfp-content-wrapper.sfp-has-show-more .sfp-topic-list {
-        padding-top: 15px;
+        overflow: hidden;
+        animation: sfp-show-more-enter 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
       }
       .sfp-show-more-overlay .sfp-hint-text {
         display: inline-flex;
         align-items: center;
         justify-content: center;
         gap: 0.5em;
-        max-width: 100%;
-        margin: 0;
+        max-width: calc(100% - 24px);
+        margin: 8px 12px 6px;
         padding: var(--space-2, 0.5em) var(--space-4, 1em);
         border: none;
         border-radius: var(--d-border-radius-large, 20px);
@@ -857,9 +854,17 @@
       .sfp-show-more-overlay .sfp-hint-text.loading:hover {
         color: var(--primary-medium);
       }
-      @keyframes sfp-float-down {
-        from { opacity: 0; transform: translateY(-8px); }
-        to { opacity: 1; transform: translateY(0); }
+      @keyframes sfp-show-more-enter {
+        from {
+          max-height: 0;
+          opacity: 0;
+          transform: translateY(-100%);
+        }
+        to {
+          max-height: 48px;
+          opacity: 1;
+          transform: translateY(0);
+        }
       }
       .sfp-settings-wrap {
         position: relative;
@@ -1212,6 +1217,8 @@
 
       /* ===== 筛选栏 ===== */
       .sfp-filter-bar {
+        position: relative;
+        z-index: 3;
         display: flex;
         align-items: center;
         gap: 12px;
