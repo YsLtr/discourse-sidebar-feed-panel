@@ -1,33 +1,32 @@
 # Discourse Sidebar Feed Panel — Active Handoff
 
-**Updated**: 2026-05-21 22:41:53 +08:00
+**Updated**: 2026-05-22 00:12:46 +08:00
 **Project root**: `C:/Users/28676/builds/discourse/userscript`
-**Current objective**: 下一步优化“最新活动”下叠加其他筛选项时的自动静默刷新设置与计数语义，重点让新话题/更新提示符合当前筛选。
+**Current objective**: 下一步进入 UI 优化和上手提示优化；当前刷新、incoming 提醒、静默刷新语义已暂时稳定，用户反馈“OK，暂时没有什么发现的问题”。
 
 ## Current State
 
 - Main file: `discourse-sidebar-feed-panel.user.js`
 - Current branch: `master`
-- Current userscript version in file: `0.6.49`
-- Latest completed request: 自动/静默刷新时保护当前可视话题和 hover 话题，避免新话题或活动更新导致瀑布流视口突变；用户反馈“现在效果不错”。
-- Current automatic refresh behavior:
-  - Only auto refresh / auto silent refresh passes `preserveViewport: true`.
-  - Manual refresh, clicking the “查看新的或更新的话题” hint, switching filter/order/category, initial load, and load-more still use full render/reorder semantics.
-  - Non-top auto refresh protects visible or hovered `.sfp-topic-item[data-topic-id]` nodes.
-  - Protected items are not removed, reinserted, or rebuilt; `_renderTopicsPreservingProtected()` patches them in place and only replaces surrounding unprotected items.
-  - Protected items keep DOM position and relative order, and only lightweight fields are patched: time/unread dot, read class, stats, hot/pinned badges.
-  - If a protected item no longer matches the active filter, it gets `.sfp-filter-mismatch` and is shown gray until it leaves protection or the user performs an active refresh.
-  - If a protected item is explicitly unavailable (`deleted_at`, `deleted`, `hidden`, `visible === false`), it also gets `.sfp-topic-unavailable`; the title line is struck through.
-  - Incoming/highlighted protected items retrigger `.sfp-new-highlight` in place via `_triggerTopicHighlight()` so hover/focus should not reset.
-- Current new-topic hint behavior remains:
-  - `_updateShowMoreHint()` creates `.sfp-show-more-overlay` as normal document flow at the top of `.sfp-content-wrapper`.
-  - Hint is hidden for default-view 0-second auto silent refresh because queued incoming topics are applied immediately.
+- Current userscript version in file: `0.6.56`
+- Latest completed work:
+  - “最新活动”下设置面板始终显示 `新活动提醒` 和 `自动静默刷新`。
+  - `新活动提醒` 是独立开关，默认开启；关闭只隐藏提示条，不影响静默刷新。
+  - `最新活动 + 任意板块 + 全部/未读/已读` 都可使用自动静默刷新。
+  - `最新活动 + 任意板块 + 全部` 才显示新活动提醒数量；计数只用 message-bus payload 的 `category_id` 做板块范围匹配，提醒前不拉 `/latest.json?topic_ids=...`。
+  - `最新活动 + 任意板块 + 未读/已读` 不显示提示数量，但仍接收 incoming 候选；静默刷新触发时才拉取候选话题并由现有本地筛选决定显示。
+  - `隐藏置顶` 不影响 incoming 提醒内容和数量；切换时只重渲染当前列表。
+  - 0 秒静默刷新会立即应用 incoming；间隔静默刷新会按倒计时应用。非 latest 排序仍用普通自动刷新。
+- Viewport protection behavior from 0.6.49 remains in force:
+  - Auto refresh / auto silent refresh uses `preserveViewport: true`.
+  - Non-top auto refresh protects visible or hovered topic DOM nodes and patches lightweight fields in place.
+  - Manual refresh, hint click, filter/order/category switch, initial load, and load-more still use full render/reorder semantics.
 
 ## Validation Run
 
 - `node --check discourse-sidebar-feed-panel.user.js`
 - `git diff --check -- discourse-sidebar-feed-panel.user.js` passed with only the repo LF/CRLF warning.
-- No live browser automation was run. User visually tested the 0.6.49 behavior and said it is good.
+- No live browser automation was completed. `$agent-browser-cli` was attempted but the extension was not connected (`extension_not_connected`, active tabs 0).
 
 ## Constraints
 
@@ -41,14 +40,14 @@
 
 ## Next Review Focus
 
-1. Optimize auto silent refresh settings for “最新活动” plus non-`all` filters such as unread/read and hide-pinned.
-2. Make the incoming topic count/hint match the active filter when latest-activity is combined with other filters.
-3. Recheck default-view gating in `_isDefaultFeedView()`, `_updateShowMoreHint()`, `_queueSidebarIncomingApply()`, and `_startAutoSilentRefresh()`; current code mostly treats only all-category + activity + all-filter as default.
-4. Preserve the just-approved protected viewport behavior while changing filter-aware refresh logic.
-5. If changing incoming filtering, verify interactions with `autoSilentRefreshInterval === 0`, interval-based silent refresh, and manual hint click.
+1. UI polish for the sidebar feed panel and settings/menu affordances.
+2. Onboarding/first-use hints: explain feed mode, board tabs, latest activity, silent refresh, and incoming hint behavior without cluttering the main workflow.
+3. Recheck compact settings layout on narrow sidebar widths and with Chinese labels.
+4. If using browser validation, first restore `$agent-browser-cli` Chrome extension connectivity.
+5. After UI changes, run `node --check discourse-sidebar-feed-panel.user.js` and `git diff --check -- discourse-sidebar-feed-panel.user.js`.
 
 ## Suggested Skills
 
-- `$agent-browser-cli` for live linux.do DOM/state checks and computed-style/layout measurements.
-- `/diagnose` if filter-aware incoming counts are hard to reproduce deterministically.
-- `$handoff` again after the next fix pass if work remains.
+- `$agent-browser-cli` for live linux.do UI, DOM, and layout checks once the extension is connected.
+- `/diagnose` if UI state or refresh behavior regresses.
+- `$handoff` again after the UI/onboarding pass if work remains.
