@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.56
+// @version      0.6.63
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -107,6 +107,8 @@
   let feedScrollEl = null;
   let feedListEl = null;
   let feedHeaderEl = null;
+  let feedRefreshBtn = null;
+  let refreshBusyCount = 0;
   let feedBackTopBtn = null;
   let resizerEl = null;
   let isResizing = false;
@@ -768,6 +770,10 @@
       .sfp-feed-header .sfp-refresh-btn.spinning svg {
         animation: sfp-spin 0.6s linear infinite;
       }
+      .sfp-feed-header .sfp-refresh-btn.spinning {
+        color: var(--tertiary);
+        background: var(--primary-low);
+      }
       @keyframes sfp-spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
@@ -901,19 +907,17 @@
       }
       .sfp-settings-wrap.open .sfp-settings-shell {
         width: 204px;
-        height: 128px;
+        height: var(--sfp-settings-shell-height, 128px);
+        overflow: visible;
         background: var(--primary-very-low);
         border: 1px solid var(--primary-low);
         border-radius: 8px;
         box-shadow: 0 8px 24px color-mix(in srgb, var(--primary) 14%, transparent);
       }
-      .sfp-settings-wrap.sfp-settings-compact.open .sfp-settings-shell {
-        height: 118px;
-      }
       .sfp-settings-panel {
         box-sizing: border-box;
         width: 204px;
-        padding: 36px 10px 10px 10px;
+        padding: 36px 10px 8px 10px;
         opacity: 0;
         visibility: hidden;
         transform: translateY(-8px);
@@ -928,14 +932,85 @@
         transition: opacity 0.26s ease 0.12s, transform 0.26s ease 0.12s, visibility 0.26s 0.12s;
       }
       .sfp-setting-row {
-        display: flex;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
-        justify-content: space-between;
-        gap: 10px;
+        column-gap: 8px;
         font-size: 12px;
         color: var(--primary);
         line-height: 1.3;
         padding: 4px 0;
+      }
+      .sfp-setting-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        white-space: nowrap;
+      }
+      .sfp-setting-help-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        height: 14px;
+        flex: 0 0 14px;
+        pointer-events: none;
+      }
+      .sfp-setting-help {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        height: 14px;
+        box-sizing: border-box;
+        appearance: none;
+        border: none;
+        background: transparent;
+        color: var(--primary-medium);
+        cursor: help;
+        padding: 0;
+        pointer-events: auto;
+      }
+      .sfp-setting-help svg {
+        width: 13px;
+        height: 13px;
+        display: block;
+        fill: currentColor;
+        pointer-events: none;
+      }
+      .sfp-setting-help:hover,
+      .sfp-setting-help:focus {
+        color: var(--tertiary);
+        outline: none;
+      }
+      .sfp-setting-help-tooltip {
+        position: absolute;
+        left: 0;
+        top: calc(100% + 6px);
+        z-index: 10004;
+        width: 178px;
+        max-width: calc(100vw - 32px);
+        padding: 8px 9px;
+        border: 1px solid var(--primary-low);
+        border-radius: 6px;
+        background: var(--secondary);
+        box-shadow: 0 8px 22px color-mix(in srgb, var(--primary) 16%, transparent);
+        color: var(--primary);
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 1.45;
+        text-align: left;
+        white-space: normal;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-4px);
+        transition: opacity 0.16s ease, transform 0.16s ease;
+      }
+      .sfp-setting-help-wrap.show-tooltip .sfp-setting-help-tooltip {
+        opacity: 1;
+        transform: translateY(0);
       }
       .sfp-setting-row input[type="checkbox"] {
         flex-shrink: 0;
@@ -943,14 +1018,19 @@
       }
       .sfp-setting-interval {
         display: none;
+        grid-template-columns: minmax(0, 1fr) 58px auto;
         align-items: center;
-        gap: 6px;
+        column-gap: 6px;
         margin-top: 6px;
         font-size: 12px;
         color: var(--primary-medium);
       }
       .sfp-setting-interval.visible {
-        display: flex;
+        display: grid;
+      }
+      .sfp-setting-row.hidden,
+      .sfp-setting-interval.hidden {
+        display: none;
       }
       .sfp-setting-interval input {
         width: 58px;
@@ -1929,9 +2009,11 @@
     }
 
     if (feedContainer) {
+      _resetRefreshButtonBusy();
       feedContainer.remove();
       feedContainer = null;
       feedHeaderEl = null;
+      feedRefreshBtn = null;
       feedScrollEl = null;
       feedListEl = null;
       feedBackTopBtn = null;
@@ -2003,11 +2085,13 @@
     _stopAutoRefresh();
     _stopAutoSilentRefresh();
     _stopSidebarIncomingTracking();
+    _resetRefreshButtonBusy();
 
     if (feedContainer) {
       feedContainer.remove();
       feedContainer = null;
       feedHeaderEl = null;
+      feedRefreshBtn = null;
       feedScrollEl = null;
       feedListEl = null;
       feedBackTopBtn = null;
@@ -2087,11 +2171,13 @@
     const refreshBtn = document.createElement("button");
     refreshBtn.className = "sfp-refresh-btn";
     refreshBtn.title = "刷新";
+    refreshBtn.setAttribute("aria-label", "刷新");
     refreshBtn.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>`;
     refreshBtn.addEventListener("click", () => {
-      refreshBtn.classList.add("spinning");
-      refreshCurrentView().finally(() => refreshBtn.classList.remove("spinning"));
+      refreshCurrentView();
     });
+    feedRefreshBtn = refreshBtn;
+    _syncRefreshButtonBusy();
     header.appendChild(refreshBtn);
   }
 
@@ -2099,9 +2185,6 @@
     const wrapper = document.createElement("span");
     wrapper.className = "sfp-settings-wrap";
     const isLatestActivityView = _isLatestActivityView();
-    if (isLatestActivityView) {
-      wrapper.classList.add("sfp-settings-compact");
-    }
 
     const shell = document.createElement("span");
     shell.className = "sfp-settings-shell";
@@ -2120,31 +2203,31 @@
     panel.className = "sfp-settings-panel";
     if (isLatestActivityView) {
       panel.innerHTML = `
-        <label class="sfp-setting-row">
-          <span>新活动提醒</span>
+        <div class="sfp-setting-row sfp-incoming-hint-row">
+          ${_buildSettingLabelHtml("新活动提醒", "在最新活动的全部列表中，按站点推送的新话题显示顶部提醒；点击提醒才把新内容加入列表。开启后会关闭自动静默刷新。")}
           <input type="checkbox" class="sfp-incoming-hint-input"${showIncomingHint ? " checked" : ""}>
-        </label>
-        <label class="sfp-setting-row">
-          <span>自动静默刷新</span>
+        </div>
+        <div class="sfp-setting-row sfp-auto-silent-row">
+          ${_buildSettingLabelHtml("自动静默刷新", "在最新活动视图中按间隔自动应用新话题，尽量保留当前阅读位置。仅在关闭新活动提醒后可用；它只处理已收到的新活动候选，无速率限制，可按需要设置。")}
           <input type="checkbox" class="sfp-auto-silent-input"${autoSilentRefreshEnabled ? " checked" : ""}>
-        </label>
-        <label class="sfp-setting-interval${autoSilentRefreshEnabled ? " visible" : ""}">
-          <span>静默刷新间隔</span>
+        </div>
+        <div class="sfp-setting-interval sfp-auto-silent-interval${_isAutoSilentRefreshActive() ? " visible" : ""}">
+          ${_buildSettingLabelHtml("静默刷新间隔", "单位为秒，最小为 0。设为 0 时，有新活动会立即静默应用；大于 0 时按倒计时批量应用。")}
           <input type="number" class="sfp-auto-silent-refresh-interval-input" min="0" step="1" value="${autoSilentRefreshInterval}">
           <span>s</span>
-        </label>
+        </div>
       `;
     } else {
       panel.innerHTML = `
-        <label class="sfp-setting-row">
-          <span>自动刷新</span>
+        <div class="sfp-setting-row sfp-auto-refresh-row">
+          ${_buildSettingLabelHtml("自动刷新", "用于非最新活动的排序视图，按间隔重新拉取当前列表，并尽量保留当前阅读位置。不要设置太快，频繁请求可能触发站点速率限制。")}
           <input type="checkbox" class="sfp-auto-refresh-input"${autoRefreshEnabled ? " checked" : ""}>
-        </label>
-        <label class="sfp-setting-interval${autoRefreshEnabled ? " visible" : ""}">
-          <span>自动刷新间隔</span>
+        </div>
+        <div class="sfp-setting-interval sfp-auto-refresh-interval${autoRefreshEnabled ? " visible" : ""}">
+          ${_buildSettingLabelHtml("自动刷新间隔", "单位为秒，最小为 1。到达间隔后刷新当前筛选和排序下的列表。")}
           <input type="number" class="sfp-auto-refresh-interval-input" min="1" step="1" value="${autoRefreshInterval}">
           <span>s</span>
-        </label>
+        </div>
       `;
     }
 
@@ -2154,30 +2237,55 @@
       const shouldOpen = !wrapper.classList.contains("open");
       _closeFloatingPanels(wrapper);
       wrapper.classList.toggle("open", shouldOpen);
+      _syncSettingsPanelState(wrapper);
     });
 
     panel.addEventListener("click", (e) => e.stopPropagation());
+    panel.querySelectorAll(".sfp-setting-help").forEach((helpBtn) => {
+      const helpWrap = helpBtn.closest(".sfp-setting-help-wrap");
+      helpBtn.addEventListener("mouseenter", () => helpWrap?.classList.add("show-tooltip"));
+      helpBtn.addEventListener("mouseleave", () => helpWrap?.classList.remove("show-tooltip"));
+      helpBtn.addEventListener("focus", () => helpWrap?.classList.add("show-tooltip"));
+      helpBtn.addEventListener("blur", () => helpWrap?.classList.remove("show-tooltip"));
+      helpBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    });
 
     const incomingHintInput = panel.querySelector(".sfp-incoming-hint-input");
     if (incomingHintInput) {
       incomingHintInput.addEventListener("change", () => {
         showIncomingHint = incomingHintInput.checked;
         GM_setValue(SHOW_INCOMING_HINT_KEY, showIncomingHint);
+        if (showIncomingHint) {
+          _stopAutoSilentRefresh();
+          sidebarIncomingApplyQueued = false;
+        } else {
+          _startAutoSilentRefresh();
+          if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
+            _queueSidebarIncomingApply();
+          }
+        }
+        _syncSettingsPanelState(wrapper);
         _updateShowMoreHint();
       });
     }
 
     const autoSilentInput = panel.querySelector(".sfp-auto-silent-input");
-    const silentIntervalRow = panel.querySelector(".sfp-setting-interval");
     const silentIntervalInput = panel.querySelector(".sfp-auto-silent-refresh-interval-input");
     if (autoSilentInput) {
       autoSilentInput.addEventListener("change", () => {
         autoSilentRefreshEnabled = autoSilentInput.checked;
         GM_setValue(AUTO_SILENT_REFRESH_KEY, autoSilentRefreshEnabled);
-        silentIntervalRow?.classList.toggle("visible", autoSilentRefreshEnabled);
+        if (autoSilentRefreshEnabled && showIncomingHint) {
+          showIncomingHint = false;
+          GM_setValue(SHOW_INCOMING_HINT_KEY, false);
+        }
+        _syncSettingsPanelState(wrapper);
         _startAutoSilentRefresh();
         _updateShowMoreHint();
-        if (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0) {
+        if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
           _queueSidebarIncomingApply();
         }
       });
@@ -2190,20 +2298,21 @@
         silentIntervalInput.value = seconds;
         GM_setValue(AUTO_SILENT_REFRESH_INTERVAL_KEY, autoSilentRefreshInterval);
         _startAutoSilentRefresh();
-        if (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0) {
+        if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
           _queueSidebarIncomingApply();
         }
       });
     }
 
     const autoRefreshInput = panel.querySelector(".sfp-auto-refresh-input");
-    const intervalRow = panel.querySelector(".sfp-setting-interval");
+    const intervalRow = panel.querySelector(".sfp-auto-refresh-interval");
     const intervalInput = panel.querySelector(".sfp-auto-refresh-interval-input");
     if (autoRefreshInput) {
       autoRefreshInput.addEventListener("change", () => {
         autoRefreshEnabled = autoRefreshInput.checked;
         GM_setValue(AUTO_REFRESH_ENABLED_KEY, autoRefreshEnabled);
         intervalRow.classList.toggle("visible", autoRefreshEnabled);
+        _syncSettingsPanelHeight(wrapper);
         _startAutoRefresh();
       });
     }
@@ -2221,7 +2330,95 @@
     shell.appendChild(btn);
     shell.appendChild(panel);
     wrapper.appendChild(shell);
+    _syncSettingsPanelState(wrapper);
     return wrapper;
+  }
+
+  function _buildSettingLabelHtml(label, tooltip) {
+    return `
+      <span class="sfp-setting-label">
+        <span>${escapeHtml(label)}</span>
+        <span class="sfp-setting-help-wrap">
+          <button type="button" class="sfp-setting-help" aria-label="${escapeHtml(label)}说明">
+            <svg viewBox="0 0 1024 1024" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><path d="M514.048 54.272q95.232 0 178.688 36.352t145.92 98.304 98.304 145.408 35.84 178.688-35.84 178.176-98.304 145.408-145.92 98.304-178.688 35.84-178.176-35.84-145.408-98.304-98.304-145.408-35.84-178.176 35.84-178.688 98.304-145.408 145.408-98.304 178.176-36.352zM515.072 826.368q26.624 0 44.544-17.92t17.92-43.52q0-26.624-17.92-44.544t-44.544-17.92-44.544 17.92-17.92 44.544q0 25.6 17.92 43.52t44.544 17.92zM567.296 574.464q-1.024-16.384 20.48-34.816t48.128-40.96 49.152-50.688 24.576-65.024q2.048-39.936-8.192-74.752t-33.792-59.904-60.928-39.936-87.552-14.848q-62.464 0-103.936 22.016t-67.072 53.248-35.84 64.512-9.216 55.808q1.024 26.624 16.896 38.912t34.304 12.8 33.792-10.24 15.36-31.232q0-12.288 7.68-30.208t20.992-34.304 32.256-27.648 42.496-11.264q46.08 0 73.728 23.04t25.6 57.856q0 17.408-10.24 32.256t-26.112 28.672-33.792 27.648-33.792 28.672-26.624 32.256-11.776 37.888l1.024 38.912q0 15.36 14.336 29.184t37.888 14.848q23.552-1.024 37.376-15.36t12.8-32.768l0-24.576z"></path></svg>
+          </button>
+          <span class="sfp-setting-help-tooltip" role="tooltip">${escapeHtml(tooltip)}</span>
+        </span>
+      </span>
+    `;
+  }
+
+  function _syncSettingsPanelState(wrapper) {
+    const panel = wrapper?.querySelector(".sfp-settings-panel");
+    if (!panel) return;
+
+    const incomingHintInput = panel.querySelector(".sfp-incoming-hint-input");
+    const autoSilentInput = panel.querySelector(".sfp-auto-silent-input");
+    const autoSilentRow = panel.querySelector(".sfp-auto-silent-row");
+    const autoSilentIntervalRow = panel.querySelector(".sfp-auto-silent-interval");
+    const autoRefreshInput = panel.querySelector(".sfp-auto-refresh-input");
+    const autoRefreshIntervalRow = panel.querySelector(".sfp-auto-refresh-interval");
+
+    if (incomingHintInput) incomingHintInput.checked = showIncomingHint;
+    if (autoSilentInput) autoSilentInput.checked = autoSilentRefreshEnabled;
+    if (autoRefreshInput) autoRefreshInput.checked = autoRefreshEnabled;
+
+    if (autoSilentRow) {
+      autoSilentRow.classList.toggle("hidden", showIncomingHint);
+    }
+    if (autoSilentIntervalRow) {
+      autoSilentIntervalRow.classList.toggle("hidden", showIncomingHint);
+      autoSilentIntervalRow.classList.toggle("visible", !showIncomingHint && autoSilentRefreshEnabled);
+    }
+    if (autoRefreshIntervalRow) {
+      autoRefreshIntervalRow.classList.toggle("visible", autoRefreshEnabled);
+    }
+
+    _syncSettingsPanelHeight(wrapper);
+  }
+
+  function _syncSettingsPanelHeight(wrapper) {
+    const shell = wrapper?.querySelector(".sfp-settings-shell");
+    const panel = wrapper?.querySelector(".sfp-settings-panel");
+    if (!shell || !panel) return;
+
+    requestAnimationFrame(() => {
+      const visibleRows = Array.from(panel.children).filter((child) => {
+        return child instanceof HTMLElement && getComputedStyle(child).display !== "none";
+      });
+      const contentBottom = visibleRows.reduce((bottom, row) => {
+        return Math.max(bottom, row.offsetTop + row.offsetHeight);
+      }, 28);
+      const panelStyle = getComputedStyle(panel);
+      const paddingBottom = Number.parseFloat(panelStyle.paddingBottom) || 0;
+      const height = Math.max(28, Math.ceil(contentBottom + paddingBottom));
+      shell.style.setProperty("--sfp-settings-shell-height", `${height}px`);
+    });
+  }
+
+  function _beginRefreshButtonBusy() {
+    refreshBusyCount++;
+    _syncRefreshButtonBusy();
+
+    let ended = false;
+    return () => {
+      if (ended) return;
+      ended = true;
+      refreshBusyCount = Math.max(0, refreshBusyCount - 1);
+      _syncRefreshButtonBusy();
+    };
+  }
+
+  function _syncRefreshButtonBusy() {
+    if (!feedRefreshBtn) return;
+    const isBusy = refreshBusyCount > 0;
+    feedRefreshBtn.classList.toggle("spinning", isBusy);
+    feedRefreshBtn.setAttribute("aria-busy", isBusy ? "true" : "false");
+  }
+
+  function _resetRefreshButtonBusy() {
+    refreshBusyCount = 0;
+    _syncRefreshButtonBusy();
   }
 
   // ========== 自定义下拉组件 ==========
@@ -2590,7 +2787,7 @@
     _recomputeSidebarIncomingFilteredTopicIds();
     _scheduleSidebarIncomingFilterRefresh();
     _updateShowMoreHint();
-    if (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0) {
+    if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
       _queueSidebarIncomingApply();
     }
   }
@@ -2609,7 +2806,7 @@
       sidebarIncomingViewSettling ||
       isLoading ||
       !_canShowSidebarIncomingHint() ||
-      (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0)
+      (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0)
     ) {
       _removeShowMoreHint();
       return;
@@ -2698,6 +2895,10 @@
 
   function _canShowSidebarIncomingHint(query = FeedQuery.snapshot()) {
     return showIncomingHint && _canUseSidebarIncomingRefresh(query) && query.filter === "all";
+  }
+
+  function _isAutoSilentRefreshActive(query = FeedQuery.snapshot()) {
+    return autoSilentRefreshEnabled && !showIncomingHint && _canUseSidebarIncomingRefresh(query);
   }
 
   function _topicMatchesCategoryScope(topic, query = FeedQuery.snapshot()) {
@@ -2800,7 +3001,7 @@
     _startAutoSilentRefresh();
     _startAutoRefresh();
     _scheduleSidebarIncomingFilterRefresh();
-    if (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0 && _canUseSidebarIncomingRefresh() && sidebarIncomingTopicIds.length > 0) {
+    if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0 && sidebarIncomingTopicIds.length > 0) {
       _queueSidebarIncomingApply();
     }
   }
@@ -2852,6 +3053,10 @@
     sidebarLatestMessageBusCallback = null;
     sidebarNewMessageBusCallback = null;
     sidebarIncomingApplyQueued = false;
+    if (sidebarIncomingFilterRefreshTimer) {
+      clearTimeout(sidebarIncomingFilterRefreshTimer);
+      sidebarIncomingFilterRefreshTimer = null;
+    }
   }
 
   function _handleSidebarIncomingMessage(data) {
@@ -2869,7 +3074,7 @@
     }
     sidebarIncomingFilterStable = false;
 
-    if (_canUseSidebarIncomingRefresh() && autoSilentRefreshEnabled && autoSilentRefreshInterval === 0) {
+    if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
       _queueSidebarIncomingApply();
     } else {
       if (_canFilterSidebarIncomingFromPayload()) {
@@ -2906,12 +3111,13 @@
   function _queueSidebarIncomingApply() {
     if (sidebarIncomingViewSettling) return;
     if (!_canUseSidebarIncomingRefresh()) return;
-    if (!autoSilentRefreshEnabled || autoSilentRefreshInterval > 0) return;
+    if (!_isAutoSilentRefreshActive() || autoSilentRefreshInterval > 0) return;
     if (sidebarIncomingApplyQueued) return;
 
     sidebarIncomingApplyQueued = true;
     Promise.resolve().then(async () => {
       sidebarIncomingApplyQueued = false;
+      if (!_isAutoSilentRefreshActive() || autoSilentRefreshInterval > 0) return;
       await _applySidebarIncomingTopics({ requireDefaultView: true, logPrefix: "auto silent refresh", preserveViewport: true });
     });
   }
@@ -2919,7 +3125,7 @@
   function _flushQueuedSidebarIncomingApply() {
     if (!sidebarIncomingApplyQueued) return;
 
-    if (!_canUseSidebarIncomingRefresh() || !autoSilentRefreshEnabled || autoSilentRefreshInterval > 0) {
+    if (!_isAutoSilentRefreshActive() || autoSilentRefreshInterval > 0) {
       sidebarIncomingApplyQueued = false;
       return;
     }
@@ -3303,6 +3509,7 @@
 
     const requestQuery = FeedQuery.snapshot();
     const requestToken = ++activeRefreshToken;
+    const endRefreshBusy = _beginRefreshButtonBusy();
     isRefreshing = true;
     try {
       await loadCategoryMetadata();
@@ -3341,6 +3548,7 @@
         _resetAutoRefreshCountdown();
         _flushQueuedSidebarIncomingApply();
       }
+      endRefreshBusy();
     }
   }
 
@@ -3354,16 +3562,22 @@
     if (requireDefaultView && !_canUseSidebarIncomingRefresh()) return;
     if (!feedListEl) return;
 
-    const incomingTopicIds = (await _refreshSidebarIncomingFilter()).slice();
-    if (incomingTopicIds.length === 0) {
-      _updateShowMoreHint();
-      return;
-    }
-
-    const requestQuery = FeedQuery.snapshot();
-    const requestToken = ++activeRefreshToken;
-    isRefreshing = true;
+    const endRefreshBusy = _beginRefreshButtonBusy();
+    let requestToken = null;
     try {
+      const incomingTopicIds = (await _refreshSidebarIncomingFilter()).slice();
+      if (incomingTopicIds.length === 0) {
+        _updateShowMoreHint();
+        return;
+      }
+      if (isLoading || isLoadingMore || isRefreshing) {
+        if (queueIfBusy) sidebarIncomingApplyQueued = true;
+        return;
+      }
+
+      const requestQuery = FeedQuery.snapshot();
+      requestToken = ++activeRefreshToken;
+      isRefreshing = true;
       await loadCategoryMetadata();
       if (requestToken !== activeRefreshToken || !FeedQuery.isCurrent(requestQuery)) return;
       const data = await fetchFeedTopicsByIds(incomingTopicIds);
@@ -3397,14 +3611,14 @@
         isRefreshing = false;
         _flushQueuedSidebarIncomingApply();
       }
+      endRefreshBusy();
     }
   }
 
   function _startAutoSilentRefresh() {
     _stopAutoSilentRefresh();
-    if (!autoSilentRefreshEnabled) return;
+    if (!_isAutoSilentRefreshActive()) return;
     if (autoSilentRefreshInterval <= 0) return;
-    if (!_isLatestActivityView()) return;
 
     _resetAutoSilentRefreshCountdown();
     autoSilentRefreshTimer = setInterval(() => {
@@ -3431,7 +3645,7 @@
   }
 
   function _resetAutoSilentRefreshCountdown() {
-    if (autoSilentRefreshEnabled && autoSilentRefreshInterval > 0) {
+    if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval > 0) {
       autoSilentRefreshSeconds = autoSilentRefreshInterval;
     }
   }
