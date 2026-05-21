@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.43
+// @version      0.6.44
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       GLM
 // @match        https://linux.do/*
@@ -43,7 +43,6 @@
   const AUTO_LOAD_RATE_WINDOW_MS = 5000;
   const AUTO_LOAD_MAX_REQUESTS_PER_WINDOW = 3;
   const AUTO_LOAD_MAX_EMPTY_FILTER_RESULTS = 3;
-  const MAX_INCOMING_TOPIC_IDS_DIRECT_APPLY = 100;
   const TAG_STYLE_CACHE_VERSION = 1;
 
   // ========== 全局状态 ==========
@@ -83,7 +82,6 @@
   let autoLoadSessionKey = "";
   let sidebarIncomingTopicIds = [];
   let sidebarIncomingTopicIdSet = new Set();
-  let sidebarIncomingOverflowed = false;
   let sidebarMessageBus = null;
   let sidebarLatestMessageBusCallback = null;
   let sidebarNewMessageBusCallback = null;
@@ -2500,7 +2498,7 @@
 
     const existing = contentWrapper.querySelector(".sfp-show-more-overlay");
     const newCount = sidebarIncomingTopicIds.length;
-    if (newCount <= 0 && !sidebarIncomingOverflowed) {
+    if (newCount <= 0) {
       if (existing) existing.remove();
       contentWrapper.classList.remove("sfp-has-show-more");
       return;
@@ -2535,9 +2533,7 @@
       hint.appendChild(label);
     }
 
-    label.textContent = sidebarIncomingOverflowed
-      ? "有大量新的或更新的话题，点击刷新"
-      : `查看 ${newCount} 个新的或更新的话题`;
+    label.textContent = `查看 ${newCount} 个新的或更新的话题`;
     contentWrapper.classList.add("sfp-has-show-more");
     if (!existing) {
       contentWrapper.insertBefore(overlay, contentWrapper.firstChild);
@@ -2570,10 +2566,6 @@
     _updateShowMoreHint();
     _startAutoSilentRefresh();
     _startAutoRefresh();
-    if (sidebarIncomingOverflowed && _isDefaultFeedView()) {
-      _queueSidebarIncomingApply();
-      return;
-    }
     if (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0 && _isDefaultFeedView() && sidebarIncomingTopicIds.length > 0) {
       _queueSidebarIncomingApply();
     }
@@ -2635,7 +2627,7 @@
 
     _addSidebarIncomingTopicId(data.topic_id);
 
-    if (_isDefaultFeedView() && (sidebarIncomingOverflowed || (autoSilentRefreshEnabled && autoSilentRefreshInterval === 0))) {
+    if (_isDefaultFeedView() && autoSilentRefreshEnabled && autoSilentRefreshInterval === 0) {
       _queueSidebarIncomingApply();
     } else {
       _updateShowMoreHint();
@@ -2645,11 +2637,6 @@
   function _addSidebarIncomingTopicId(topicId) {
     const numericId = Number(topicId);
     if (!Number.isFinite(numericId) || sidebarIncomingTopicIdSet.has(numericId)) return;
-
-    if (sidebarIncomingTopicIds.length >= MAX_INCOMING_TOPIC_IDS_DIRECT_APPLY) {
-      sidebarIncomingOverflowed = true;
-      return;
-    }
 
     sidebarIncomingTopicIdSet.add(numericId);
     sidebarIncomingTopicIds.push(numericId);
@@ -2663,20 +2650,11 @@
 
     sidebarIncomingTopicIds = sidebarIncomingTopicIds.filter((id) => !toRemove.has(Number(id)));
     sidebarIncomingTopicIdSet = new Set(sidebarIncomingTopicIds);
-    if (sidebarIncomingTopicIds.length === 0) {
-      sidebarIncomingOverflowed = false;
-    }
-  }
-
-  function _clearSidebarIncomingTopicIds() {
-    sidebarIncomingTopicIds = [];
-    sidebarIncomingTopicIdSet = new Set();
-    sidebarIncomingOverflowed = false;
   }
 
   function _queueSidebarIncomingApply() {
     if (!_isDefaultFeedView()) return;
-    if (!sidebarIncomingOverflowed && (!autoSilentRefreshEnabled || autoSilentRefreshInterval > 0)) return;
+    if (!autoSilentRefreshEnabled || autoSilentRefreshInterval > 0) return;
     if (sidebarIncomingApplyQueued) return;
 
     sidebarIncomingApplyQueued = true;
@@ -2689,7 +2667,7 @@
   function _flushQueuedSidebarIncomingApply() {
     if (!sidebarIncomingApplyQueued) return;
 
-    if (!_isDefaultFeedView() || (!sidebarIncomingOverflowed && (!autoSilentRefreshEnabled || autoSilentRefreshInterval > 0))) {
+    if (!_isDefaultFeedView() || !autoSilentRefreshEnabled || autoSilentRefreshInterval > 0) {
       sidebarIncomingApplyQueued = false;
       return;
     }
@@ -2899,12 +2877,10 @@
         hasMorePages = !!data.topic_list.more_topics_url;
         renderTopics();
         _removeSidebarIncomingTopicIds(topics.map((topic) => topic.id));
-        sidebarIncomingOverflowed = false;
         _updateShowMoreHint();
       } else {
         if (feedListEl) feedListEl.innerHTML = `<div class="sfp-empty">暂无话题</div>`;
         hasMorePages = false;
-        sidebarIncomingOverflowed = false;
       }
 
       _startAutoRefresh();
@@ -3010,11 +2986,10 @@
   async function refreshCurrentView() {
     return _refreshCurrentView({
       logPrefix: "manual refresh",
-      clearIncomingOnSuccess: sidebarIncomingOverflowed && _isDefaultFeedView(),
     });
   }
 
-  async function _refreshCurrentView({ requireDefaultView = false, logPrefix = "refresh", clearIncomingOnSuccess = false } = {}) {
+  async function _refreshCurrentView({ requireDefaultView = false, logPrefix = "refresh" } = {}) {
     if (isLoading || isLoadingMore || isRefreshing) return false;
     if (requireDefaultView && !_isDefaultFeedView()) return false;
     if (!feedListEl) return false;
@@ -3044,11 +3019,7 @@
       hasMorePages = !!data.topic_list.more_topics_url;
 
       renderTopics(newTopicIds);
-      if (clearIncomingOnSuccess) {
-        _clearSidebarIncomingTopicIds();
-      } else {
-        _removeSidebarIncomingTopicIds(freshTopics.map((topic) => topic.id));
-      }
+      _removeSidebarIncomingTopicIds(freshTopics.map((topic) => topic.id));
 
       _updateShowMoreHint();
       return true;
@@ -3077,15 +3048,6 @@
     const incomingTopicIds = sidebarIncomingTopicIds.slice();
     if (incomingTopicIds.length === 0) {
       _updateShowMoreHint();
-      return;
-    }
-
-    if (sidebarIncomingOverflowed || incomingTopicIds.length > MAX_INCOMING_TOPIC_IDS_DIRECT_APPLY) {
-      await _refreshCurrentView({
-        requireDefaultView,
-        logPrefix: `${logPrefix} overflow refresh`,
-        clearIncomingOnSuccess: true,
-      });
       return;
     }
 
