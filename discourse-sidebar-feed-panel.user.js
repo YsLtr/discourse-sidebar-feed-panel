@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.63
+// @version      0.6.67
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -101,6 +101,9 @@
   let categoryMetaLoaded = false;
   let tagStylePromise = null;
   let tagStyleLoaded = false;
+  let siteDataPromise = null;
+  let siteDataLoaded = false;
+  let siteDataCache = null;
   let pendingTabBarScrollTab = null;
   let toggleBtn = null;
   let feedContainer = null;
@@ -110,6 +113,7 @@
   let feedRefreshBtn = null;
   let refreshBusyCount = 0;
   let feedBackTopBtn = null;
+  let feedScrollAbortController = null;
   let resizerEl = null;
   let isResizing = false;
   let originalSidebarWidthBeforeFeed = null;
@@ -168,8 +172,9 @@
 
   function formatRelativeTime(dateStr) {
     const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return "";
     const now = new Date();
-    const diff = now - date;
+    const diff = Math.max(0, now - date);
     const seconds = Math.floor(diff / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
@@ -318,22 +323,26 @@
   function _categoryFallbackMeta(id) {
     const config = CATEGORY_CONFIG[id];
     if (!config) return null;
-    const parent = config.parent_category_id ? _getCategoryMeta(config.parent_category_id) : null;
-    const icon = _safeIconName(config.icon || "folder");
+    return _normalizeCategoryMeta({ id }, config, config.parent_category_id ? _getCategoryMeta(config.parent_category_id) : null);
+  }
+
+  function _normalizeCategoryMeta(raw = {}, fallback = {}, parent = null) {
+    const id = Number(raw.id ?? fallback.id);
+    const icon = _safeIconName(raw.icon || fallback.icon || parent?.icon || "folder");
     return {
-      id: Number(id),
-      name: config.name || "",
-      color: _normalizeHexColor(config.color, "888"),
-      text_color: _normalizeHexColor(config.text_color, "FFFFFF"),
+      id,
+      name: raw.name || fallback.name || "",
+      color: _normalizeHexColor(raw.color || fallback.color, "888"),
+      text_color: _normalizeHexColor(raw.text_color || fallback.text_color, "FFFFFF"),
       icon,
-      style_type: _safeCategoryStyleType(config.style_type, !!icon),
-      slug: config.tabId || "",
-      parent_category_id: config.parent_category_id || null,
-      parent_color: parent?.color || null,
-      parent_text_color: parent?.text_color || null,
-      read_restricted: !!config.read_restricted,
-      description_text: "",
-      description_excerpt: "",
+      style_type: _safeCategoryStyleType(raw.style_type || fallback.style_type, !!icon),
+      slug: raw.slug || fallback.tabId || "",
+      parent_category_id: raw.parent_category_id || fallback.parent_category_id || null,
+      parent_color: parent ? _normalizeHexColor(parent.color, "888") : null,
+      parent_text_color: parent ? _normalizeHexColor(parent.text_color, "FFFFFF") : null,
+      read_restricted: !!(raw.read_restricted || fallback.read_restricted),
+      description_text: raw.description_text || raw.description_excerpt || raw.description || "",
+      description_excerpt: raw.description_excerpt || raw.description_text || raw.description || "",
     };
   }
 
@@ -412,15 +421,60 @@
     }
   }
 
+  function _parsePreloadedPayload(raw) {
+    if (!raw) return null;
+    try {
+      const decoded = raw.startsWith("%") ? decodeURIComponent(raw) : raw;
+      return JSON.parse(decoded);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function _extractPreloadedSiteData() {
+    const candidates = [
+      ...document.querySelectorAll("[data-preloaded]"),
+      ...document.querySelectorAll("script[type='application/json']"),
+    ];
+    for (const el of candidates) {
+      const payload = _parsePreloadedPayload(el.getAttribute("data-preloaded") || el.textContent || "");
+      const site = payload?._site || payload?.site || payload;
+      if (site?.categories || site?.top_tags) return site;
+    }
+    return null;
+  }
+
+  async function loadSiteData() {
+    if (siteDataLoaded) return siteDataCache;
+    if (siteDataPromise) return siteDataPromise;
+
+    siteDataPromise = (async () => {
+      const preloaded = _extractPreloadedSiteData();
+      if (preloaded) {
+        siteDataCache = preloaded;
+        siteDataLoaded = true;
+        return siteDataCache;
+      }
+
+      const resp = await fetch("/site.json", { headers: { "X-CSRF-Token": getCsrfToken() } });
+      if (!resp.ok) throw new Error(`site.json ${resp.status}`);
+      siteDataCache = await resp.json();
+      siteDataLoaded = true;
+      return siteDataCache;
+    })().finally(() => {
+      siteDataPromise = null;
+    });
+
+    return siteDataPromise;
+  }
+
   async function loadCategoryMetadata() {
     if (categoryMetaLoaded) return;
     if (categoryMetaPromise) return categoryMetaPromise;
 
     categoryMetaPromise = (async () => {
       try {
-        const resp = await fetch("/site.json", { headers: { "X-CSRF-Token": getCsrfToken() } });
-        if (!resp.ok) throw new Error(`site.json ${resp.status}`);
-        const site = await resp.json();
+        const site = await loadSiteData();
         const categories = Array.isArray(site?.categories) ? site.categories : [];
         const rawById = new Map(categories.map((cat) => [Number(cat.id), cat]));
 
@@ -429,22 +483,7 @@
           if (!Number.isFinite(id)) return;
           const parent = cat.parent_category_id ? rawById.get(Number(cat.parent_category_id)) : null;
           const fallback = CATEGORY_CONFIG[id] || {};
-          const icon = _safeIconName(cat.icon || fallback.icon || parent?.icon || "");
-          categoryMetaById.set(id, {
-            id,
-            name: cat.name || fallback.name || "",
-            color: _normalizeHexColor(cat.color || fallback.color, "888"),
-            text_color: _normalizeHexColor(cat.text_color || fallback.text_color, "FFFFFF"),
-            icon,
-            style_type: _safeCategoryStyleType(cat.style_type || fallback.style_type, !!icon),
-            slug: cat.slug || fallback.tabId || "",
-            parent_category_id: cat.parent_category_id || null,
-            parent_color: parent ? _normalizeHexColor(parent.color, "888") : null,
-            parent_text_color: parent ? _normalizeHexColor(parent.text_color, "FFFFFF") : null,
-            read_restricted: !!cat.read_restricted,
-            description_text: cat.description_text || cat.description_excerpt || cat.description || "",
-            description_excerpt: cat.description_excerpt || cat.description_text || cat.description || "",
-          });
+          categoryMetaById.set(id, _normalizeCategoryMeta(cat, fallback, parent));
         });
 
         categoryMetaLoaded = true;
@@ -478,6 +517,37 @@
 
   function _tagDisplayName(tag) {
     return typeof tag === "string" ? tag : (tag?.name || tag?.text || tag?.slug || "");
+  }
+
+  function _normalizeTagRecord(tag) {
+    if (typeof tag === "string") {
+      const name = tag.trim();
+      return name ? { name, slug: name } : null;
+    }
+    if (tag && typeof tag === "object") {
+      const name = String(tag.name || tag.text || tag.slug || tag.id || "").trim();
+      if (!name) return null;
+      return {
+        id: tag.id,
+        name,
+        slug: tag.slug || tag.name || name,
+      };
+    }
+    const name = String(tag || "").trim();
+    return name ? { name, slug: name } : null;
+  }
+
+  function _getTopTagsFromSiteData(site) {
+    if (site?.can_tag_topics === false) return [];
+    const topTags = Array.isArray(site?.top_tags) ? site.top_tags : [];
+    return topTags.map(_normalizeTagRecord).filter(Boolean);
+  }
+
+  function _cacheTagStyleAliases(tags) {
+    tags.forEach((tag) => {
+      const style = _getTagStyle(tag);
+      if (style) _cacheTagStyle(_tagIndexKeys(tag), style);
+    });
   }
 
   function _getTagStyle(tag) {
@@ -604,7 +674,15 @@
     tagStylePromise = (async () => {
       let iframe = null;
       try {
+        let siteTags = [];
+        try {
+          siteTags = _getTopTagsFromSiteData(await loadSiteData());
+        } catch (e) {
+          siteTags = _getTopTagsFromSiteData(_extractPreloadedSiteData());
+        }
+
         if (_loadTagStyleCache()) {
+          _cacheTagStyleAliases(siteTags);
           tagStyleLoaded = true;
           return;
         }
@@ -618,6 +696,7 @@
         const doc = await _waitForIframeTags(iframe);
         if (doc) _extractTagStylesFromDocument(doc);
 
+        _cacheTagStyleAliases(siteTags);
         _saveTagStyleCache();
         tagStyleLoaded = true;
       } catch (e) {
@@ -1709,6 +1788,10 @@
         align-items: center;
         gap: 4px;
       }
+      .sfp-topic-item .sfp-topic-stat .d-icon {
+        width: 1em;
+        height: 1em;
+      }
 
       /* ===== 加载状态 ===== */
       .sfp-loading {
@@ -2006,6 +2089,10 @@
 
     if (feedContainer) {
       _resetRefreshButtonBusy();
+      if (feedScrollAbortController) {
+        feedScrollAbortController.abort();
+        feedScrollAbortController = null;
+      }
       feedContainer.remove();
       feedContainer = null;
       feedHeaderEl = null;
@@ -2077,6 +2164,10 @@
     isRefreshing = false;
     _pendingReload = false;
     sidebarIncomingApplyQueued = false;
+    if (feedScrollAbortController) {
+      feedScrollAbortController.abort();
+      feedScrollAbortController = null;
+    }
 
     _stopAutoRefresh();
     _stopAutoSilentRefresh();
@@ -2284,8 +2375,8 @@
 
     const incomingHintInput = panel.querySelector(".sfp-incoming-hint-input");
     if (incomingHintInput) {
-      incomingHintInput.addEventListener("change", () => {
-        showIncomingHint = incomingHintInput.checked;
+      _bindCheckboxSetting(incomingHintInput, (checked) => {
+        showIncomingHint = checked;
         GM_setValue(SHOW_INCOMING_HINT_KEY, showIncomingHint);
         if (showIncomingHint) {
           _stopAutoSilentRefresh();
@@ -2304,8 +2395,8 @@
     const autoSilentInput = panel.querySelector(".sfp-auto-silent-input");
     const silentIntervalInput = panel.querySelector(".sfp-auto-silent-refresh-interval-input");
     if (autoSilentInput) {
-      autoSilentInput.addEventListener("change", () => {
-        autoSilentRefreshEnabled = autoSilentInput.checked;
+      _bindCheckboxSetting(autoSilentInput, (checked) => {
+        autoSilentRefreshEnabled = checked;
         GM_setValue(AUTO_SILENT_REFRESH_KEY, autoSilentRefreshEnabled);
         if (autoSilentRefreshEnabled && showIncomingHint) {
           showIncomingHint = false;
@@ -2320,25 +2411,21 @@
       });
     }
 
-    if (silentIntervalInput) {
-      silentIntervalInput.addEventListener("change", () => {
-        const seconds = Math.max(0, Number(silentIntervalInput.value) || DEFAULT_AUTO_SILENT_REFRESH_INTERVAL);
-        autoSilentRefreshInterval = seconds;
-        silentIntervalInput.value = seconds;
-        GM_setValue(AUTO_SILENT_REFRESH_INTERVAL_KEY, autoSilentRefreshInterval);
-        _startAutoSilentRefresh();
-        if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
-          _queueSidebarIncomingApply();
-        }
-      });
-    }
+    _bindNumberSetting(silentIntervalInput, 0, DEFAULT_AUTO_SILENT_REFRESH_INTERVAL, (seconds) => {
+      autoSilentRefreshInterval = seconds;
+      GM_setValue(AUTO_SILENT_REFRESH_INTERVAL_KEY, autoSilentRefreshInterval);
+      _startAutoSilentRefresh();
+      if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
+        _queueSidebarIncomingApply();
+      }
+    });
 
     const autoRefreshInput = panel.querySelector(".sfp-auto-refresh-input");
     const intervalRow = panel.querySelector(".sfp-auto-refresh-interval");
     const intervalInput = panel.querySelector(".sfp-auto-refresh-interval-input");
     if (autoRefreshInput) {
-      autoRefreshInput.addEventListener("change", () => {
-        autoRefreshEnabled = autoRefreshInput.checked;
+      _bindCheckboxSetting(autoRefreshInput, (checked) => {
+        autoRefreshEnabled = checked;
         GM_setValue(AUTO_REFRESH_ENABLED_KEY, autoRefreshEnabled);
         intervalRow.classList.toggle("visible", autoRefreshEnabled);
         _syncSettingsPanelHeight(wrapper);
@@ -2346,15 +2433,11 @@
       });
     }
 
-    if (intervalInput) {
-      intervalInput.addEventListener("change", () => {
-        const seconds = Math.max(1, Number(intervalInput.value) || DEFAULT_AUTO_REFRESH_INTERVAL);
-        autoRefreshInterval = seconds;
-        intervalInput.value = seconds;
-        GM_setValue(AUTO_REFRESH_INTERVAL_KEY, autoRefreshInterval);
-        _startAutoRefresh();
-      });
-    }
+    _bindNumberSetting(intervalInput, 1, DEFAULT_AUTO_REFRESH_INTERVAL, (seconds) => {
+      autoRefreshInterval = seconds;
+      GM_setValue(AUTO_REFRESH_INTERVAL_KEY, autoRefreshInterval);
+      _startAutoRefresh();
+    });
 
     shell.appendChild(btn);
     shell.appendChild(panel);
@@ -2424,11 +2507,26 @@
     });
   }
 
+  function _bindCheckboxSetting(input, onChange) {
+    if (!input) return;
+    input.addEventListener("change", () => onChange(input.checked));
+  }
+
+  function _bindNumberSetting(input, min, fallback, onChange) {
+    if (!input) return;
+    input.addEventListener("change", () => {
+      const nextValue = Math.max(min, Number(input.value) || fallback);
+      input.value = nextValue;
+      onChange(nextValue);
+    });
+  }
+
   function _beginRefreshButtonBusy() {
     refreshBusyCount++;
     _syncRefreshButtonBusy();
 
     let ended = false;
+    // Call the returned function exactly once when the async refresh path settles.
     return () => {
       if (ended) return;
       ended = true;
@@ -3063,8 +3161,20 @@
   }
 
   function _getMessageBusLastId(channel) {
-    const lastId = sidebarMessageBus?.callbacks?.find((callback) => callback.channel === channel)?.last_id;
-    return Number.isFinite(lastId) ? lastId : -1;
+    const candidates = [
+      sidebarMessageBus?.lastId?.(channel),
+      sidebarMessageBus?.lastIdForChannel?.(channel),
+      sidebarMessageBus?.lastIds?.[channel],
+      sidebarMessageBus?.last_ids?.[channel],
+      sidebarMessageBus?.channels?.[channel]?.lastId,
+    ];
+
+    for (const candidate of candidates) {
+      const lastId = Number(candidate);
+      if (Number.isFinite(lastId)) return lastId;
+    }
+
+    return -1;
   }
 
   function _stopSidebarIncomingTracking() {
@@ -3163,14 +3273,7 @@
   }
 
   function _getAutoLoadSessionKey() {
-    return [
-      currentTab,
-      currentCategoryId || "",
-      currentOrder,
-      currentPeriod,
-      currentFilter,
-      hidePinned ? "hide-pinned" : "show-pinned",
-    ].join("|");
+    return FeedQuery.key(FeedQuery.snapshot());
   }
 
   function _resetAutoLoadState() {
@@ -3530,6 +3633,48 @@
     requestAnimationFrame(restore);
   }
 
+  function _mergeAndRenderTopics(fetchedTopics, {
+    mode = "prepend",
+    moreTopicsUrl = "",
+    incomingCandidateIds = [],
+    filterTopic = null,
+    preserveViewport = false,
+  } = {}) {
+    const topics = typeof filterTopic === "function"
+      ? fetchedTopics.filter(filterTopic)
+      : fetchedTopics;
+
+    if (topics.length === 0) {
+      if (incomingCandidateIds.length) _removeSidebarIncomingTopicIds(incomingCandidateIds);
+      _updateShowMoreHint();
+      return false;
+    }
+
+    const topicMap = new Map(topics.map((topic) => [topic.id, topic]));
+    let highlightTopicIds = [];
+
+    if (mode === "replace-head") {
+      highlightTopicIds = topics
+        .filter((topic) => !loadedTopicIds.has(topic.id) || sidebarIncomingTopicIdSet.has(Number(topic.id)))
+        .map((topic) => topic.id);
+      allTopics = topics.concat(allTopics.filter((topic) => !topicMap.has(topic.id)));
+      hasMorePages = !!moreTopicsUrl;
+    } else {
+      highlightTopicIds = topics.map((topic) => topic.id);
+      allTopics = topics.concat(allTopics.filter((topic) => !topicMap.has(topic.id)));
+      hasMorePages = hasMorePages || topics.length > 0;
+    }
+
+    topics.forEach((topic) => loadedTopicIds.add(topic.id));
+
+    const scrollAnchor = _captureFeedScrollAnchor();
+    renderTopics(highlightTopicIds, { preserveProtected: preserveViewport });
+    if (incomingCandidateIds.length) _removeSidebarIncomingTopicIds(incomingCandidateIds);
+    _updateShowMoreHint();
+    _restoreFeedScrollAnchor(scrollAnchor);
+    return true;
+  }
+
   async function _refreshCurrentView({ requireDefaultView = false, logPrefix = "refresh", preserveViewport = false } = {}) {
     if (isLoading || isLoadingMore || isRefreshing) return false;
     if (requireDefaultView && !_canUseSidebarIncomingRefresh()) return false;
@@ -3548,25 +3693,12 @@
 
       if (!data?.topic_list?.topics) return false;
 
-      const freshTopics = data.topic_list.topics;
-      const freshMap = new Map(freshTopics.map((t) => [t.id, t]));
-      const refreshHighlightTopicIds = freshTopics
-        .filter((topic) => !loadedTopicIds.has(topic.id) || sidebarIncomingTopicIdSet.has(Number(topic.id)))
-        .map((topic) => topic.id);
-
-      freshTopics.forEach((topic) => loadedTopicIds.add(topic.id));
-
-      const existingTail = allTopics.filter((topic) => !freshMap.has(topic.id));
-      allTopics = freshTopics.concat(existingTail);
-      hasMorePages = !!data.topic_list.more_topics_url;
-
-      const scrollAnchor = _captureFeedScrollAnchor();
-      renderTopics(refreshHighlightTopicIds, { preserveProtected: preserveViewport });
-      _removeSidebarIncomingTopicIds(freshTopics.map((topic) => topic.id));
-
-      _updateShowMoreHint();
-      _restoreFeedScrollAnchor(scrollAnchor);
-      return true;
+      return _mergeAndRenderTopics(data.topic_list.topics, {
+        mode: "replace-head",
+        moreTopicsUrl: data.topic_list.more_topics_url,
+        incomingCandidateIds: data.topic_list.topics.map((topic) => topic.id),
+        preserveViewport,
+      });
     } catch (e) {
       console.warn(`[SFP] ${logPrefix} error:`, e);
       return false;
@@ -3613,25 +3745,12 @@
       if (!data?.topic_list?.topics) return;
       _processUsers(data);
 
-      const incomingTopics = data.topic_list.topics.filter((topic) => _topicMatchesIncomingView(topic, requestQuery));
-      const incomingMap = new Map(incomingTopics.map((topic) => [topic.id, topic]));
-      const incomingIdSet = new Set(incomingTopics.map((topic) => topic.id));
-
-      if (incomingTopics.length === 0) {
-        _removeSidebarIncomingTopicIds(incomingTopicIds);
-        _updateShowMoreHint();
-        return;
-      }
-
-      incomingTopics.forEach((topic) => loadedTopicIds.add(topic.id));
-      allTopics = incomingTopics.concat(allTopics.filter((topic) => !incomingMap.has(topic.id)));
-      hasMorePages = hasMorePages || incomingTopics.length > 0;
-
-      const scrollAnchor = _captureFeedScrollAnchor();
-      renderTopics(Array.from(incomingIdSet), { preserveProtected: preserveViewport });
-      _removeSidebarIncomingTopicIds(incomingTopicIds);
-      _updateShowMoreHint();
-      _restoreFeedScrollAnchor(scrollAnchor);
+      _mergeAndRenderTopics(data.topic_list.topics, {
+        mode: "prepend",
+        incomingCandidateIds: incomingTopicIds,
+        filterTopic: (topic) => _topicMatchesIncomingView(topic, requestQuery),
+        preserveViewport,
+      });
     } catch (e) {
       console.warn(`[SFP] ${logPrefix} error:`, e);
     } finally {
@@ -3760,9 +3879,9 @@
     const views = topic.views >= 1000 ? (topic.views / 1000).toFixed(1) + "k" : (topic.views || 0);
     const likes = topic.like_count || 0;
     return `
-        <span class="sfp-topic-stat">💬 ${replies}</span>
-        <span class="sfp-topic-stat">👁 ${views}</span>
-        <span class="sfp-topic-stat">❤️ ${likes}</span>
+        <span class="sfp-topic-stat">${_svgIcon("comment")} ${replies}</span>
+        <span class="sfp-topic-stat">${_svgIcon("far-eye")} ${views}</span>
+        <span class="sfp-topic-stat">${_svgIcon("heart")} ${likes}</span>
       `;
   }
 
@@ -3954,7 +4073,13 @@
 
   // 已读 = 首页标题链接带楼层号；未读 = 首页标题链接不带楼层号。
   function _isTopicRead(topic) {
-    return _topicListUrlHasPostNumber(topic);
+    if (!topic || !topic.id) return false;
+    if (_hasLastReadPostNumber(topic)) return _topicListUrlHasPostNumber(topic);
+    if (topic.unseen === true) return false;
+    if (Number(topic.new_posts) > 0 || Number(topic.unread_posts) > 0) return false;
+    if (topic.is_seen === true || topic.unseen === false) return true;
+    if (Number(topic.new_posts) === 0 && Number(topic.unread_posts) === 0) return true;
+    return false;
   }
 
   function _hasUnreadMarker(topic) {
@@ -4179,6 +4304,15 @@
   // ========== 无限滚动加载 ==========
   function _setupScrollLoadMore() {
     if (!feedScrollEl) return;
+    if (feedScrollAbortController) feedScrollAbortController.abort();
+    feedScrollAbortController = typeof AbortController === "function" ? new AbortController() : null;
+    const listenerOptions = feedScrollAbortController
+      ? { passive: false, signal: feedScrollAbortController.signal }
+      : { passive: false };
+    const passiveListenerOptions = feedScrollAbortController
+      ? { passive: true, signal: feedScrollAbortController.signal }
+      : { passive: true };
+
     feedScrollEl.addEventListener("wheel", (e) => {
       if (!feedScrollEl || e.deltaY === 0) return;
 
@@ -4193,9 +4327,9 @@
         e.preventDefault();
         e.stopPropagation();
       }
-    }, { passive: false });
+    }, listenerOptions);
 
-    feedScrollEl.addEventListener("scroll", _updateBackTopButton, { passive: true });
+    feedScrollEl.addEventListener("scroll", _updateBackTopButton, passiveListenerOptions);
 
     feedScrollEl.addEventListener("scroll", debounce(() => {
       if (!feedScrollEl || !hasMorePages || isLoadingMore) return;
@@ -4203,7 +4337,7 @@
       if (scrollHeight - scrollTop - clientHeight < 200) {
         loadMoreTopics({ source: "auto" });
       }
-    }, 300));
+    }, 300), passiveListenerOptions);
   }
 
   // ========== 加载更多辅助 ==========
@@ -4304,7 +4438,8 @@
           }
         }
       });
-      observer.observe(document.body, { childList: true, subtree: true });
+      const target = document.querySelector("#main-outlet") || document.querySelector(".d-header") || document.body;
+      observer.observe(target, { childList: true, subtree: true });
     }
 
     function _checkUrlChange() {
