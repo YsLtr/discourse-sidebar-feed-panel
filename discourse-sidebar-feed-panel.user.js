@@ -44,6 +44,7 @@
   const AUTO_LOAD_RATE_WINDOW_MS = 5000;
   const AUTO_LOAD_MAX_REQUESTS_PER_WINDOW = 3;
   const AUTO_LOAD_MAX_EMPTY_FILTER_RESULTS = 3;
+  const SETTINGS_BUTTON_SIZE = 28;
   const TAG_STYLE_CACHE_VERSION = 1;
 
   // ========== 全局状态 ==========
@@ -2507,10 +2508,10 @@
       });
       const contentBottom = visibleRows.reduce((bottom, row) => {
         return Math.max(bottom, row.offsetTop + row.offsetHeight);
-      }, 28);
+      }, SETTINGS_BUTTON_SIZE);
       const panelStyle = getComputedStyle(panel);
       const paddingBottom = Number.parseFloat(panelStyle.paddingBottom) || 0;
-      const height = Math.max(28, Math.ceil(contentBottom + paddingBottom));
+      const height = Math.max(SETTINGS_BUTTON_SIZE, Math.ceil(contentBottom + paddingBottom));
       shell.style.setProperty("--sfp-settings-shell-height", `${height}px`);
     });
   }
@@ -3224,8 +3225,6 @@
         _recomputeSidebarIncomingFilteredTopicIds();
         sidebarIncomingState.filterStable = true;
         _updateShowMoreHint({ skipIncomingFilterRefresh: true });
-      } else {
-        _scheduleSidebarIncomingFilterRefresh();
       }
     }
   }
@@ -3347,10 +3346,6 @@
 
     isCurrent(query) {
       return this.key(query) === this.key(this.snapshot());
-    },
-
-    isDefault(query = this.snapshot()) {
-      return query.tab === "all" && query.order === "activity" && query.filter === "all";
     },
 
     buildUrl(query, page) {
@@ -4078,7 +4073,9 @@
   function _isTopicRead(topic) {
     if (!topic || !topic.id) return false;
     if (_hasLastReadPostNumber(topic)) {
-      return new RegExp(`/t/[^/]+/${topic.id}/\\d+(?:$|[/?#])`).test(_topicListUrl(topic));
+      const baseUrl = _topicBaseUrl(topic);
+      const url = _topicListUrl(topic);
+      return url !== baseUrl && url.startsWith(`${baseUrl}/`);
     }
     if (topic.unseen === true) return false;
     if (Number(topic.new_posts) > 0 || Number(topic.unread_posts) > 0) return false;
@@ -4245,7 +4242,7 @@
         ${statusBadgesHtml}
         <span class="sfp-topic-time">${_topicTimeHtml(topic)}</span>
       </div>
-      <div class="sfp-topic-title"><span class="sfp-topic-title-line">${closedHtml}${escapeHtml(topic.unicode_title || topic.title)}</span></div>
+      <div class="sfp-topic-title"><span class="sfp-topic-title-line">${closedHtml}${escapeHtml(topic.unicode_title?.trim() || topic.title)}</span></div>
       <div class="sfp-topic-category-tags">
         ${categoryHtml}
         ${tagsHtml}
@@ -4361,10 +4358,7 @@
       return;
     }
 
-    const noMoreEl = document.createElement("div");
-    noMoreEl.className = "sfp-no-more";
-    noMoreEl.textContent = "— 已经到底了 —";
-    feedListEl.appendChild(noMoreEl);
+    _appendNoMore();
   }
 
   function _showLoadMoreSpinner() {
@@ -4381,6 +4375,10 @@
 
   function _showNoMore() {
     _removePaginationFooter();
+    _appendNoMore();
+  }
+
+  function _appendNoMore() {
     const el = document.createElement("div");
     el.className = "sfp-no-more";
     el.textContent = "— 已经到底了 —";

@@ -1,40 +1,37 @@
 # Discourse Sidebar Feed Panel — Active Handoff
 
-**Updated**: 2026-05-22 13:22 (+08:00)
+**Updated**: 2026-05-22 13:53 (+08:00)
 **Project root**: `C:/Users/28676/builds/discourse/userscript`
 **Branch**: `master`
-**Current objective**: Continue low-risk structural cleanup in `discourse-sidebar-feed-panel.user.js`, with small validated steps. Avoid broad automated CSS rewrites.
+**Current objective**: Continue low-risk cleanup in `discourse-sidebar-feed-panel.user.js` with small reviewed steps. Avoid broad automated CSS rewrites.
 
 ## Current State
 
 - Main file: `discourse-sidebar-feed-panel.user.js`
 - Current userscript version in file: `0.6.69`
-- Latest completed pass reviewed and optimized code-review findings:
-  - Added cached `getCsrfToken()` and `toAbsoluteSiteUrl()`.
+- Latest completed pass reviewed the user's "third round comprehensive review" and applied the reasonable low-risk findings:
+  - Removed unused `FeedQuery.isDefault()`.
+  - Removed the no-op incoming refresh scheduling branch in `_handleSidebarIncomingMessage()`.
+  - Added `SETTINGS_BUTTON_SIZE` for `_syncSettingsPanelHeight()` instead of repeated `28`.
+  - Replaced `_isTopicRead()` per-topic `RegExp` creation with `_topicBaseUrl()` plus string comparison.
+  - Trimmed `topic.unicode_title` before falling back to `topic.title`.
+  - Extracted `_appendNoMore()` so `_renderPaginationFooter()` and `_showNoMore()` share the "already at bottom" DOM construction without dropping optional footer notes.
+- Earlier cleanup already completed:
+  - Cached `getCsrfToken()` and `toAbsoluteSiteUrl()`.
   - Replaced hardcoded `https://linux.do` URL joins in avatar and middle-click topic open paths.
   - Replaced topic middle-click `mousedown`/`mouseup` handling with `auxclick`.
-  - Extracted `getSidebarElement()` and replaced repeated `#d-sidebar` / `.sidebar-container` lookup sites.
-  - Removed unused `_isDefaultFeedView()`, `_canFilterSidebarIncomingFromPayload()`, empty `.sfp-pinned` CSS rule, and `_topicListUrlHasPostNumber()`.
-  - Simplified `_scrollTabIntoView()` to direct `scrollTo()`.
-  - Made `_topicMatchesIncomingView()` reuse `_topicMatchesIncomingCandidate()`.
-  - Added `_applyFilter()` default early return.
-  - Extracted `_applyReadMarker()` and grouped read-state helpers near `_isTopicRead()` / `_hasUnreadMarker()`.
-  - Optimized `_updateSettingsControl()` so same-mode settings panels sync state instead of rebuilding DOM.
-  - Removed the ineffective `_getOrderedTabCategories()` filter while preserving behavior: saved tab order is prioritized and unsaved/new tabs still appear.
+  - Extracted `getSidebarElement()` and removed several unused helpers/CSS rules.
+  - Simplified `_scrollTabIntoView()`, incoming candidate matching, read marker helpers, settings panel syncing, and saved tab ordering behavior.
 
 ## Validation
 
-- `node --check discourse-sidebar-feed-panel.user.js` passed.
-- `git diff --check -- discourse-sidebar-feed-panel.user.js` passed, with only CRLF conversion warnings.
-- Browser verification with `$agent-browser-cli` on linux.do tab `1047331194` (`https://linux.do/t/topic/2224562`) confirmed:
-  - `.sfp-feed-container`, `.sfp-settings-wrap`, `.sfp-tab-bar`, and `.sfp-back-top-btn` are present.
-  - `.sfp-tab-bar` `overflow-x` remains `auto`.
-  - `.sfp-topic-stat .d-icon` count was nonzero (`111` at verification time).
-- Browser verification reflects the currently installed userscript in the browser. Local metadata/code changes require reinstall/update before they run in-page.
+- `node --check discourse-sidebar-feed-panel.user.js` passed after the latest edits.
+- `git diff --check -- discourse-sidebar-feed-panel.user.js` passed, with only the expected CRLF conversion warning.
+- Browser verification was not rerun for the latest local edits. Previous linux.do verification confirmed the installed userscript rendered `.sfp-feed-container`, `.sfp-settings-wrap`, `.sfp-tab-bar`, and `.sfp-back-top-btn`; local code changes still require reinstall/update before in-page verification.
 
 ## Constraints
 
-- Do not commit unrelated untracked files unless explicitly requested.
+- Do not commit unrelated untracked/reference files unless explicitly requested.
 - Current unrelated untracked/reference files: `CLAUDE.md`, `LINUX DO Timeline-1.29.1.user.js`, `discourse-content-preserver.user.js`.
 - Sidebar minimum width remains `DEFAULT_WIDTH = 272`.
 - Preserve `0.6.21+` period behavior: `period=all` ranked orders stay on `/latest.json?order=...`; non-`all` ranked periods use `/top.json?period=...&order=...`.
@@ -48,15 +45,17 @@
 - `_isTopicRead()` remains intentionally defensive. Any future simplification must preserve read/unread filters and protected-topic local patching.
 - RouteWatcher narrowing should continue to be watched during live route changes and sidebar regeneration.
 - Incoming-topic state is improved but still spread across helper functions; keep future refactors behavior-preserving.
+- `_startAutoRefresh()` is still called from both control sync and successful topic load paths; previous review marked this as redundant but safe because `_startAutoRefresh()` stops the old timer first.
 
 ## Recommended Next Steps
 
-1. Run another focused review of incoming refresh state helpers, one small slice at a time.
-2. If changing route/sidebar behavior, verify on linux.do with `$agent-browser-cli` after reinstalling/updating the local userscript.
-3. Consider only small CSS extraction candidates, such as loading/error styles, not the full `injectStyles()` block.
+1. Reinstall/update the local userscript before any live browser verification.
+2. If continuing cleanup, review one incoming refresh state helper slice at a time.
+3. If changing route/sidebar behavior, verify on linux.do with `$agent-browser-cli`.
+4. Consider only small CSS extraction candidates, such as loading/error styles, not the full `injectStyles()` block.
 
 ## Suggested Skills
 
 - `$agent-browser-cli` for live linux.do verification.
-- `/review` or `/simplify` for the next code-quality pass.
+- `/review` or `/simplify` for another focused quality pass.
 - `/diagnose` if a regression appears after refactoring.
