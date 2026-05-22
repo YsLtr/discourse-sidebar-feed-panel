@@ -20,6 +20,9 @@
   if (window.top !== window.self) return;
 
   // ========== 持久化键 ==========
+  // 所有 GM_* 键都带 sfp_ 前缀，避免和其他 userscript 或站点本身的
+  // localStorage/GM 存储冲突。这里的键名一旦发布就尽量不要重命名：
+  // 老版本用户升级时会直接读取这些值来恢复宽度、标签、筛选和刷新偏好。
   const STATE_KEY = "sfp_feed_mode_enabled";
   const ORDER_KEY = "sfp_current_order";
   const PERIOD_KEY = "sfp_current_period";
@@ -36,11 +39,21 @@
   const TAG_STYLE_CACHE_KEY = "sfp_tag_style_cache_v1";
 
   // ========== 常量 ==========
+  // DEFAULT_WIDTH 同时也是当前最小宽度。之前的需求要求“允许压缩的最小宽度
+  // 改为 header-sidebar-toggle 的宽度”，但侧边栏内容在 272px 以下会破坏
+  // 话题卡片和设置浮层，因此这里保留信息流面板自己的最低可用宽度。
   const DEFAULT_WIDTH = 272;
   const MIN_WIDTH = DEFAULT_WIDTH;
   const MAX_WIDTH = 500;
+
+  // 两套刷新机制的默认值刻意不同：
+  // - 最新活动依赖 Discourse message-bus 的增量候选，默认 0 表示用户手动点提醒；
+  // - 其他排序没有可靠增量事件，默认 10 秒重新拉取当前列表。
   const DEFAULT_AUTO_SILENT_REFRESH_INTERVAL = 0;
   const DEFAULT_AUTO_REFRESH_INTERVAL = 10;
+
+  // 自动补页只在“筛选后当前页不够显示”时触发。窗口限速和空结果计数一起
+  // 防止未读/已读筛选在站点数据不足时连续请求后续页。
   const AUTO_LOAD_RATE_WINDOW_MS = 5000;
   const AUTO_LOAD_MAX_REQUESTS_PER_WINDOW = 3;
   const AUTO_LOAD_MAX_EMPTY_FILTER_RESULTS = 3;
@@ -48,6 +61,8 @@
   const TAG_STYLE_CACHE_VERSION = 1;
 
   // ========== 全局状态 ==========
+  // currentOrder 历史上曾使用 default，后续需求把“默认”和“最新活动”合并。
+  // 这里在启动时迁移旧值，避免旧用户升级后落到不存在的排序分支。
   let feedModeEnabled = GM_getValue(STATE_KEY, false);
   let currentOrder = GM_getValue(ORDER_KEY, "activity");
   if (currentOrder === "default") {
@@ -75,14 +90,24 @@
   let isLoadingMore = false;
   let isRefreshing = false;
   let _pendingReload = false;
+
+  // 自动刷新相关计时器都只存运行态，不持久化剩余秒数。页面切换或脚本重载后
+  // 重新按用户配置开始倒计时，比恢复旧倒计时更容易避免重复刷新。
   let autoSilentRefreshTimer = null;
   let autoSilentRefreshSeconds = 0;
   let autoRefreshTimer = null;
   let autoRefreshSeconds = 0;
+
+  // 自动补页按“当前查询快照”隔离。切换板块、排序、已读筛选后必须清零，
+  // 否则上一个视图的限速或空结果会错误影响新视图。
   let autoLoadTimestamps = [];
   let autoLoadEmptyFilterCount = 0;
   let autoLoadStoppedForSession = false;
   let autoLoadSessionKey = "";
+
+  // message-bus 只告诉我们“可能有变化的话题 id”。完整话题数据仍要从
+  // /latest.json?topic_ids=... 拉取；本地 cache 只用于在显示提醒前做板块范围
+  // 粗筛，避免每条推送都立即请求详情。
   const sidebarIncomingState = {
     topicIds: [],
     topicIdSet: new Set(),
@@ -2297,6 +2322,11 @@
 
     const panel = document.createElement("div");
     panel.className = "sfp-settings-panel";
+
+    // 设置项按当前排序视图分组，而不是一次性展示全部选项：
+    // - 最新活动可以消费 message-bus 增量，因此提供“新活动提醒”和“静默刷新”；
+    // - 浏览量/回复/点赞等排序没有同等可靠的增量通道，只提供普通自动刷新。
+    // 这样可以减少用户误以为所有排序都能无请求地接收新话题。
     if (isLatestActivityView) {
       panel.innerHTML = `
         <div class="sfp-setting-row sfp-incoming-hint-row">
@@ -2387,6 +2417,9 @@
       _bindCheckboxSetting(incomingHintInput, (checked) => {
         showIncomingHint = checked;
         GM_setValue(SHOW_INCOMING_HINT_KEY, showIncomingHint);
+        // 手动提醒和自动静默刷新是互斥体验：前者让用户决定何时插入新话题，
+        // 后者由脚本自动合并。互斥可以避免同一批 incoming 同时出现在提醒和
+        // 静默队列里，导致重复刷新或顶部提示残留。
         if (showIncomingHint) {
           _stopAutoSilentRefresh();
           sidebarIncomingState.applyQueued = false;
@@ -2407,6 +2440,8 @@
       _bindCheckboxSetting(autoSilentInput, (checked) => {
         autoSilentRefreshEnabled = checked;
         GM_setValue(AUTO_SILENT_REFRESH_KEY, autoSilentRefreshEnabled);
+        // 开启静默刷新时主动关闭新活动提醒，保持上面的互斥关系。设置面板随后
+        // 会重新计算可见行高度，避免隐藏间隔输入后留下空白。
         if (autoSilentRefreshEnabled && showIncomingHint) {
           showIncomingHint = false;
           GM_setValue(SHOW_INCOMING_HINT_KEY, false);
@@ -2483,6 +2518,8 @@
     if (autoSilentInput) autoSilentInput.checked = autoSilentRefreshEnabled;
     if (autoRefreshInput) autoRefreshInput.checked = autoRefreshEnabled;
 
+    // “自动静默刷新”只有在关闭“新活动提醒”后才显示；这不是权限限制，
+    // 而是为了让用户明确选择“手动应用”或“自动应用”其中一种 incoming 处理方式。
     if (autoSilentRow) {
       autoSilentRow.classList.toggle("hidden", showIncomingHint);
     }
@@ -2502,6 +2539,8 @@
     const panel = wrapper?.querySelector(".sfp-settings-panel");
     if (!shell || !panel) return;
 
+    // 设置面板是绝对定位浮层，但外层 shell 需要参与 header 布局。
+    // 每次显示/隐藏行后重新测量实际可见内容高度，避免动画期间按钮区域被截断。
     requestAnimationFrame(() => {
       const visibleRows = Array.from(panel.children).filter((child) => {
         return child instanceof HTMLElement && getComputedStyle(child).display !== "none";
@@ -2954,6 +2993,8 @@
       _scheduleSidebarIncomingFilterRefresh();
     }
 
+    // 提醒条只显示已经通过当前板块范围过滤的候选数量。未读/已读这种依赖完整
+    // 话题字段的筛选会在点击应用时再次确认，避免仅凭 message-bus payload 误判。
     const existing = contentWrapper.querySelector(".sfp-show-more-overlay");
     const newCount = sidebarIncomingState.filteredTopicIds.length;
     if (newCount <= 0) {
@@ -3070,6 +3111,9 @@
       return sidebarIncomingState.filteredTopicIds;
     }
 
+    // 这里故意只用 incoming candidate 条件，不套完整本地筛选。
+    // cache 里的 payload 可能缺少 last_read_post_number/new_posts 等字段；
+    // 完整筛选留给 _applySidebarIncomingTopics 拉取详情后处理。
     sidebarIncomingState.filteredTopicIds = sidebarIncomingState.topicIds.filter((id) => {
       const topic = sidebarIncomingState.topicCache.get(Number(id));
       return topic && _topicMatchesIncomingCandidate(topic, query);
@@ -3161,6 +3205,9 @@
     sidebarMessageBus = messageBus;
     sidebarLatestMessageBusCallback = (data) => _handleSidebarIncomingMessage(data);
     sidebarNewMessageBusCallback = (data) => _handleSidebarIncomingMessage(data);
+    // 同时订阅 /latest 和 /new：Discourse 在不同列表和站点配置下可能通过
+    // 其中任一频道广播新话题或最新活动。lastId 使用当前 bus 实例读取，
+    // 避免重新订阅时误用已经清掉的全局 sidebarMessageBus。
     messageBus.subscribe("/latest", sidebarLatestMessageBusCallback, _getMessageBusLastId(messageBus, "/latest"));
     messageBus.subscribe("/new", sidebarNewMessageBusCallback, _getMessageBusLastId(messageBus, "/new"));
   }
@@ -3207,6 +3254,8 @@
     if (!data.topic_id) return;
     if (data.payload?.archetype && data.payload.archetype !== "regular") return;
 
+    // 推送 payload 不一定包含完整话题字段，但通常足够判断 id、分类和 archetype。
+    // 先记录候选，真正插入列表前再拉完整数据，避免把不完整 payload 直接渲染。
     _addSidebarIncomingTopicId(data.topic_id);
     if (data.payload) {
       sidebarIncomingState.topicCache.set(Number(data.topic_id), {
@@ -3255,6 +3304,8 @@
     if (!_isAutoSilentRefreshActive() || autoSilentRefreshInterval > 0) return;
     if (sidebarIncomingState.applyQueued) return;
 
+    // 0 秒静默刷新表示“有 incoming 就尽快应用”。这里排入 microtask，
+    // 让同一轮 message-bus 回调中的多个 topic id 先合并，再发起一次批量请求。
     sidebarIncomingState.applyQueued = true;
     Promise.resolve().then(async () => {
       sidebarIncomingState.applyQueued = false;
@@ -3333,6 +3384,8 @@
     },
 
     key(query) {
+      // 查询 key 覆盖所有会影响 API URL 或本地筛选的状态。异步请求返回时用
+      // isCurrent 比较 key，丢弃用户切换视图前发出的旧响应。
       return [
         query.tab,
         query.categoryId || "",
@@ -3350,6 +3403,9 @@
     buildUrl(query, page) {
       const useTopList = _usesPeriodScopedTopList(query.order, query.period);
 
+      // Discourse 的 top 周期只在 /top.json 或分类 /l/top.json 上有完整语义。
+      // period=all 的“最多浏览/回复/点赞”等排序继续走 latest.json?order=...，
+      // 保留此前版本的 ranked order 行为。
       if (query.tab !== "all" && query.categoryId) {
         const cat = CATEGORY_CONFIG[query.categoryId];
         const tabId = cat?.tabId || query.tab;
@@ -3654,11 +3710,12 @@
     let highlightTopicIds = [];
 
     if (mode === "replace-head") {
+      // 手动刷新或普通自动刷新拿到的是列表头部，应该同步 more_topics_url；
+      // incoming prepend 只是在现有列表前插入候选话题，不能据此重置分页状态。
       highlightTopicIds = topics
         .filter((topic) => !loadedTopicIds.has(topic.id) || sidebarIncomingState.topicIdSet.has(Number(topic.id)))
         .map((topic) => topic.id);
       allTopics = topics.concat(allTopics.filter((topic) => !topicMap.has(topic.id)));
-      // moreTopicsUrl belongs to the refreshed page head; incoming prepend keeps the previous pagination state.
       hasMorePages = !!moreTopicsUrl;
     } else {
       highlightTopicIds = topics.map((topic) => topic.id);
@@ -3713,7 +3770,9 @@
   }
 
   // ========== 静默刷新 ==========
-  // 仅在 latest/latest category 语义可匹配的最新活动视图中按 incoming 事件启用
+  // 仅在 latest/latest category 语义可匹配的最新活动视图中按 incoming 事件启用。
+  // 这条路径不重新拉整页，而是按 message-bus 收集到的 topic id 批量取详情，
+  // 然后插入到当前列表顶部；这样能减少刷新时对阅读位置的扰动。
   async function _applySidebarIncomingTopics({ requireDefaultView = false, logPrefix = "incoming", queueIfBusy = true, preserveViewport = false } = {}) {
     if (sidebarIncomingState.viewSettling || isLoading || isLoadingMore || isRefreshing) {
       if (queueIfBusy) sidebarIncomingState.applyQueued = true;
@@ -3767,6 +3826,8 @@
     if (!_isAutoSilentRefreshActive()) return;
     if (autoSilentRefreshInterval <= 0) return;
 
+    // 大于 0 的静默刷新按倒计时批量应用 incoming。0 秒场景由
+    // _queueSidebarIncomingApply 处理，避免同时存在 interval 和 microtask 两条触发链。
     _resetAutoSilentRefreshCountdown();
     autoSilentRefreshTimer = setInterval(() => {
       autoSilentRefreshSeconds--;
@@ -3810,6 +3871,8 @@
     if (_isLatestActivityView()) return;
     if (!autoRefreshEnabled) return;
 
+    // 非最新活动排序没有可靠 incoming 增量，只能按当前查询重新拉取列表头部。
+    // refreshCurrentView 会保存滚动锚点，尽量避免自动刷新把正在看的内容挤走。
     _resetAutoRefreshCountdown();
     autoRefreshTimer = setInterval(() => {
       autoRefreshSeconds--;
