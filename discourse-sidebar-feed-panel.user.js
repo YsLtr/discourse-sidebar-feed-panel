@@ -3,7 +3,7 @@
 // @namespace    https://linux.do/
 // @version      0.6.63
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
-// @author       GLM
+// @author       YsLtr
 // @match        https://linux.do/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=linux.do
 // @grant        GM_addStyle
@@ -949,7 +949,6 @@
         white-space: nowrap;
       }
       .sfp-setting-help-wrap {
-        position: relative;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -980,15 +979,12 @@
         fill: currentColor;
         pointer-events: none;
       }
-      .sfp-setting-help:hover,
-      .sfp-setting-help:focus {
+      .sfp-setting-help:hover {
         color: var(--tertiary);
         outline: none;
       }
-      .sfp-setting-help-tooltip {
-        position: absolute;
-        left: 0;
-        top: calc(100% + 6px);
+      .sfp-help-tooltip {
+        position: fixed;
         z-index: 10004;
         width: 178px;
         max-width: calc(100vw - 32px);
@@ -1008,7 +1004,7 @@
         transform: translateY(-4px);
         transition: opacity 0.16s ease, transform 0.16s ease;
       }
-      .sfp-setting-help-wrap.show-tooltip .sfp-setting-help-tooltip {
+      .sfp-help-tooltip.visible {
         opacity: 1;
         transform: translateY(0);
       }
@@ -2242,11 +2238,44 @@
 
     panel.addEventListener("click", (e) => e.stopPropagation());
     panel.querySelectorAll(".sfp-setting-help").forEach((helpBtn) => {
-      const helpWrap = helpBtn.closest(".sfp-setting-help-wrap");
-      helpBtn.addEventListener("mouseenter", () => helpWrap?.classList.add("show-tooltip"));
-      helpBtn.addEventListener("mouseleave", () => helpWrap?.classList.remove("show-tooltip"));
-      helpBtn.addEventListener("focus", () => helpWrap?.classList.add("show-tooltip"));
-      helpBtn.addEventListener("blur", () => helpWrap?.classList.remove("show-tooltip"));
+      const showTooltip = () => {
+        if (!globalHelpTooltip) return;
+        const text = helpBtn.getAttribute("data-tooltip");
+        if (!text) return;
+        globalHelpTooltip.textContent = text;
+        globalHelpTooltip.style.display = "";
+        globalHelpTooltip.style.visibility = "hidden";
+        globalHelpTooltip.classList.add("visible");
+        const btnRect = helpBtn.getBoundingClientRect();
+        const gap = 6;
+        const tooltipHeight = globalHelpTooltip.offsetHeight;
+        const tooltipWidth = globalHelpTooltip.offsetWidth;
+        let left = btnRect.left;
+        let top = btnRect.bottom + gap;
+        if (left + tooltipWidth > window.innerWidth - 8) {
+          left = Math.max(8, btnRect.right - tooltipWidth);
+        }
+        if (top + tooltipHeight > window.innerHeight - 8) {
+          top = btnRect.top - tooltipHeight - gap;
+        }
+        globalHelpTooltip.style.left = left + "px";
+        globalHelpTooltip.style.top = top + "px";
+        globalHelpTooltip.style.visibility = "";
+        globalHelpTooltip.classList.remove("visible");
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            globalHelpTooltip.classList.add("visible");
+          });
+        });
+      };
+      const hideTooltip = () => {
+        if (globalHelpTooltip) {
+          globalHelpTooltip.classList.remove("visible");
+          globalHelpTooltip.style.display = "none";
+        }
+      };
+      helpBtn.addEventListener("mouseenter", showTooltip);
+      helpBtn.addEventListener("mouseleave", hideTooltip);
       helpBtn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -2339,10 +2368,9 @@
       <span class="sfp-setting-label">
         <span>${escapeHtml(label)}</span>
         <span class="sfp-setting-help-wrap">
-          <button type="button" class="sfp-setting-help" aria-label="${escapeHtml(label)}说明">
+          <button type="button" class="sfp-setting-help" aria-label="${escapeHtml(label)}说明" data-tooltip="${escapeHtml(tooltip)}">
             <svg viewBox="0 0 1024 1024" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><path d="M514.048 54.272q95.232 0 178.688 36.352t145.92 98.304 98.304 145.408 35.84 178.688-35.84 178.176-98.304 145.408-145.92 98.304-178.688 35.84-178.176-35.84-145.408-98.304-98.304-145.408-35.84-178.176 35.84-178.688 98.304-145.408 145.408-98.304 178.176-36.352zM515.072 826.368q26.624 0 44.544-17.92t17.92-43.52q0-26.624-17.92-44.544t-44.544-17.92-44.544 17.92-17.92 44.544q0 25.6 17.92 43.52t44.544 17.92zM567.296 574.464q-1.024-16.384 20.48-34.816t48.128-40.96 49.152-50.688 24.576-65.024q2.048-39.936-8.192-74.752t-33.792-59.904-60.928-39.936-87.552-14.848q-62.464 0-103.936 22.016t-67.072 53.248-35.84 64.512-9.216 55.808q1.024 26.624 16.896 38.912t34.304 12.8 33.792-10.24 15.36-31.232q0-12.288 7.68-30.208t20.992-34.304 32.256-27.648 42.496-11.264q46.08 0 73.728 23.04t25.6 57.856q0 17.408-10.24 32.256t-26.112 28.672-33.792 27.648-33.792 28.672-26.624 32.256-11.776 37.888l1.024 38.912q0 15.36 14.336 29.184t37.888 14.848q23.552-1.024 37.376-15.36t12.8-32.768l0-24.576z"></path></svg>
           </button>
-          <span class="sfp-setting-help-tooltip" role="tooltip">${escapeHtml(tooltip)}</span>
         </span>
       </span>
     `;
@@ -4297,8 +4325,16 @@
   })();
 
   // ========== 初始化 ==========
+  let globalHelpTooltip = null;
+
   function init() {
     injectStyles();
+
+    globalHelpTooltip = document.createElement("div");
+    globalHelpTooltip.className = "sfp-help-tooltip";
+    globalHelpTooltip.setAttribute("role", "tooltip");
+    globalHelpTooltip.style.display = "none";
+    document.body.appendChild(globalHelpTooltip);
 
     waitForEmber(() => {
       createToggle();
