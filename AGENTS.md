@@ -1,15 +1,15 @@
 # Discourse Sidebar Feed Panel — Active Handoff
 
-**Updated**: 2026-05-22 22:25 (Asia/Shanghai)
+**Updated**: 2026-05-22 12:22 (+08:00)
 **Project root**: `C:/Users/28676/builds/discourse/userscript`
 **Branch**: `master`
-**Current objective**: 继续优化 `discourse-sidebar-feed-panel.user.js` 的结构和逻辑，优先做低风险、可逐步验证的小项；不要再大范围自动重写 CSS。
+**Current objective**: 继续做 `discourse-sidebar-feed-panel.user.js` 的低风险结构优化，优先小步验证；不要再大范围自动重写 CSS。
 
 ## Current State
 
 - Main file: `discourse-sidebar-feed-panel.user.js`
 - Current userscript version in file: `0.6.67`
-- Current tracked changes include both script optimization and this handoff update.
+- Current tracked changes now include a state-grouping refactor and this handoff update.
 - Completed in the latest pass:
   - Added shared site metadata loading via `loadSiteData()`, including preloaded page data and `/site.json` fallback.
   - Centralized category normalization in `_normalizeCategoryMeta()` and tag compatibility parsing in `_normalizeTagRecord()` / `_getTopTagsFromSiteData()`.
@@ -22,13 +22,14 @@
   - Replaced topic stat emoji with Discourse SVG icon markup and added `.sfp-topic-stat .d-icon` sizing CSS.
   - Narrowed `RouteWatcher` mutation observation target to `#main-outlet` / `.d-header` before falling back to `document.body`.
   - Reworked `_getMessageBusLastId()` to avoid direct `callbacks` lookup and try safer candidate properties.
+  - Grouped incoming-state globals into `sidebarIncomingState` and removed the back-to-top `scrollTop` fallback.
 - Important recovery note: an attempted automatic split of `injectStyles()` temporarily removed/broke the CSS injection block. It has been restored, `function injectStyles()` exists again, and `node --check` passes.
 
 ## Validation
 
 - `node --check discourse-sidebar-feed-panel.user.js` passed after the CSS recovery.
 - `git diff --check -- AGENTS.md discourse-sidebar-feed-panel.user.js` passed, with only CRLF conversion warnings.
-- Live browser verification was previously run on linux.do tab `1047331194` (`https://linux.do/t/topic/2224067`) and confirmed userscript DOM (`.sfp-feed-container`, `.sfp-settings-wrap`) was present. Re-run browser verification after the next script edit.
+- Live browser verification was rerun on linux.do tab `1047331194` (`https://linux.do/t/topic/1838851`) and confirmed `.sfp-feed-container`, `.sfp-settings-wrap`, `.sfp-tab-bar`, topic stat icons, and back-to-top button were present. `overflow-x` on the tab bar remained `auto`.
 
 ## Constraints
 
@@ -52,8 +53,8 @@
 3. Review `RouteWatcher` after narrowing:
    - Ensure Discourse sidebar regeneration is still caught after route transitions and layout changes.
 4. Continue reducing state complexity in small slices:
-   - Incoming-related globals (`sidebarIncomingTopicIds`, caches, filter flags, queue flags) are still spread across the file.
-   - Prefer a small object grouping first; do not rewrite the whole state machine at once.
+   - Incoming-related globals are now grouped, but the state machine is still spread across helper functions.
+   - Keep the next refactor small and behavior-preserving.
 5. Consider small CSS extraction only if necessary:
    - Suggested first candidate: topic-stat icon sizing or loading/error styles, not the whole `injectStyles()` block.
 6. Re-run live verification after every behavior-affecting change:

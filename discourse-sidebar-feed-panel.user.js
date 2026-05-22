@@ -82,18 +82,20 @@
   let autoLoadEmptyFilterCount = 0;
   let autoLoadStoppedForSession = false;
   let autoLoadSessionKey = "";
-  let sidebarIncomingTopicIds = [];
-  let sidebarIncomingTopicIdSet = new Set();
-  let sidebarIncomingTopicCache = new Map();
-  let sidebarIncomingFilteredTopicIds = [];
-  let sidebarIncomingFilterRefreshTimer = null;
-  let sidebarIncomingFilterRefreshToken = 0;
-  let sidebarIncomingViewSettling = false;
-  let sidebarIncomingFilterStable = false;
+  const sidebarIncomingState = {
+    topicIds: [],
+    topicIdSet: new Set(),
+    topicCache: new Map(),
+    filteredTopicIds: [],
+    filterRefreshTimer: null,
+    filterRefreshToken: 0,
+    viewSettling: false,
+    filterStable: false,
+    applyQueued: false,
+  };
   let sidebarMessageBus = null;
   let sidebarLatestMessageBusCallback = null;
   let sidebarNewMessageBusCallback = null;
-  let sidebarIncomingApplyQueued = false;
   let activeLoadToken = 0;
   let activeLoadMoreToken = 0;
   let activeRefreshToken = 0;
@@ -2163,7 +2165,7 @@
     isLoadingMore = false;
     isRefreshing = false;
     _pendingReload = false;
-    sidebarIncomingApplyQueued = false;
+    sidebarIncomingState.applyQueued = false;
     if (feedScrollAbortController) {
       feedScrollAbortController.abort();
       feedScrollAbortController = null;
@@ -2380,7 +2382,7 @@
         GM_setValue(SHOW_INCOMING_HINT_KEY, showIncomingHint);
         if (showIncomingHint) {
           _stopAutoSilentRefresh();
-          sidebarIncomingApplyQueued = false;
+          sidebarIncomingState.applyQueued = false;
         } else {
           _startAutoSilentRefresh();
           if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
@@ -2896,20 +2898,20 @@
   }
 
   function _beginSidebarIncomingViewSettling() {
-    sidebarIncomingViewSettling = true;
-    sidebarIncomingFilterStable = false;
-    sidebarIncomingFilteredTopicIds = [];
-    sidebarIncomingFilterRefreshToken++;
-    if (sidebarIncomingFilterRefreshTimer) {
-      clearTimeout(sidebarIncomingFilterRefreshTimer);
-      sidebarIncomingFilterRefreshTimer = null;
+    sidebarIncomingState.viewSettling = true;
+    sidebarIncomingState.filterStable = false;
+    sidebarIncomingState.filteredTopicIds = [];
+    sidebarIncomingState.filterRefreshToken++;
+    if (sidebarIncomingState.filterRefreshTimer) {
+      clearTimeout(sidebarIncomingState.filterRefreshTimer);
+      sidebarIncomingState.filterRefreshTimer = null;
     }
     _removeShowMoreHint();
   }
 
   function _finishSidebarIncomingViewSettling() {
-    sidebarIncomingViewSettling = false;
-    sidebarIncomingFilterStable = false;
+    sidebarIncomingState.viewSettling = false;
+    sidebarIncomingState.filterStable = false;
     _recomputeSidebarIncomingFilteredTopicIds();
     _scheduleSidebarIncomingFilterRefresh();
     _updateShowMoreHint();
@@ -2929,7 +2931,7 @@
     // 0 秒静默刷新会立即应用新话题，不需要显示手动提醒；有效间隔会批量应用，
     // 间隔期间保留数量提示。
     if (
-      sidebarIncomingViewSettling ||
+      sidebarIncomingState.viewSettling ||
       isLoading ||
       !_canShowSidebarIncomingHint() ||
       (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0)
@@ -2938,7 +2940,7 @@
       return;
     }
 
-    if (!sidebarIncomingFilterStable) {
+    if (!sidebarIncomingState.filterStable) {
       return;
     }
 
@@ -2947,7 +2949,7 @@
     }
 
     const existing = contentWrapper.querySelector(".sfp-show-more-overlay");
-    const newCount = sidebarIncomingFilteredTopicIds.length;
+    const newCount = sidebarIncomingState.filteredTopicIds.length;
     if (newCount <= 0) {
       if (existing) existing.remove();
       contentWrapper.classList.remove("sfp-has-show-more");
@@ -3066,25 +3068,25 @@
 
   function _recomputeSidebarIncomingFilteredTopicIds(query = FeedQuery.snapshot()) {
     if (!_canUseSidebarIncomingRefresh(query)) {
-      sidebarIncomingFilteredTopicIds = [];
-      sidebarIncomingFilterStable = false;
-      return sidebarIncomingFilteredTopicIds;
+      sidebarIncomingState.filteredTopicIds = [];
+      sidebarIncomingState.filterStable = false;
+      return sidebarIncomingState.filteredTopicIds;
     }
 
-    sidebarIncomingFilteredTopicIds = sidebarIncomingTopicIds.filter((id) => {
-      const topic = sidebarIncomingTopicCache.get(Number(id));
+    sidebarIncomingState.filteredTopicIds = sidebarIncomingState.topicIds.filter((id) => {
+      const topic = sidebarIncomingState.topicCache.get(Number(id));
       return topic && _topicMatchesIncomingCandidate(topic, query);
     });
-    return sidebarIncomingFilteredTopicIds;
+    return sidebarIncomingState.filteredTopicIds;
   }
 
   function _scheduleSidebarIncomingFilterRefresh() {
-    if (sidebarIncomingViewSettling || isLoading || isRefreshing) return;
-    if (!_canUseSidebarIncomingRefresh() || sidebarIncomingTopicIds.length === 0) return;
-    if (sidebarIncomingFilterRefreshTimer) return;
+    if (sidebarIncomingState.viewSettling || isLoading || isRefreshing) return;
+    if (!_canUseSidebarIncomingRefresh() || sidebarIncomingState.topicIds.length === 0) return;
+    if (sidebarIncomingState.filterRefreshTimer) return;
 
-    sidebarIncomingFilterRefreshTimer = setTimeout(() => {
-      sidebarIncomingFilterRefreshTimer = null;
+    sidebarIncomingState.filterRefreshTimer = setTimeout(() => {
+      sidebarIncomingState.filterRefreshTimer = null;
       _refreshSidebarIncomingFilter().catch((e) => {
         console.warn("[SFP] incoming filter refresh error:", e);
       });
@@ -3093,8 +3095,8 @@
 
   async function _refreshSidebarIncomingFilter() {
     const requestQuery = FeedQuery.snapshot();
-    if (sidebarIncomingViewSettling || isLoading || isRefreshing) {
-      return sidebarIncomingFilteredTopicIds;
+    if (sidebarIncomingState.viewSettling || isLoading || isRefreshing) {
+      return sidebarIncomingState.filteredTopicIds;
     }
     if (!_canUseSidebarIncomingRefresh(requestQuery)) {
       _recomputeSidebarIncomingFilteredTopicIds(requestQuery);
@@ -3102,22 +3104,22 @@
       return [];
     }
 
-    const incomingTopicIds = sidebarIncomingTopicIds.slice();
-    const token = ++sidebarIncomingFilterRefreshToken;
+    const incomingTopicIds = sidebarIncomingState.topicIds.slice();
+    const token = ++sidebarIncomingState.filterRefreshToken;
     if (incomingTopicIds.length === 0) {
-      sidebarIncomingFilteredTopicIds = [];
-      sidebarIncomingFilterStable = true;
+      sidebarIncomingState.filteredTopicIds = [];
+      sidebarIncomingState.filterStable = true;
       _updateShowMoreHint({ skipIncomingFilterRefresh: true });
       return [];
     }
 
     await loadCategoryMetadata();
-    if (token !== sidebarIncomingFilterRefreshToken || !FeedQuery.isCurrent(requestQuery)) return sidebarIncomingFilteredTopicIds;
+    if (token !== sidebarIncomingState.filterRefreshToken || !FeedQuery.isCurrent(requestQuery)) return sidebarIncomingState.filteredTopicIds;
 
     _recomputeSidebarIncomingFilteredTopicIds(requestQuery);
-    sidebarIncomingFilterStable = true;
+    sidebarIncomingState.filterStable = true;
     _updateShowMoreHint({ skipIncomingFilterRefresh: true });
-    return sidebarIncomingFilteredTopicIds;
+    return sidebarIncomingState.filteredTopicIds;
   }
 
   function _syncDefaultViewControls() {
@@ -3127,7 +3129,7 @@
     _startAutoSilentRefresh();
     _startAutoRefresh();
     _scheduleSidebarIncomingFilterRefresh();
-    if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0 && sidebarIncomingTopicIds.length > 0) {
+    if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0 && sidebarIncomingState.topicIds.length > 0) {
       _queueSidebarIncomingApply();
     }
   }
@@ -3190,10 +3192,10 @@
     sidebarMessageBus = null;
     sidebarLatestMessageBusCallback = null;
     sidebarNewMessageBusCallback = null;
-    sidebarIncomingApplyQueued = false;
-    if (sidebarIncomingFilterRefreshTimer) {
-      clearTimeout(sidebarIncomingFilterRefreshTimer);
-      sidebarIncomingFilterRefreshTimer = null;
+    sidebarIncomingState.applyQueued = false;
+    if (sidebarIncomingState.filterRefreshTimer) {
+      clearTimeout(sidebarIncomingState.filterRefreshTimer);
+      sidebarIncomingState.filterRefreshTimer = null;
     }
   }
 
@@ -3204,20 +3206,20 @@
 
     _addSidebarIncomingTopicId(data.topic_id);
     if (data.payload) {
-      sidebarIncomingTopicCache.set(Number(data.topic_id), {
-        ...(sidebarIncomingTopicCache.get(Number(data.topic_id)) || {}),
+      sidebarIncomingState.topicCache.set(Number(data.topic_id), {
+        ...(sidebarIncomingState.topicCache.get(Number(data.topic_id)) || {}),
         ...data.payload,
         id: Number(data.topic_id),
       });
     }
-    sidebarIncomingFilterStable = false;
+    sidebarIncomingState.filterStable = false;
 
     if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
       _queueSidebarIncomingApply();
     } else {
       if (_canFilterSidebarIncomingFromPayload()) {
         _recomputeSidebarIncomingFilteredTopicIds();
-        sidebarIncomingFilterStable = true;
+        sidebarIncomingState.filterStable = true;
         _updateShowMoreHint({ skipIncomingFilterRefresh: true });
       } else {
         _scheduleSidebarIncomingFilterRefresh();
@@ -3227,11 +3229,11 @@
 
   function _addSidebarIncomingTopicId(topicId) {
     const numericId = Number(topicId);
-    if (!Number.isFinite(numericId) || sidebarIncomingTopicIdSet.has(numericId)) return;
+    if (!Number.isFinite(numericId) || sidebarIncomingState.topicIdSet.has(numericId)) return;
 
-    sidebarIncomingTopicIdSet.add(numericId);
-    sidebarIncomingTopicIds.push(numericId);
-    sidebarIncomingFilterStable = false;
+    sidebarIncomingState.topicIdSet.add(numericId);
+    sidebarIncomingState.topicIds.push(numericId);
+    sidebarIncomingState.filterStable = false;
   }
 
   function _removeSidebarIncomingTopicIds(topicIds) {
@@ -3240,35 +3242,35 @@
     const toRemove = new Set(topicIds.map((id) => Number(id)).filter(Number.isFinite));
     if (toRemove.size === 0) return;
 
-    sidebarIncomingTopicIds = sidebarIncomingTopicIds.filter((id) => !toRemove.has(Number(id)));
-    sidebarIncomingTopicIdSet = new Set(sidebarIncomingTopicIds);
-    toRemove.forEach((id) => sidebarIncomingTopicCache.delete(Number(id)));
+    sidebarIncomingState.topicIds = sidebarIncomingState.topicIds.filter((id) => !toRemove.has(Number(id)));
+    sidebarIncomingState.topicIdSet = new Set(sidebarIncomingState.topicIds);
+    toRemove.forEach((id) => sidebarIncomingState.topicCache.delete(Number(id)));
     _recomputeSidebarIncomingFilteredTopicIds();
   }
 
   function _queueSidebarIncomingApply() {
-    if (sidebarIncomingViewSettling) return;
+    if (sidebarIncomingState.viewSettling) return;
     if (!_canUseSidebarIncomingRefresh()) return;
     if (!_isAutoSilentRefreshActive() || autoSilentRefreshInterval > 0) return;
-    if (sidebarIncomingApplyQueued) return;
+    if (sidebarIncomingState.applyQueued) return;
 
-    sidebarIncomingApplyQueued = true;
+    sidebarIncomingState.applyQueued = true;
     Promise.resolve().then(async () => {
-      sidebarIncomingApplyQueued = false;
+      sidebarIncomingState.applyQueued = false;
       if (!_isAutoSilentRefreshActive() || autoSilentRefreshInterval > 0) return;
       await _applySidebarIncomingTopics({ requireDefaultView: true, logPrefix: "auto silent refresh", preserveViewport: true });
     });
   }
 
   function _flushQueuedSidebarIncomingApply() {
-    if (!sidebarIncomingApplyQueued) return;
+    if (!sidebarIncomingState.applyQueued) return;
 
     if (!_isAutoSilentRefreshActive() || autoSilentRefreshInterval > 0) {
-      sidebarIncomingApplyQueued = false;
+      sidebarIncomingState.applyQueued = false;
       return;
     }
 
-    sidebarIncomingApplyQueued = false;
+    sidebarIncomingState.applyQueued = false;
     _queueSidebarIncomingApply();
   }
 
@@ -3655,7 +3657,7 @@
 
     if (mode === "replace-head") {
       highlightTopicIds = topics
-        .filter((topic) => !loadedTopicIds.has(topic.id) || sidebarIncomingTopicIdSet.has(Number(topic.id)))
+        .filter((topic) => !loadedTopicIds.has(topic.id) || sidebarIncomingState.topicIdSet.has(Number(topic.id)))
         .map((topic) => topic.id);
       allTopics = topics.concat(allTopics.filter((topic) => !topicMap.has(topic.id)));
       hasMorePages = !!moreTopicsUrl;
@@ -3715,8 +3717,8 @@
   // ========== 静默刷新 ==========
   // 仅在 latest/latest category 语义可匹配的最新活动视图中按 incoming 事件启用
   async function _applySidebarIncomingTopics({ requireDefaultView = false, logPrefix = "incoming", queueIfBusy = true, preserveViewport = false } = {}) {
-    if (sidebarIncomingViewSettling || isLoading || isLoadingMore || isRefreshing) {
-      if (queueIfBusy) sidebarIncomingApplyQueued = true;
+    if (sidebarIncomingState.viewSettling || isLoading || isLoadingMore || isRefreshing) {
+      if (queueIfBusy) sidebarIncomingState.applyQueued = true;
       return;
     }
     if (requireDefaultView && !_canUseSidebarIncomingRefresh()) return;
@@ -3731,7 +3733,7 @@
         return;
       }
       if (isLoading || isLoadingMore || isRefreshing) {
-        if (queueIfBusy) sidebarIncomingApplyQueued = true;
+        if (queueIfBusy) sidebarIncomingState.applyQueued = true;
         return;
       }
 
@@ -4285,11 +4287,7 @@
     btn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M12 5.5 5.5 12l1.4 1.4 4.1-4.1V20h2V9.3l4.1 4.1 1.4-1.4L12 5.5z"/></svg>`;
     btn.addEventListener("click", () => {
       if (!feedScrollEl) return;
-      if (typeof feedScrollEl.scrollTo === "function") {
-        feedScrollEl.scrollTo({ top: 0, behavior: "smooth" });
-      } else {
-        feedScrollEl.scrollTop = 0;
-      }
+      feedScrollEl.scrollTo({ top: 0, behavior: "smooth" });
       _updateBackTopButton();
     });
     return btn;
