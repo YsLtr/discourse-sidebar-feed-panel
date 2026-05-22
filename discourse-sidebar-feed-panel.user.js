@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.67
+// @version      0.6.68
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -3642,7 +3642,8 @@
     filterTopic = null,
     preserveViewport = false,
   } = {}) {
-    const topics = typeof filterTopic === "function"
+    const shouldFilterTopics = mode !== "replace-head" && typeof filterTopic === "function";
+    const topics = shouldFilterTopics
       ? fetchedTopics.filter(filterTopic)
       : fetchedTopics;
 
@@ -3660,6 +3661,7 @@
         .filter((topic) => !loadedTopicIds.has(topic.id) || sidebarIncomingState.topicIdSet.has(Number(topic.id)))
         .map((topic) => topic.id);
       allTopics = topics.concat(allTopics.filter((topic) => !topicMap.has(topic.id)));
+      // moreTopicsUrl belongs to the refreshed page head; incoming prepend keeps the previous pagination state.
       hasMorePages = !!moreTopicsUrl;
     } else {
       highlightTopicIds = topics.map((topic) => topic.id);
@@ -4073,7 +4075,7 @@
     return new RegExp(`/t/[^/]+/${topic.id}/\\d+(?:$|[/?#])`).test(_topicListUrl(topic));
   }
 
-  // 已读 = 首页标题链接带楼层号；未读 = 首页标题链接不带楼层号。
+  // Discourse topic 列表的已读信号不稳定：优先保留楼层号语义，再用 API 字段兜底。
   function _isTopicRead(topic) {
     if (!topic || !topic.id) return false;
     if (_hasLastReadPostNumber(topic)) return _topicListUrlHasPostNumber(topic);
@@ -4088,7 +4090,7 @@
     return !_isTopicRead(topic);
   }
 
-  // 未读 = 首页标题链接不带楼层号；已读 = 首页标题链接带楼层号
+  // 未读/已读筛选复用 _isTopicRead，避免和渲染、点击后本地 patch 的语义分叉。
   function _applyFilter(topics) {
     let result = topics;
     if (hidePinned) {

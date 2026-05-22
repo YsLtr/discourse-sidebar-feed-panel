@@ -1,6 +1,6 @@
 # Discourse Sidebar Feed Panel — Active Handoff
 
-**Updated**: 2026-05-22 12:22 (+08:00)
+**Updated**: 2026-05-22 12:44 (+08:00)
 **Project root**: `C:/Users/28676/builds/discourse/userscript`
 **Branch**: `master`
 **Current objective**: 继续做 `discourse-sidebar-feed-panel.user.js` 的低风险结构优化，优先小步验证；不要再大范围自动重写 CSS。
@@ -8,9 +8,8 @@
 ## Current State
 
 - Main file: `discourse-sidebar-feed-panel.user.js`
-- Current userscript version in file: `0.6.67`
-- Current tracked changes now include a state-grouping refactor and this handoff update.
-- Completed in the latest pass:
+- Current userscript version in file: `0.6.68`
+- Latest work prepared for handoff:
   - Added shared site metadata loading via `loadSiteData()`, including preloaded page data and `/site.json` fallback.
   - Centralized category normalization in `_normalizeCategoryMeta()` and tag compatibility parsing in `_normalizeTagRecord()` / `_getTopTagsFromSiteData()`.
   - Updated tag style indexing to alias styles using top tags from preloaded/site data, inspired by fluxdo's string/object tag compatibility logic.
@@ -23,13 +22,14 @@
   - Narrowed `RouteWatcher` mutation observation target to `#main-outlet` / `.d-header` before falling back to `document.body`.
   - Reworked `_getMessageBusLastId()` to avoid direct `callbacks` lookup and try safer candidate properties.
   - Grouped incoming-state globals into `sidebarIncomingState` and removed the back-to-top `scrollTop` fallback.
+  - Clarified `_mergeAndRenderTopics()` mode semantics so `filterTopic` is only applied outside `replace-head`, refreshed stale read/unread comments, and bumped userscript metadata to `0.6.68`.
 - Important recovery note: an attempted automatic split of `injectStyles()` temporarily removed/broke the CSS injection block. It has been restored, `function injectStyles()` exists again, and `node --check` passes.
 
 ## Validation
 
-- `node --check discourse-sidebar-feed-panel.user.js` passed after the CSS recovery.
+- `node --check discourse-sidebar-feed-panel.user.js` passed after the latest small refactor.
 - `git diff --check -- AGENTS.md discourse-sidebar-feed-panel.user.js` passed, with only CRLF conversion warnings.
-- Live browser verification was rerun on linux.do tab `1047331194` (`https://linux.do/t/topic/1838851`) and confirmed `.sfp-feed-container`, `.sfp-settings-wrap`, `.sfp-tab-bar`, topic stat icons, and back-to-top button were present. `overflow-x` on the tab bar remained `auto`.
+- Live browser verification was rerun on linux.do tab `1047331194` (`https://linux.do/t/topic/1838851`) and confirmed `.sfp-feed-container`, `.sfp-settings-wrap`, `.sfp-tab-bar`, topic stat icons, and back-to-top button were present. `overflow-x` on the tab bar remained `auto`. This verifies the currently installed userscript, not automatic application of local file edits.
 
 ## Constraints
 
@@ -45,19 +45,17 @@
 
 ## Recommended Next Optimizations
 
-1. Remove the back-to-top `scrollTo` fallback if targeting modern browsers only:
-   - Current location: `_buildBackTopButton()` still has `typeof feedScrollEl.scrollTo === "function"` and `feedScrollEl.scrollTop = 0` fallback.
-2. Review `_isTopicRead()` / `_hasUnreadMarker()` semantics carefully:
+1. Review `_isTopicRead()` / `_hasUnreadMarker()` semantics carefully:
    - Current implementation is defensive, but `_hasUnreadMarker()` is just `!_isTopicRead(topic)`.
    - Any simplification must preserve read/unread filters and protected-topic patching.
-3. Review `RouteWatcher` after narrowing:
+2. Review `RouteWatcher` after narrowing:
    - Ensure Discourse sidebar regeneration is still caught after route transitions and layout changes.
-4. Continue reducing state complexity in small slices:
+3. Continue reducing state complexity in small slices:
    - Incoming-related globals are now grouped, but the state machine is still spread across helper functions.
    - Keep the next refactor small and behavior-preserving.
-5. Consider small CSS extraction only if necessary:
+4. Consider small CSS extraction only if necessary:
    - Suggested first candidate: topic-stat icon sizing or loading/error styles, not the whole `injectStyles()` block.
-6. Re-run live verification after every behavior-affecting change:
+5. Re-run live verification after every behavior-affecting change:
    - Use `$agent-browser-cli`; check `.sfp-feed-container`, settings panel, tab scrolling, load-more behavior, and topic stat icons.
 
 ## Suggested Skills
