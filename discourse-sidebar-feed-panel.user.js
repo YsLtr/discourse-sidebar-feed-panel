@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.68
+// @version      0.6.69
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -123,8 +123,18 @@
   const topicHighlightTimers = new WeakMap();
 
   // ========== 工具函数 ==========
+  let cachedCsrfToken = null;
+
   function getCsrfToken() {
-    return document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+    if (cachedCsrfToken === null) {
+      cachedCsrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+    }
+    return cachedCsrfToken;
+  }
+
+  function toAbsoluteSiteUrl(path) {
+    if (!path) return "";
+    return new URL(path, location.origin).href;
   }
 
   function navigateTo(path) {
@@ -193,7 +203,7 @@
   function getAvatarUrl(template, size) {
     if (!template) return "";
     let url = template.replace("{size}", String(size));
-    if (!url.startsWith("http")) url = "https://linux.do" + url;
+    if (!url.startsWith("http")) url = toAbsoluteSiteUrl(url);
     return url;
   }
 
@@ -374,7 +384,6 @@
     const savedOrder = _getSavedTabOrder();
     if (!savedOrder.length) return [...TAB_CATEGORIES];
 
-    const orderedIds = new Set(savedOrder);
     return [...TAB_CATEGORIES].sort((a, b) => {
       const idxA = savedOrder.indexOf(a.id);
       const idxB = savedOrder.indexOf(b.id);
@@ -382,7 +391,7 @@
       if (idxA === -1) return 1;
       if (idxB === -1) return -1;
       return idxA - idxB;
-    }).filter((cat) => orderedIds.has(cat.id) || CATEGORY_CONFIG[cat.id]?.tabId);
+    });
   }
 
   function _saveTabOrderFromGrid(grid) {
@@ -416,11 +425,7 @@
     const targetLeft = activeTab.offsetLeft - ((bar.clientWidth - activeTab.offsetWidth) / 2);
     const left = Math.min(maxScrollLeft, Math.max(0, targetLeft));
 
-    if (typeof bar.scrollTo === "function") {
-      bar.scrollTo({ left, behavior });
-    } else {
-      bar.scrollLeft = left;
-    }
+    bar.scrollTo({ left, behavior });
   }
 
   function _parsePreloadedPayload(raw) {
@@ -1508,9 +1513,6 @@
       .sfp-topic-item:hover {
         background: var(--primary-very-low);
       }
-      .sfp-topic-item.sfp-pinned {
-        /* 只保留置顶 badge 标记，不加背景色 */
-      }
       .sfp-topic-item.sfp-filter-mismatch {
         opacity: 0.48;
         filter: grayscale(0.85);
@@ -1948,10 +1950,14 @@
     return MIN_WIDTH;
   }
 
+  function getSidebarElement() {
+    return document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+  }
+
   function applySidebarWidth(width) {
     const clampedWidth = Math.min(MAX_WIDTH, Math.max(getMinSidebarWidth(), width));
     sfpSidebarWidth = clampedWidth;
-    const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+    const sidebar = getSidebarElement();
     if (sidebar) {
       sidebar.style.setProperty("width", clampedWidth + "px", "important");
     }
@@ -1973,7 +1979,7 @@
   }
 
   function animateSidebarWidth(targetWidth, { cleanupAfter = false, enforceMin = true } = {}) {
-    const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+    const sidebar = getSidebarElement();
     if (!sidebar) return;
 
     if (widthAnimationTimer) {
@@ -2003,7 +2009,7 @@
   }
 
   function restoreSidebarWidth() {
-    const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+    const sidebar = getSidebarElement();
     if (sidebar) {
       sidebar.style.removeProperty("width");
     }
@@ -2011,7 +2017,7 @@
   }
 
   function setupResizer() {
-    const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+    const sidebar = getSidebarElement();
     if (!sidebar) return;
 
     if (resizerEl && !sidebar.contains(resizerEl)) {
@@ -2066,13 +2072,13 @@
       resizerEl = null;
     }
 
-    const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+    const sidebar = getSidebarElement();
     sidebar?.querySelectorAll(":scope > .sfp-resizer").forEach((el) => el.remove());
   }
 
   // ========== 激活 / 停用 ==========
   function activateFeed() {
-    const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+    const sidebar = getSidebarElement();
     if (!sidebar) return;
 
     if (!sidebar.classList.contains("sfp-feed-mode") || originalSidebarWidthBeforeFeed === null) {
@@ -2155,7 +2161,7 @@
   }
 
   function deactivateFeed() {
-    const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+    const sidebar = getSidebarElement();
     if (!sidebar) return;
 
     activeLoadToken++;
@@ -3009,10 +3015,6 @@
     }
   }
 
-  function _isDefaultFeedView() {
-    return FeedQuery.isDefault();
-  }
-
   function _isLatestActivityView(query = FeedQuery.snapshot()) {
     return query.order === "activity";
   }
@@ -3052,18 +3054,13 @@
   }
 
   function _topicMatchesIncomingView(topic, query = FeedQuery.snapshot()) {
-    return _canUseSidebarIncomingRefresh(query) &&
-      _topicMatchesCategoryScope(topic, query) &&
+    return _topicMatchesIncomingCandidate(topic, query) &&
       _topicMatchesLocalFilter(topic, query);
   }
 
   function _topicMatchesIncomingCandidate(topic, query = FeedQuery.snapshot()) {
     return _canUseSidebarIncomingRefresh(query) &&
       _topicMatchesCategoryScope(topic, query);
-  }
-
-  function _canFilterSidebarIncomingFromPayload(query = FeedQuery.snapshot()) {
-    return _canUseSidebarIncomingRefresh(query);
   }
 
   function _recomputeSidebarIncomingFilteredTopicIds(query = FeedQuery.snapshot()) {
@@ -3139,6 +3136,12 @@
 
     const oldSettings = feedHeaderEl.querySelector(".sfp-settings-wrap");
     if (!oldSettings) return;
+
+    const hasLatestActivityPanel = !!oldSettings.querySelector(".sfp-incoming-hint-row");
+    if (hasLatestActivityPanel === _isLatestActivityView()) {
+      _syncSettingsPanelState(oldSettings);
+      return;
+    }
 
     const isOpen = oldSettings.classList.contains("open");
     const nextSettings = _buildSettingsControl();
@@ -3217,7 +3220,7 @@
     if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
       _queueSidebarIncomingApply();
     } else {
-      if (_canFilterSidebarIncomingFromPayload()) {
+      if (_canUseSidebarIncomingRefresh()) {
         _recomputeSidebarIncomingFilteredTopicIds();
         sidebarIncomingState.filterStable = true;
         _updateShowMoreHint({ skipIncomingFilterRefresh: true });
@@ -4043,7 +4046,7 @@
     _updateBackTopButton();
   }
 
-  // ========== 客户端筛选 ==========
+  // ========== 话题 URL / 已读状态 / 客户端筛选 ==========
   function _topicBaseUrl(topic) {
     const slug = topic.slug || "topic";
     return `/t/${slug}/${topic.id}`;
@@ -4071,14 +4074,12 @@
     return `${baseUrl}/${postNumber}`;
   }
 
-  function _topicListUrlHasPostNumber(topic) {
-    return new RegExp(`/t/[^/]+/${topic.id}/\\d+(?:$|[/?#])`).test(_topicListUrl(topic));
-  }
-
   // Discourse topic 列表的已读信号不稳定：优先保留楼层号语义，再用 API 字段兜底。
   function _isTopicRead(topic) {
     if (!topic || !topic.id) return false;
-    if (_hasLastReadPostNumber(topic)) return _topicListUrlHasPostNumber(topic);
+    if (_hasLastReadPostNumber(topic)) {
+      return new RegExp(`/t/[^/]+/${topic.id}/\\d+(?:$|[/?#])`).test(_topicListUrl(topic));
+    }
     if (topic.unseen === true) return false;
     if (Number(topic.new_posts) > 0 || Number(topic.unread_posts) > 0) return false;
     if (topic.is_seen === true || topic.unseen === false) return true;
@@ -4090,8 +4091,30 @@
     return !_isTopicRead(topic);
   }
 
+  function _applyReadMarker(topic) {
+    topic.unread_posts = 0;
+    topic.new_posts = 0;
+    topic.unseen = false;
+    topic.is_seen = true;
+    if (topic.highest_post_number) {
+      topic.last_read_post_number = topic.highest_post_number;
+    }
+  }
+
+  function markTopicAsRead(topic, itemElement) {
+    if (!_hasUnreadMarker(topic)) return;
+    _applyReadMarker(topic);
+    const existing = allTopics.find((t) => t.id === topic.id);
+    if (existing && existing !== topic) _applyReadMarker(existing);
+    itemElement.classList.add("sfp-read");
+    const dot = itemElement.querySelector(".sfp-unread-dot");
+    if (dot) dot.remove();
+  }
+
   // 未读/已读筛选复用 _isTopicRead，避免和渲染、点击后本地 patch 的语义分叉。
   function _applyFilter(topics) {
+    if (!hidePinned && currentFilter === "all") return topics;
+
     let result = topics;
     if (hidePinned) {
       result = result.filter((t) => !t.pinned && !t.pinned_globally);
@@ -4241,42 +4264,16 @@
     });
 
     // 中键新标签页
-    item.addEventListener("mousedown", (e) => { if (e.button === 1) e.preventDefault(); });
-    item.addEventListener("mouseup", (e) => {
+    item.addEventListener("auxclick", (e) => {
       if (e.button === 1) {
         e.preventDefault();
         const targetUrl = _topicListUrl(topic);
         markTopicAsRead(topic, item);
-        window.open(`https://linux.do${targetUrl}`, "_blank");
+        window.open(toAbsoluteSiteUrl(targetUrl), "_blank");
       }
     });
 
     return item;
-  }
-
-  // ========== 标记帖子为已读 ==========
-  function markTopicAsRead(topic, itemElement) {
-    if (!_hasUnreadMarker(topic)) return;
-    topic.unread_posts = 0;
-    topic.new_posts = 0;
-    topic.unseen = false;
-    topic.is_seen = true;
-    if (topic.highest_post_number) {
-      topic.last_read_post_number = topic.highest_post_number;
-    }
-    const existing = allTopics.find((t) => t.id === topic.id);
-    if (existing) {
-      existing.unread_posts = 0;
-      existing.new_posts = 0;
-      existing.unseen = false;
-      existing.is_seen = true;
-      if (existing.highest_post_number) {
-        existing.last_read_post_number = existing.highest_post_number;
-      }
-    }
-    itemElement.classList.add("sfp-read");
-    const dot = itemElement.querySelector(".sfp-unread-dot");
-    if (dot) dot.remove();
   }
 
   // ========== 回到顶部 ==========
@@ -4431,7 +4428,7 @@
         }
 
         if (feedModeEnabled) {
-          const sidebar = document.querySelector("#d-sidebar") || document.querySelector(".sidebar-container");
+          const sidebar = getSidebarElement();
           const resizerMissing = !resizerEl || !sidebar?.contains(resizerEl);
           if (sidebar && (!feedContainer || !sidebar.contains(feedContainer) || !sidebar.classList.contains("sfp-feed-mode") || resizerMissing)) {
             activateFeed();
