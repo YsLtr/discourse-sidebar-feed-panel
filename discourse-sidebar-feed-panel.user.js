@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.69
+// @version      0.6.70
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -2802,7 +2802,6 @@
     oldShell.replaceWith(newShell);
     const newBar = newShell.querySelector(".sfp-tab-bar");
     if (options.scrollTabId) {
-      if (newBar) newBar.scrollLeft = scrollLeft;
       requestAnimationFrame(() => {
         _scrollTabIntoView(newShell, options.scrollTabId, options.scrollBehavior || "auto");
       });
@@ -3162,17 +3161,17 @@
     sidebarMessageBus = messageBus;
     sidebarLatestMessageBusCallback = (data) => _handleSidebarIncomingMessage(data);
     sidebarNewMessageBusCallback = (data) => _handleSidebarIncomingMessage(data);
-    messageBus.subscribe("/latest", sidebarLatestMessageBusCallback, _getMessageBusLastId("/latest"));
-    messageBus.subscribe("/new", sidebarNewMessageBusCallback, _getMessageBusLastId("/new"));
+    messageBus.subscribe("/latest", sidebarLatestMessageBusCallback, _getMessageBusLastId(messageBus, "/latest"));
+    messageBus.subscribe("/new", sidebarNewMessageBusCallback, _getMessageBusLastId(messageBus, "/new"));
   }
 
-  function _getMessageBusLastId(channel) {
+  function _getMessageBusLastId(messageBus, channel) {
     const candidates = [
-      sidebarMessageBus?.lastId?.(channel),
-      sidebarMessageBus?.lastIdForChannel?.(channel),
-      sidebarMessageBus?.lastIds?.[channel],
-      sidebarMessageBus?.last_ids?.[channel],
-      sidebarMessageBus?.channels?.[channel]?.lastId,
+      messageBus?.lastId?.(channel),
+      messageBus?.lastIdForChannel?.(channel),
+      messageBus?.lastIds?.[channel],
+      messageBus?.last_ids?.[channel],
+      messageBus?.channels?.[channel]?.lastId,
     ];
 
     for (const candidate of candidates) {
@@ -3664,7 +3663,6 @@
     } else {
       highlightTopicIds = topics.map((topic) => topic.id);
       allTopics = topics.concat(allTopics.filter((topic) => !topicMap.has(topic.id)));
-      hasMorePages = hasMorePages || topics.length > 0;
     }
 
     topics.forEach((topic) => loadedTopicIds.add(topic.id));
