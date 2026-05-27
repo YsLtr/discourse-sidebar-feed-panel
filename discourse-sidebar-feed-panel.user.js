@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.70
+// @version      0.6.71
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -4130,19 +4130,13 @@
     return `${baseUrl}/${postNumber}`;
   }
 
-  // Discourse topic 列表的已读信号不稳定：优先保留楼层号语义，再用 API 字段兜底。
+  // 以脚本实际跳转链接为准：不带楼层号是未读，带楼层号说明有阅读进度。
+  // `unseen: false` 只表示这个话题不再是“新出现”，不能证明用户打开读过。
   function _isTopicRead(topic) {
     if (!topic || !topic.id) return false;
-    if (_hasLastReadPostNumber(topic)) {
-      const baseUrl = _topicBaseUrl(topic);
-      const url = _topicListUrl(topic);
-      return url !== baseUrl && url.startsWith(`${baseUrl}/`);
-    }
-    if (topic.unseen === true) return false;
-    if (Number(topic.new_posts) > 0 || Number(topic.unread_posts) > 0) return false;
-    if (topic.is_seen === true || topic.unseen === false) return true;
-    if (Number(topic.new_posts) === 0 && Number(topic.unread_posts) === 0) return true;
-    return false;
+    const baseUrl = _topicBaseUrl(topic);
+    const url = _topicListUrl(topic);
+    return url !== baseUrl && url.startsWith(`${baseUrl}/`);
   }
 
   function _hasUnreadMarker(topic) {
