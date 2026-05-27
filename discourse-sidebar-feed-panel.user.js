@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.72
+// @version      0.6.73
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -1526,9 +1526,12 @@
 
       /* ===== 帖子列表项 ===== */
       .sfp-topic-item {
+        display: block;
         padding: 12px 20px;
         border-bottom: 1px solid var(--primary-very-low);
+        color: inherit;
         cursor: pointer;
+        text-decoration: none;
         transition: background 0.2s;
         position: relative;
         min-width: 0;
@@ -1536,8 +1539,18 @@
         overflow-wrap: break-word;
         word-break: break-word;
       }
+      .sfp-topic-item:visited,
+      .sfp-topic-item:hover,
+      .sfp-topic-item:focus {
+        color: inherit;
+        text-decoration: none;
+      }
       .sfp-topic-item:hover {
         background: var(--primary-very-low);
+      }
+      .sfp-topic-item:focus-visible {
+        outline: 2px solid var(--tertiary);
+        outline-offset: -2px;
       }
       .sfp-topic-item.sfp-filter-mismatch {
         opacity: 0.48;
@@ -4242,8 +4255,10 @@
 
   // ========== 创建帖子项 ==========
   function createTopicItem(topic, isNew = false) {
-    const item = document.createElement("div");
+    const item = document.createElement("a");
+    const targetUrl = _topicListUrl(topic);
     item.className = "sfp-topic-item";
+    item.href = toAbsoluteSiteUrl(targetUrl);
     item.dataset.topicId = topic.id;
     if (topic.pinned || topic.pinned_globally) {
       item.classList.add("sfp-pinned");
@@ -4325,18 +4340,16 @@
     // 点击跳转
     item.addEventListener("click", (e) => {
       if (e.button !== 0) return;
-      const targetUrl = _topicListUrl(topic);
       markTopicAsRead(topic, item);
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || item.target === "_blank") return;
+      e.preventDefault();
       navigateTo(targetUrl);
     });
 
-    // 中键新标签页
+    // 中键使用原生链接打开新标签页，同时保持本地已读状态同步。
     item.addEventListener("auxclick", (e) => {
       if (e.button === 1) {
-        e.preventDefault();
-        const targetUrl = _topicListUrl(topic);
         markTopicAsRead(topic, item);
-        window.open(toAbsoluteSiteUrl(targetUrl), "_blank");
       }
     });
 
