@@ -63,3 +63,9 @@ https://linux.do/*
 ## 许可证
 
 MIT
+
+## 致谢
+
+[linux-do-timeline](https://linux.do/t/topic/1548156)
+[发个脚本的优化](https://linux.do/t/topic/1548771)
+[LINUX DO](https://linux.do/)
