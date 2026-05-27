@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.71
+// @version      0.6.72
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -3298,6 +3298,16 @@
     _recomputeSidebarIncomingFilteredTopicIds();
   }
 
+  function _removeSidebarIncomingTopicsForQuery(query = FeedQuery.snapshot()) {
+    if (!sidebarIncomingState.topicIds.length) return;
+
+    const topicIds = sidebarIncomingState.topicIds.filter((id) => {
+      const topic = sidebarIncomingState.topicCache.get(Number(id));
+      return topic && _topicMatchesIncomingCandidate(topic, query);
+    });
+    _removeSidebarIncomingTopicIds(topicIds);
+  }
+
   function _queueSidebarIncomingApply() {
     if (sidebarIncomingState.viewSettling) return;
     if (!_canUseSidebarIncomingRefresh()) return;
@@ -3693,6 +3703,7 @@
     moreTopicsUrl = "",
     incomingCandidateIds = [],
     filterTopic = null,
+    clearIncomingForQuery = null,
     preserveViewport = false,
   } = {}) {
     const shouldFilterTopics = mode !== "replace-head" && typeof filterTopic === "function";
@@ -3726,7 +3737,11 @@
 
     const scrollAnchor = _captureFeedScrollAnchor();
     renderTopics(highlightTopicIds, { preserveProtected: preserveViewport });
-    if (incomingCandidateIds.length) _removeSidebarIncomingTopicIds(incomingCandidateIds);
+    if (clearIncomingForQuery) {
+      _removeSidebarIncomingTopicsForQuery(clearIncomingForQuery);
+    } else if (incomingCandidateIds.length) {
+      _removeSidebarIncomingTopicIds(incomingCandidateIds);
+    }
     _updateShowMoreHint();
     _restoreFeedScrollAnchor(scrollAnchor);
     return true;
@@ -3753,7 +3768,7 @@
       return _mergeAndRenderTopics(data.topic_list.topics, {
         mode: "replace-head",
         moreTopicsUrl: data.topic_list.more_topics_url,
-        incomingCandidateIds: data.topic_list.topics.map((topic) => topic.id),
+        clearIncomingForQuery: requestQuery,
         preserveViewport,
       });
     } catch (e) {
