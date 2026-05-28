@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.73
+// @version      0.6.74
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -2189,7 +2189,6 @@
 
     // 恢复当前 tab 筛选的分类
     _restoreTabState();
-    _startSidebarIncomingTracking();
     _syncDefaultViewControls();
 
     // 始终全量加载，数据已在 deactivateFeed 中清除
@@ -2443,6 +2442,7 @@
           }
         }
         _syncSettingsPanelState(wrapper);
+        _syncSidebarIncomingTracking();
         _updateShowMoreHint();
       });
     }
@@ -2460,6 +2460,7 @@
           GM_setValue(SHOW_INCOMING_HINT_KEY, false);
         }
         _syncSettingsPanelState(wrapper);
+        _syncSidebarIncomingTracking();
         _startAutoSilentRefresh();
         _updateShowMoreHint();
         if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
@@ -3077,6 +3078,11 @@
     return _isLatestActivityView(query);
   }
 
+  function _shouldUseSidebarIncomingQueue(query = FeedQuery.snapshot()) {
+    return _canUseSidebarIncomingRefresh(query) &&
+      (showIncomingHint || _isAutoSilentRefreshActive(query));
+  }
+
   function _canShowSidebarIncomingHint(query = FeedQuery.snapshot()) {
     return showIncomingHint && _canUseSidebarIncomingRefresh(query) && query.filter === "all";
   }
@@ -3177,13 +3183,14 @@
   }
 
   function _syncDefaultViewControls() {
+    _syncSidebarIncomingTracking();
     _recomputeSidebarIncomingFilteredTopicIds();
     _updateSettingsControl();
     _updateShowMoreHint();
     _startAutoSilentRefresh();
     _startAutoRefresh();
     _scheduleSidebarIncomingFilterRefresh();
-    if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0 && sidebarIncomingState.topicIds.length > 0) {
+    if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
       _queueSidebarIncomingApply();
     }
   }
@@ -3207,6 +3214,7 @@
   }
 
   function _startSidebarIncomingTracking() {
+    if (!_shouldUseSidebarIncomingQueue()) return;
     if (sidebarLatestMessageBusCallback || sidebarNewMessageBusCallback) return;
 
     const messageBus = getMessageBus();
@@ -3223,6 +3231,16 @@
     // 避免重新订阅时误用已经清掉的全局 sidebarMessageBus。
     messageBus.subscribe("/latest", sidebarLatestMessageBusCallback, _getMessageBusLastId(messageBus, "/latest"));
     messageBus.subscribe("/new", sidebarNewMessageBusCallback, _getMessageBusLastId(messageBus, "/new"));
+  }
+
+  function _syncSidebarIncomingTracking() {
+    // Message-bus tracking only maintains incoming candidates; auto silent
+    // refresh uses a separate timer to decide when those candidates are applied.
+    if (feedModeEnabled && _shouldUseSidebarIncomingQueue()) {
+      _startSidebarIncomingTracking();
+    } else {
+      _stopSidebarIncomingTracking();
+    }
   }
 
   function _getMessageBusLastId(messageBus, channel) {
@@ -3255,16 +3273,16 @@
     sidebarMessageBus = null;
     sidebarLatestMessageBusCallback = null;
     sidebarNewMessageBusCallback = null;
-    sidebarIncomingState.applyQueued = false;
-    if (sidebarIncomingState.filterRefreshTimer) {
-      clearTimeout(sidebarIncomingState.filterRefreshTimer);
-      sidebarIncomingState.filterRefreshTimer = null;
-    }
+    _clearSidebarIncomingCandidates();
   }
 
   function _handleSidebarIncomingMessage(data) {
     if (!data || !["latest", "new_topic"].includes(data.message_type)) return;
     if (!data.topic_id) return;
+    if (!_shouldUseSidebarIncomingQueue()) {
+      _clearSidebarIncomingCandidates();
+      return;
+    }
     if (data.payload?.archetype && data.payload.archetype !== "regular") return;
 
     // 推送 payload 不一定包含完整话题字段，但通常足够判断 id、分类和 archetype。
@@ -3288,6 +3306,22 @@
         _updateShowMoreHint({ skipIncomingFilterRefresh: true });
       }
     }
+  }
+
+  function _clearSidebarIncomingCandidates() {
+    // Idempotent cleanup for disabled incoming tracking and stale callbacks.
+    sidebarIncomingState.topicIds = [];
+    sidebarIncomingState.topicIdSet = new Set();
+    sidebarIncomingState.topicCache.clear();
+    sidebarIncomingState.filteredTopicIds = [];
+    sidebarIncomingState.filterStable = false;
+    sidebarIncomingState.applyQueued = false;
+    if (sidebarIncomingState.filterRefreshTimer) {
+      clearTimeout(sidebarIncomingState.filterRefreshTimer);
+      sidebarIncomingState.filterRefreshTimer = null;
+    }
+    sidebarIncomingState.filterRefreshToken++;
+    _removeShowMoreHint();
   }
 
   function _addSidebarIncomingTopicId(topicId) {
@@ -3325,6 +3359,7 @@
     if (sidebarIncomingState.viewSettling) return;
     if (!_canUseSidebarIncomingRefresh()) return;
     if (!_isAutoSilentRefreshActive() || autoSilentRefreshInterval > 0) return;
+    if (sidebarIncomingState.topicIds.length === 0) return;
     if (sidebarIncomingState.applyQueued) return;
 
     // 0 秒静默刷新表示“有 incoming 就尽快应用”。这里排入 microtask，
@@ -3737,7 +3772,7 @@
       // 手动刷新或普通自动刷新拿到的是列表头部，应该同步 more_topics_url；
       // incoming prepend 只是在现有列表前插入候选话题，不能据此重置分页状态。
       highlightTopicIds = topics
-        .filter((topic) => !loadedTopicIds.has(topic.id) || sidebarIncomingState.topicIdSet.has(Number(topic.id)))
+        .filter((topic) => !loadedTopicIds.has(topic.id))
         .map((topic) => topic.id);
       allTopics = topics.concat(allTopics.filter((topic) => !topicMap.has(topic.id)));
       hasMorePages = !!moreTopicsUrl;
@@ -3814,7 +3849,6 @@
     try {
       const incomingTopicIds = (await _refreshSidebarIncomingFilter()).slice();
       if (incomingTopicIds.length === 0) {
-        _updateShowMoreHint();
         return;
       }
       if (isLoading || isLoadingMore || isRefreshing) {
