@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.75
+// @version      0.6.76
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -36,6 +36,7 @@
   const AUTO_SILENT_REFRESH_INTERVAL_KEY = "sfp_auto_silent_refresh_interval";
   const AUTO_REFRESH_ENABLED_KEY = "sfp_auto_refresh_enabled";
   const AUTO_REFRESH_INTERVAL_KEY = "sfp_auto_refresh_interval";
+  const RESIDENT_TOPIC_LIMIT_KEY = "sfp_resident_topic_limit";
   const TAG_STYLE_CACHE_KEY = "sfp_tag_style_cache_v1";
 
   // ========== 常量 ==========
@@ -51,6 +52,11 @@
   // - 其他排序没有可靠增量事件，默认 10 秒重新拉取当前列表。
   const DEFAULT_AUTO_SILENT_REFRESH_INTERVAL = 0;
   const DEFAULT_AUTO_REFRESH_INTERVAL = 10;
+  const DEFAULT_RESIDENT_TOPIC_LIMIT = 200;
+  const MIN_RESIDENT_TOPIC_LIMIT = 50;
+  const MAX_RESIDENT_TOPIC_LIMIT = 1000;
+  const AUTO_REFRESH_IDLE_LIMIT_MS = 10 * 60 * 1000;
+  const AUTO_REFRESH_TOPIC_LIMIT_MULTIPLIER = 3;
 
   // 自动补页只在“筛选后当前页不够显示”时触发。窗口限速和空结果计数一起
   // 防止未读/已读筛选在站点数据不足时连续请求后续页。
@@ -79,6 +85,12 @@
   let autoSilentRefreshInterval = Math.max(0, Number(GM_getValue(AUTO_SILENT_REFRESH_INTERVAL_KEY, DEFAULT_AUTO_SILENT_REFRESH_INTERVAL)) || DEFAULT_AUTO_SILENT_REFRESH_INTERVAL);
   let autoRefreshEnabled = GM_getValue(AUTO_REFRESH_ENABLED_KEY, false);
   let autoRefreshInterval = Math.max(1, Number(GM_getValue(AUTO_REFRESH_INTERVAL_KEY, DEFAULT_AUTO_REFRESH_INTERVAL)) || DEFAULT_AUTO_REFRESH_INTERVAL);
+  let residentTopicLimit = clampNumber(
+    Number(GM_getValue(RESIDENT_TOPIC_LIMIT_KEY, DEFAULT_RESIDENT_TOPIC_LIMIT)),
+    MIN_RESIDENT_TOPIC_LIMIT,
+    MAX_RESIDENT_TOPIC_LIMIT,
+    DEFAULT_RESIDENT_TOPIC_LIMIT
+  );
   let currentCategoryId = null;
 
   let allTopics = [];
@@ -86,6 +98,8 @@
   let loadedTopicIds = new Set();
   let currentPage = 0;
   let hasMorePages = true;
+  let nextTopicsUrl = "";
+  let topicPageSize = 30;
   let isLoading = false;
   let isLoadingMore = false;
   let isRefreshing = false;
@@ -111,6 +125,8 @@
   const sidebarIncomingState = {
     topicIds: [],
     topicIdSet: new Set(),
+    droppedTopicIds: [],
+    droppedTopicIdSet: new Set(),
     topicCache: new Map(),
     filteredTopicIds: [],
     filterRefreshTimer: null,
@@ -125,6 +141,7 @@
   let activeLoadToken = 0;
   let activeLoadMoreToken = 0;
   let activeRefreshToken = 0;
+  let lastPageActivityAt = Date.now();
   let categoryMetaPromise = null;
   let categoryMetaLoaded = false;
   let tagStylePromise = null;
@@ -156,6 +173,12 @@
       cachedCsrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
     }
     return cachedCsrfToken;
+  }
+
+  function clampNumber(value, min, max, fallback) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(numeric)));
   }
 
   function toAbsoluteSiteUrl(path) {
@@ -2236,6 +2259,7 @@
     loadedTopicIds.clear();
     currentPage = 0;
     hasMorePages = true;
+    nextTopicsUrl = "";
     _resetAutoLoadState();
 
     sidebar.classList.remove("sfp-feed-mode");
@@ -2341,6 +2365,11 @@
     // 这样可以减少用户误以为所有排序都能无请求地接收新话题。
     if (isLatestActivityView) {
       panel.innerHTML = `
+        <div class="sfp-setting-interval sfp-resident-topic-limit-row visible">
+          ${_buildSettingLabelHtml("保留话题数量", "刷新后最多保留的话题数量。当前可见话题及其上方内容会优先保留，因此实际数量可能临时超过此值。")}
+          <input type="number" class="sfp-resident-topic-limit-input" min="${MIN_RESIDENT_TOPIC_LIMIT}" max="${MAX_RESIDENT_TOPIC_LIMIT}" step="10" value="${residentTopicLimit}">
+          <span>条</span>
+        </div>
         <div class="sfp-setting-row sfp-incoming-hint-row">
           ${_buildSettingLabelHtml("新活动提醒", "在最新活动的全部列表中，按站点推送的新话题显示顶部提醒；点击提醒才把新内容加入列表。开启后会关闭自动静默刷新。")}
           <input type="checkbox" class="sfp-incoming-hint-input"${showIncomingHint ? " checked" : ""}>
@@ -2357,6 +2386,11 @@
       `;
     } else {
       panel.innerHTML = `
+        <div class="sfp-setting-interval sfp-resident-topic-limit-row visible">
+          ${_buildSettingLabelHtml("保留话题数量", "刷新后最多保留的话题数量。当前可见话题及其上方内容会优先保留，因此实际数量可能临时超过此值。")}
+          <input type="number" class="sfp-resident-topic-limit-input" min="${MIN_RESIDENT_TOPIC_LIMIT}" max="${MAX_RESIDENT_TOPIC_LIMIT}" step="10" value="${residentTopicLimit}">
+          <span>条</span>
+        </div>
         <div class="sfp-setting-row sfp-auto-refresh-row">
           ${_buildSettingLabelHtml("自动刷新", "用于非最新活动的排序视图，按间隔重新拉取当前列表，并尽量保留当前阅读位置。不要设置太快，频繁请求可能触发站点速率限制。")}
           <input type="checkbox" class="sfp-auto-refresh-input"${autoRefreshEnabled ? " checked" : ""}>
@@ -2446,6 +2480,14 @@
         _updateShowMoreHint();
       });
     }
+
+    const residentLimitInput = panel.querySelector(".sfp-resident-topic-limit-input");
+    _bindNumberSetting(residentLimitInput, MIN_RESIDENT_TOPIC_LIMIT, DEFAULT_RESIDENT_TOPIC_LIMIT, (limit) => {
+      residentTopicLimit = clampNumber(limit, MIN_RESIDENT_TOPIC_LIMIT, MAX_RESIDENT_TOPIC_LIMIT, DEFAULT_RESIDENT_TOPIC_LIMIT);
+      residentLimitInput.value = residentTopicLimit;
+      GM_setValue(RESIDENT_TOPIC_LIMIT_KEY, residentTopicLimit);
+      _compactSidebarIncomingCandidates();
+    }, MAX_RESIDENT_TOPIC_LIMIT);
 
     const autoSilentInput = panel.querySelector(".sfp-auto-silent-input");
     const silentIntervalInput = panel.querySelector(".sfp-auto-silent-refresh-interval-input");
@@ -2574,10 +2616,10 @@
     input.addEventListener("change", () => onChange(input.checked));
   }
 
-  function _bindNumberSetting(input, min, fallback, onChange) {
+  function _bindNumberSetting(input, min, fallback, onChange, max = Infinity) {
     if (!input) return;
     input.addEventListener("change", () => {
-      const nextValue = Math.max(min, Number(input.value) || fallback);
+      const nextValue = clampNumber(input.value, min, max, fallback);
       input.value = nextValue;
       onChange(nextValue);
     });
@@ -3287,8 +3329,8 @@
 
     // 推送 payload 不一定包含完整话题字段，但通常足够判断 id、分类和 archetype。
     // 先记录候选，真正插入列表前再拉完整数据，避免把不完整 payload 直接渲染。
-    _addSidebarIncomingTopicId(data.topic_id);
-    if (data.payload) {
+    const addedIncoming = _addSidebarIncomingTopicId(data.topic_id);
+    if (addedIncoming && data.payload) {
       sidebarIncomingState.topicCache.set(Number(data.topic_id), {
         ...(sidebarIncomingState.topicCache.get(Number(data.topic_id)) || {}),
         ...data.payload,
@@ -3312,6 +3354,8 @@
     // Idempotent cleanup for disabled incoming tracking and stale callbacks.
     sidebarIncomingState.topicIds = [];
     sidebarIncomingState.topicIdSet = new Set();
+    sidebarIncomingState.droppedTopicIds = [];
+    sidebarIncomingState.droppedTopicIdSet = new Set();
     sidebarIncomingState.topicCache.clear();
     sidebarIncomingState.filteredTopicIds = [];
     sidebarIncomingState.filterStable = false;
@@ -3326,11 +3370,45 @@
 
   function _addSidebarIncomingTopicId(topicId) {
     const numericId = Number(topicId);
-    if (!Number.isFinite(numericId) || sidebarIncomingState.topicIdSet.has(numericId)) return;
+    if (!Number.isFinite(numericId) || sidebarIncomingState.topicIdSet.has(numericId)) return false;
+
+    if (sidebarIncomingState.droppedTopicIdSet.has(numericId)) {
+      sidebarIncomingState.droppedTopicIdSet.delete(numericId);
+      sidebarIncomingState.droppedTopicIds = sidebarIncomingState.droppedTopicIds.filter((id) => Number(id) !== numericId);
+    }
 
     sidebarIncomingState.topicIdSet.add(numericId);
     sidebarIncomingState.topicIds.push(numericId);
     sidebarIncomingState.filterStable = false;
+    _compactSidebarIncomingCandidates();
+    return true;
+  }
+
+  function _rememberDroppedIncomingTopicIds(topicIds) {
+    topicIds.forEach((topicId) => {
+      const numericId = Number(topicId);
+      if (!Number.isFinite(numericId) || sidebarIncomingState.droppedTopicIdSet.has(numericId)) return;
+      sidebarIncomingState.droppedTopicIdSet.add(numericId);
+      sidebarIncomingState.droppedTopicIds.push(numericId);
+    });
+
+    while (sidebarIncomingState.droppedTopicIds.length > residentTopicLimit) {
+      const oldId = sidebarIncomingState.droppedTopicIds.shift();
+      sidebarIncomingState.droppedTopicIdSet.delete(oldId);
+    }
+  }
+
+  function _compactSidebarIncomingCandidates() {
+    const overflow = sidebarIncomingState.topicIds.length - residentTopicLimit;
+    if (overflow <= 0) return;
+
+    const droppedIds = sidebarIncomingState.topicIds.splice(0, overflow);
+    droppedIds.forEach((id) => {
+      sidebarIncomingState.topicIdSet.delete(Number(id));
+      sidebarIncomingState.topicCache.delete(Number(id));
+    });
+    _rememberDroppedIncomingTopicIds(droppedIds);
+    _recomputeSidebarIncomingFilteredTopicIds();
   }
 
   function _removeSidebarIncomingTopicIds(topicIds) {
@@ -3342,6 +3420,8 @@
     sidebarIncomingState.topicIds = sidebarIncomingState.topicIds.filter((id) => !toRemove.has(Number(id)));
     sidebarIncomingState.topicIdSet = new Set(sidebarIncomingState.topicIds);
     toRemove.forEach((id) => sidebarIncomingState.topicCache.delete(Number(id)));
+    sidebarIncomingState.droppedTopicIds = sidebarIncomingState.droppedTopicIds.filter((id) => !toRemove.has(Number(id)));
+    sidebarIncomingState.droppedTopicIdSet = new Set(sidebarIncomingState.droppedTopicIds);
     _recomputeSidebarIncomingFilteredTopicIds();
   }
 
@@ -3359,6 +3439,7 @@
     if (sidebarIncomingState.viewSettling) return;
     if (!_canUseSidebarIncomingRefresh()) return;
     if (!_isAutoSilentRefreshActive() || autoSilentRefreshInterval > 0) return;
+    if (_shouldSkipAutomaticRefresh()) return;
     if (sidebarIncomingState.topicIds.length === 0) return;
     if (sidebarIncomingState.applyQueued) return;
 
@@ -3508,6 +3589,38 @@
     return resp.json();
   }
 
+  function normalizeTopicListJsonUrl(url) {
+    if (!url) return "";
+    let nextUrl = String(url);
+    if (/^https?:\/\//i.test(nextUrl)) {
+      try {
+        const parsed = new URL(nextUrl);
+        if (parsed.origin === location.origin) {
+          nextUrl = parsed.pathname + parsed.search + parsed.hash;
+        }
+      } catch {
+        return nextUrl;
+      }
+    }
+
+    const [pathAndSearch, hash = ""] = nextUrl.split("#");
+    const queryIndex = pathAndSearch.indexOf("?");
+    const path = queryIndex >= 0 ? pathAndSearch.slice(0, queryIndex) : pathAndSearch;
+    const search = queryIndex >= 0 ? pathAndSearch.slice(queryIndex) : "";
+    const jsonPath = path.endsWith(".json") ? path : `${path.replace(/\/$/, "")}.json`;
+    return `${jsonPath}${search}${hash ? `#${hash}` : ""}`;
+  }
+
+  async function fetchFeedTopicsByUrl(url) {
+    const nextUrl = normalizeTopicListJsonUrl(url);
+    if (!nextUrl) return null;
+    const csrfToken = getCsrfToken();
+    const headers = { "X-CSRF-Token": csrfToken };
+    const resp = await fetch(nextUrl, { headers });
+    if (!resp.ok) throw new Error(`API error: ${resp.status}`);
+    return resp.json();
+  }
+
   async function fetchFeedTopicsByIds(topicIds) {
     const ids = Array.from(new Set(topicIds.map((id) => Number(id)).filter(Number.isFinite)));
     if (ids.length === 0) return null;
@@ -3517,6 +3630,23 @@
     const resp = await fetch(`/latest.json?topic_ids=${ids.join(",")}`, { headers });
     if (!resp.ok) throw new Error(`API error: ${resp.status}`);
     return resp.json();
+  }
+
+  function _buildContinuationUrlForResidentTail(query = FeedQuery.snapshot()) {
+    const pageSize = Math.max(1, topicPageSize || 30);
+    const nextPage = Math.max(1, Math.floor(allTopics.length / pageSize));
+    return FeedQuery.buildUrl(query, nextPage);
+  }
+
+  function _realignContinuationToResidentTail(query = FeedQuery.snapshot(), { allowSynthetic = false } = {}) {
+    if (!hasMorePages && !allowSynthetic) {
+      nextTopicsUrl = "";
+      return;
+    }
+
+    currentPage = Math.max(0, Math.floor(allTopics.length / Math.max(1, topicPageSize || 30)) - 1);
+    nextTopicsUrl = _buildContinuationUrlForResidentTail(query);
+    hasMorePages = !!nextTopicsUrl;
   }
 
   function _needsPeriodForUrl(order) {
@@ -3554,6 +3684,7 @@
 
     currentPage = 0;
     hasMorePages = true;
+    nextTopicsUrl = "";
     allTopics = [];
     loadedTopicIds.clear();
     _updateShowMoreHint();
@@ -3576,15 +3707,18 @@
 
       if (data?.topic_list?.topics) {
         const topics = data.topic_list.topics;
+        if (topics.length > 0) topicPageSize = topics.length;
         topics.forEach((t) => loadedTopicIds.add(t.id));
         allTopics = topics;
-        hasMorePages = !!data.topic_list.more_topics_url;
+        nextTopicsUrl = data.topic_list.more_topics_url || "";
+        hasMorePages = !!nextTopicsUrl;
         renderTopics();
         _removeSidebarIncomingTopicIds(topics.map((topic) => topic.id));
         _updateShowMoreHint();
       } else {
         if (feedListEl) feedListEl.innerHTML = `<div class="sfp-empty">暂无话题</div>`;
         hasMorePages = false;
+        nextTopicsUrl = "";
       }
 
       _startAutoRefresh();
@@ -3616,13 +3750,12 @@
   }
 
   async function loadMoreTopics({ source = "manual" } = {}) {
-    if (isLoading || isLoadingMore || !hasMorePages) return;
+    if (isLoading || isLoadingMore || !hasMorePages || !nextTopicsUrl) return;
     const isAutoLoad = source === "auto";
     if (isAutoLoad && !_canRunAutoLoad()) return;
 
     const requestQuery = FeedQuery.snapshot();
     const requestToken = ++activeLoadMoreToken;
-    const nextPage = currentPage + 1;
     isLoadingMore = true;
     if (isAutoLoad) _recordAutoLoadRequest();
 
@@ -3631,20 +3764,22 @@
     try {
       await loadCategoryMetadata();
       if (requestToken !== activeLoadMoreToken || !FeedQuery.isCurrent(requestQuery)) return;
-      const data = await fetchFeedTopics(requestQuery, nextPage);
+      const data = await fetchFeedTopicsByUrl(nextTopicsUrl);
       if (requestToken !== activeLoadMoreToken || !FeedQuery.isCurrent(requestQuery)) return;
       _processUsers(data);
 
       if (data?.topic_list?.topics) {
         const topics = data.topic_list.topics;
-        currentPage = nextPage;
+        if (topics.length > 0) topicPageSize = Math.max(topicPageSize, topics.length);
+        currentPage++;
         const newTopics = topics.filter((t) => {
           if (loadedTopicIds.has(t.id)) return false;
           loadedTopicIds.add(t.id);
           return true;
         });
 
-        hasMorePages = !!data.topic_list.more_topics_url;
+        nextTopicsUrl = data.topic_list.more_topics_url || "";
+        hasMorePages = !!nextTopicsUrl;
         if (newTopics.length === 0) {
           if (hasMorePages) {
             _renderPaginationFooter({
@@ -3669,6 +3804,7 @@
         }
       } else {
         hasMorePages = false;
+        nextTopicsUrl = "";
         _showNoMore();
       }
     } catch (e) {
@@ -3746,6 +3882,46 @@
     requestAnimationFrame(restore);
   }
 
+  function _captureProtectedTopicIds() {
+    return _getVisibleOrHoveredTopicItems()
+      .map(({ topicId }) => Number(topicId))
+      .filter(Number.isFinite);
+  }
+
+  function _trimResidentTopicsAfterRefresh(protectedTopicIds = [], query = FeedQuery.snapshot()) {
+    if (allTopics.length <= residentTopicLimit) return false;
+
+    const protectedIdSet = new Set(protectedTopicIds.map((id) => Number(id)).filter(Number.isFinite));
+    let protectedPrefixEnd = -1;
+    if (protectedIdSet.size > 0) {
+      allTopics.forEach((topic, index) => {
+        if (protectedIdSet.has(Number(topic.id))) {
+          protectedPrefixEnd = Math.max(protectedPrefixEnd, index);
+        }
+      });
+    }
+
+    const keepCount = Math.max(residentTopicLimit, protectedPrefixEnd + 1);
+    if (allTopics.length <= keepCount) return false;
+
+    const trimmedTopics = allTopics.splice(keepCount);
+    trimmedTopics.forEach((topic) => loadedTopicIds.delete(topic.id));
+    _rebuildUsersMapForResidentTopics();
+    _realignContinuationToResidentTail(query, { allowSynthetic: true });
+    return true;
+  }
+
+  function _rebuildUsersMapForResidentTopics() {
+    const nextUsersMap = {};
+    allTopics.forEach((topic) => {
+      const userId = topic?.posters?.[0]?.user_id;
+      if (userId !== undefined && usersMap[userId]) {
+        nextUsersMap[userId] = usersMap[userId];
+      }
+    });
+    usersMap = nextUsersMap;
+  }
+
   function _mergeAndRenderTopics(fetchedTopics, {
     mode = "prepend",
     moreTopicsUrl = "",
@@ -3767,6 +3943,11 @@
 
     const topicMap = new Map(topics.map((topic) => [topic.id, topic]));
     let highlightTopicIds = [];
+    const protectedTopicIds = _captureProtectedTopicIds();
+    const requestQuery = FeedQuery.snapshot();
+    if (topics.length > 0 && mode === "replace-head") {
+      topicPageSize = Math.max(topicPageSize, topics.length);
+    }
 
     if (mode === "replace-head") {
       // 手动刷新或普通自动刷新拿到的是列表头部，应该同步 more_topics_url；
@@ -3782,6 +3963,9 @@
     }
 
     topics.forEach((topic) => loadedTopicIds.add(topic.id));
+    if (!_trimResidentTopicsAfterRefresh(protectedTopicIds, requestQuery)) {
+      _realignContinuationToResidentTail(requestQuery);
+    }
 
     const scrollAnchor = _captureFeedScrollAnchor();
     renderTopics(highlightTopicIds, { preserveProtected: preserveViewport });
@@ -3895,7 +4079,7 @@
       autoSilentRefreshSeconds--;
       if (autoSilentRefreshSeconds <= 0) {
         _resetAutoSilentRefreshCountdown();
-        if (feedModeEnabled && !isLoading && !isLoadingMore && !isRefreshing) {
+        if (feedModeEnabled && !isLoading && !isLoadingMore && !isRefreshing && !_shouldSkipAutomaticRefresh()) {
           if (_canUseSidebarIncomingRefresh()) {
             _applySidebarIncomingTopics({
               requireDefaultView: true,
@@ -3927,6 +4111,30 @@
     }
   }
 
+  function _recordPageActivity() {
+    lastPageActivityAt = Date.now();
+  }
+
+  function _isPageIdleForAutoRefresh() {
+    return document.visibilityState === "hidden" ||
+      Date.now() - lastPageActivityAt > AUTO_REFRESH_IDLE_LIMIT_MS;
+  }
+
+  function _shouldSkipAutomaticRefresh() {
+    return _isPageIdleForAutoRefresh() ||
+      allTopics.length > residentTopicLimit * AUTO_REFRESH_TOPIC_LIMIT_MULTIPLIER;
+  }
+
+  function _setupPageActivityTracking() {
+    const options = { passive: true };
+    ["pointerdown", "keydown", "wheel", "touchstart", "scroll"].forEach((eventName) => {
+      window.addEventListener(eventName, _recordPageActivity, options);
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") _recordPageActivity();
+    });
+  }
+
   // ========== 自动刷新 ==========
   function _startAutoRefresh() {
     _stopAutoRefresh();
@@ -3940,7 +4148,7 @@
       autoRefreshSeconds--;
       if (autoRefreshSeconds <= 0) {
         _resetAutoRefreshCountdown();
-        if (feedModeEnabled && !isLoading && !isLoadingMore) {
+        if (feedModeEnabled && !isLoading && !isLoadingMore && !_shouldSkipAutomaticRefresh()) {
           _refreshCurrentView({ logPrefix: "auto refresh", preserveViewport: true });
         }
       }
@@ -4577,6 +4785,7 @@
 
   function init() {
     injectStyles();
+    _setupPageActivityTracking();
 
     globalHelpTooltip = document.createElement("div");
     globalHelpTooltip.className = "sfp-help-tooltip";
