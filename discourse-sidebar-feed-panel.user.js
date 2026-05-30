@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.74
+// @version      0.6.75
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -4550,8 +4550,9 @@
           }
         }
       });
-      const target = document.querySelector("#main-outlet") || document.querySelector(".d-header") || document.body;
-      observer.observe(target, { childList: true, subtree: true });
+      // 这里必须盯住 body：Discourse 关闭/打开原生侧边栏时，sidebar 节点可能在
+      // main-outlet / d-header 之外被重建；如果只观察局部容器，feed 恢复就会漏掉。
+      observer.observe(document.body, { childList: true, subtree: true });
     }
 
     function _checkUrlChange() {
