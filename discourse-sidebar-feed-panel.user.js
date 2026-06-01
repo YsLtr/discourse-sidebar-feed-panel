@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.84
+// @version      0.6.97
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -1422,26 +1422,18 @@
         --scrollbarBg: transparent;
         --scrollbarThumbBg: var(--d-selected, var(--token-color-surface-hovered));
         --scrollbarWidth: var(--space-2, 0.5em);
-        scrollbar-color: transparent var(--scrollbarBg);
-        transition: scrollbar-color 0.25s ease-in-out;
-        transition-delay: 0.5s;
+        scrollbar-gutter: stable;
+        scrollbar-color: var(--scrollbarThumbBg) var(--scrollbarBg);
       }
       .sfp-feed-scroll::-webkit-scrollbar {
         width: var(--scrollbarWidth);
       }
       .sfp-feed-scroll::-webkit-scrollbar-thumb {
-        background-color: transparent;
+        background-color: var(--scrollbarThumbBg);
         border-radius: calc(var(--scrollbarWidth) / 2);
       }
       .sfp-feed-scroll::-webkit-scrollbar-track {
         background-color: transparent;
-      }
-      .sfp-feed-scroll:hover {
-        scrollbar-color: var(--scrollbarThumbBg) var(--scrollbarBg);
-        transition-delay: 0s;
-      }
-      .sfp-feed-scroll:hover::-webkit-scrollbar-thumb {
-        background-color: var(--scrollbarThumbBg);
       }
       .sfp-content-wrapper {
         position: relative;
@@ -2985,6 +2977,7 @@
         done = true;
         feedScrollEl?.removeEventListener("scroll", onScroll);
         feedScrollEl?.removeEventListener("wheel", onInterrupt);
+        feedScrollEl?.removeEventListener("pointerdown", onInterrupt);
         feedScrollEl?.removeEventListener("touchstart", onInterrupt);
         window.removeEventListener("keydown", onInterrupt, true);
       };
@@ -2993,6 +2986,9 @@
         resolve(result);
       };
       const onInterrupt = () => {
+        if (feedScrollEl) {
+          feedScrollEl.scrollTo({ top: feedScrollEl.scrollTop, behavior: "auto" });
+        }
         if (!_isAtFeedHead()) finish("interrupted");
       };
       const onScroll = () => {
@@ -3020,6 +3016,7 @@
 
       feedScrollEl.addEventListener("scroll", onScroll, { passive: true });
       feedScrollEl.addEventListener("wheel", onInterrupt, { passive: true });
+      feedScrollEl.addEventListener("pointerdown", onInterrupt, { passive: true });
       feedScrollEl.addEventListener("touchstart", onInterrupt, { passive: true });
       window.addEventListener("keydown", onInterrupt, true);
       requestAnimationFrame(tick);
