@@ -2989,7 +2989,7 @@
         if (feedScrollEl) {
           feedScrollEl.scrollTo({ top: feedScrollEl.scrollTop, behavior: "auto" });
         }
-        if (!_isAtFeedHead()) finish("interrupted");
+        finish(_isAtFeedHead() ? "reached" : "interrupted");
       };
       const onScroll = () => {
         if (!feedScrollEl) {
