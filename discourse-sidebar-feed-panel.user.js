@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.97
+// @version      0.6.99
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -167,6 +167,18 @@
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return fallback;
     return Math.min(max, Math.max(min, Math.round(numeric)));
+  }
+
+  function isAtScrollBoundary(el, deltaY) {
+    // 当前调用方会提前过滤 deltaY === 0；这里保留 guard 是为了未来调用方。
+    if (!el || !deltaY) return false;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const canScroll = scrollHeight > clientHeight;
+    const atTop = scrollTop <= 0;
+    const atBottom = Math.ceil(scrollTop + clientHeight) >= scrollHeight;
+    const scrollingUp = deltaY < 0;
+    const scrollingDown = deltaY > 0;
+    return !canScroll || (scrollingUp && atTop) || (scrollingDown && atBottom);
   }
 
   function toAbsoluteSiteUrl(path) {
@@ -1419,6 +1431,8 @@
         overflow-y: auto;
         overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
+        overscroll-behavior-y: contain;
+        touch-action: pan-y pinch-zoom;
         --scrollbarBg: transparent;
         --scrollbarThumbBg: var(--d-selected, var(--token-color-surface-hovered));
         --scrollbarWidth: var(--space-2, 0.5em);
@@ -4440,22 +4454,53 @@
     const passiveListenerOptions = feedScrollAbortController
       ? { passive: true, signal: feedScrollAbortController.signal }
       : { passive: true };
+    // 只跟踪单个主触点；这里的目标是阻止边界 overscroll，不做完整手势识别。
+    let touchStartY = null;
+    let touchIdentifier = null;
 
     feedScrollEl.addEventListener("wheel", (e) => {
       if (!feedScrollEl || e.deltaY === 0) return;
 
-      const { scrollTop, scrollHeight, clientHeight } = feedScrollEl;
-      const canScroll = scrollHeight > clientHeight;
-      const atTop = scrollTop <= 0;
-      const atBottom = Math.ceil(scrollTop + clientHeight) >= scrollHeight;
-      const scrollingUp = e.deltaY < 0;
-      const scrollingDown = e.deltaY > 0;
-
-      if (!canScroll || (scrollingUp && atTop) || (scrollingDown && atBottom)) {
+      if (isAtScrollBoundary(feedScrollEl, e.deltaY)) {
         e.preventDefault();
         e.stopPropagation();
       }
     }, listenerOptions);
+
+    feedScrollEl.addEventListener("touchstart", (e) => {
+      if (!e.touches || e.touches.length === 0) return;
+      const touch = e.touches[0];
+      touchStartY = touch.clientY;
+      touchIdentifier = touch.identifier;
+    }, passiveListenerOptions);
+
+    feedScrollEl.addEventListener("touchmove", (e) => {
+      if (!feedScrollEl || !e.cancelable || touchStartY === null) return;
+      if (!e.touches || e.touches.length === 0) return;
+
+      let touch = null;
+      for (const candidate of e.touches) {
+        if (candidate.identifier === touchIdentifier) {
+          touch = candidate;
+          break;
+        }
+      }
+      if (!touch) touch = e.touches[0];
+
+      const deltaY = touch.clientY - touchStartY;
+      if (deltaY === 0) return;
+
+      if (isAtScrollBoundary(feedScrollEl, -deltaY)) {
+        e.preventDefault();
+      }
+    }, listenerOptions);
+
+    const resetTouchBoundsTracking = () => {
+      touchStartY = null;
+      touchIdentifier = null;
+    };
+    feedScrollEl.addEventListener("touchend", resetTouchBoundsTracking, passiveListenerOptions);
+    feedScrollEl.addEventListener("touchcancel", resetTouchBoundsTracking, passiveListenerOptions);
 
     feedScrollEl.addEventListener("scroll", _scheduleHeadActionStateSync, passiveListenerOptions);
 
