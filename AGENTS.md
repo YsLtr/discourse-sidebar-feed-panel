@@ -1,32 +1,37 @@
 # Discourse Sidebar Feed Panel — Active Handoff
 
-**Updated**: 2026-06-01 19:21:27 CST +0800
+**Updated**: 2026-06-01 20:25:08 CST +0800
 **Project root**: `/home/ysltr/builds/discourse/userscript`
 **Branch**: `main`
-**Current objective**: Preserve the new away-from-head refresh model and next diagnose scroll jank during direct scrolling and return-to-head animation.
+**Current objective**: Continue diagnosing and fixing scroll and return-to-head performance jank without undoing the away-from-head refresh model.
 
 ## Current State
 
 - Main file: `discourse-sidebar-feed-panel.user.js`
-- Current userscript version in file: `0.6.77`
-- New domain glossary updates are in `CONTEXT.md`.
-- New ADR: `docs/adr/0001-freeze-refresh-away-from-head.md`.
-- Implemented the aggressive refresh/retention redesign:
-  - Header refresh button becomes the only return-to-head affordance when the feed is away from the head screen.
-  - The old floating back-to-top button and in-feed new-topic reminder overlay were removed.
-  - Incoming reminder count now appears as plain themed text inside the header action button.
-  - Clicking an incoming count first returns to the top, then applies incoming candidates; interrupted return keeps the count.
-  - Automatic refresh and automatic silent refresh pause away from the true feed head and resume only at `scrollTop <= 1`.
-  - Incoming tracking continues so the count can update without inserting new feed DOM above the reader.
-  - Resident Topic retention was simplified to page-size-derived depth; the configurable resident-topic-limit setting and continuation URL state were removed.
-  - Pagination now builds URLs from local page depth; Discourse `more_topics_url` is only used as the more-pages signal.
-- A wrong first diagnosis added an automatic-refresh suppression lock; the user clarified that was ineffective, and that code has been removed.
-- The effective fix for unreliable incoming application was `_waitForFeedScrollHead()` returning `reached`, `timeout`, or `interrupted`; timeout now snaps to top and applies, while user interruption does not apply.
+- Current userscript version in file: `0.6.84`
+- Domain glossary: `CONTEXT.md`
+- ADR: `docs/adr/0001-freeze-refresh-away-from-head.md`
+- The away-from-head refresh model remains in force:
+  - Header action button is the only return-to-head affordance away from the head screen.
+  - Incoming count lives inside the header action button and applies only after returning to the true feed head.
+  - Automatic refresh/silent refresh pause away from true head and resume only at `scrollTop <= 1`.
+  - Resident Topic retention remains page-depth based; old configurable resident-topic-limit and continuation URL state remain removed.
+- Current uncommitted code changes before this handoff:
+  - Version bumped from `0.6.77` to `0.6.84`.
+  - DeepSeek review item kept: `_restoreMissingAutomaticRefreshTimers()` restores only missing expected timers instead of using the old `!autoRefreshTimer && !autoSilentRefreshTimer` all-or-nothing guard.
+  - Back-to-top arrow enter animation is now one-shot via temporary `.sfp-back-top-enter`, triggered only when `lastHeadActionAwayState` changes into away state, so downward scrolling no longer repeats the disappear/reappear animation.
+
+## Recently Tried And Reverted
+
+- Reverted the attempted scroll-jank fixes that cached refresh-button busy/render state.
+- Reverted the attempted hover-transition changes for Topic Items.
+- Reverted the attempted `.sfp-scroll-active` class that disabled hover during scroll, because it caused a startup hitch when scrolling began.
+- Do not reintroduce a scroll-path class toggle without first proving it avoids style recalculation at scroll start.
 
 ## Validation
 
-- `node --check discourse-sidebar-feed-panel.user.js` passed.
-- `git diff --check -- discourse-sidebar-feed-panel.user.js CONTEXT.md AGENTS.md docs/adr/0001-freeze-refresh-away-from-head.md` passed.
+- `node --check discourse-sidebar-feed-panel.user.js` passed after the latest changes.
+- `git diff --check -- discourse-sidebar-feed-panel.user.js` passed after the latest changes.
 - Live browser verification after reinstalling/updating the userscript is still pending.
 
 ## Constraints
@@ -37,23 +42,26 @@
 - Preserve `0.6.21+` period behavior: `period=all` ranked orders stay on `/latest.json?order=...`; non-`all` ranked periods use `/top.json?period=...&order=...`.
 - Keep the intended internal horizontal scroll of `.sfp-tab-bar`; do not regress board filter scrolling or the closed-sidebar overflow fix.
 - Prefer Discourse/Horizon CSS variables and native DOM conventions over hardcoded approximations.
+- The return-to-head timeout fallback is intentional: timeout snaps to top and applies, interruption does not apply incoming.
 
 ## Known Risk
 
-- User reported noticeable scroll jank not only during return-to-head but also while directly scrolling. This is explicitly deferred for the next session.
-- Likely first places to inspect: `_scheduleHeadActionStateSync()`, `_syncHeadActionState()`, incoming count recomputation, scroll listeners, and any code that writes `innerHTML`, class names, or timers during scroll.
-- The current return-to-head timeout fallback is intentional after diagnosis; do not remove it unless replacing it with a better deterministic completion/interruption model.
+- User still reports scroll jank during direct mouse scrolling and return-to-head animation.
+- User observed touch interaction does not show the same jank, so mouse hover/repaint remains a plausible contributor.
+- Earlier browser measurement was contaminated by an unfocused tab throttling `requestAnimationFrame`; do not treat the 1000ms frame gaps from that probe as conclusive.
+- The likely hot paths remain `_scheduleHeadActionStateSync()`, `_syncHeadActionState()`, incoming count recomputation, scroll listeners, hover repaint, and any DOM writes during scroll.
 
 ## Next Steps
 
-1. Reinstall/update the local userscript before live verification.
-2. Use `$diagnose` for the scroll-jank report and build a browser feedback loop before guessing.
-3. Measure whether scroll events are causing repeated header DOM writes, incoming recomputation, timer restarts, or layout work.
-4. Verify incoming count click behavior on linux.do: count visible away from head, click returns to top, applies incoming only after reaching/snap-to-top, and interruption preserves the count.
-5. Verify non-latest automatic refresh: pauses away from true head, resumes only at top.
+1. Reinstall/update local userscript to `0.6.84` before live testing.
+2. Use `$diagnose` to build a focused browser feedback loop in a focused linux.do tab.
+3. Measure direct mouse scroll and return-to-head separately; compare with touch/pointer-neutral operation.
+4. Instrument actual button DOM mutations, class changes, `innerHTML` writes, hover changes, and style/layout work during scroll.
+5. Avoid speculative CSS state toggles on scroll; prove a hypothesis with measurement before patching.
+6. Verify the back-to-top arrow enter animation now plays once when crossing into away-from-head and does not replay while continuing downward.
 
 ## Suggested Skills
 
-- `$diagnose` for the scroll-jank investigation.
-- `$agent-browser-cli` for live linux.do DOM/state checks and computed-style/layout measurements.
+- `$diagnose` for the scroll and return-to-head performance investigation.
+- `$agent-browser-cli` for focused linux.do DOM/state/performance checks.
 - `$handoff` again if work remains.

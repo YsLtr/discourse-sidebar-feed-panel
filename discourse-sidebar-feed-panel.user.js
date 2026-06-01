@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.77
+// @version      0.6.84
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -897,6 +897,9 @@
         color: var(--tertiary);
         background: var(--primary-low);
       }
+      .sfp-feed-header .sfp-refresh-btn.sfp-back-top-enter:not(.sfp-has-incoming-count) svg {
+        animation: sfp-back-top-enter 0.18s ease;
+      }
       .sfp-feed-header .sfp-refresh-btn .sfp-refresh-count {
         display: inline-block;
         min-width: 0;
@@ -911,6 +914,16 @@
       @keyframes sfp-spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
+      }
+      @keyframes sfp-back-top-enter {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
       }
       .sfp-feed-header .sfp-refresh-btn svg,
       .sfp-feed-header .sfp-settings-btn svg {
@@ -2878,6 +2891,34 @@
     }
   }
 
+  function _isAutoSilentRefreshTimerExpected() {
+    return _isAutoSilentRefreshActive() && autoSilentRefreshInterval > 0;
+  }
+
+  function _isAutoRefreshTimerExpected() {
+    return autoRefreshEnabled && !_isLatestActivityView() && _isAtFeedHead();
+  }
+
+  function _restoreMissingAutomaticRefreshTimers() {
+    if (isLoading || isLoadingMore || isRefreshing) return;
+    if (_isAutoSilentRefreshTimerExpected() && !autoSilentRefreshTimer) {
+      _startAutoSilentRefresh();
+    }
+    if (_isAutoRefreshTimerExpected() && !autoRefreshTimer) {
+      _startAutoRefresh();
+    }
+  }
+
+  function _playBackTopEnterAnimation() {
+    if (!feedRefreshBtn) return;
+    feedRefreshBtn.classList.remove("sfp-back-top-enter");
+    void feedRefreshBtn.offsetWidth;
+    feedRefreshBtn.classList.add("sfp-back-top-enter");
+    setTimeout(() => {
+      feedRefreshBtn?.classList.remove("sfp-back-top-enter");
+    }, 220);
+  }
+
   function _syncHeadActionState({ restartAuto = true } = {}) {
     if (!feedRefreshBtn) return;
 
@@ -2912,11 +2953,12 @@
       if (isAway) {
         _stopAutoRefresh();
         _stopAutoSilentRefresh();
+        if (!showsCount) _playBackTopEnterAnimation();
       } else if (restartAuto && isAtHead) {
         _restartAutomaticRefreshTimers();
       }
-    } else if (!isAway && restartAuto && isAtHead && !autoRefreshTimer && !autoSilentRefreshTimer) {
-      _restartAutomaticRefreshTimers();
+    } else if (!isAway && restartAuto && isAtHead) {
+      _restoreMissingAutomaticRefreshTimers();
     }
   }
 
