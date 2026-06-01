@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      0.6.99
+// @version      0.6.100
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -254,6 +254,41 @@
     let url = template.replace("{size}", String(size));
     if (!url.startsWith("http")) url = toAbsoluteSiteUrl(url);
     return url;
+  }
+
+  function getUserProfileUrl(username) {
+    if (!username) return "";
+    return `/u/${encodeURIComponent(username)}`;
+  }
+
+  function openPathInNewTab(path) {
+    window.open(toAbsoluteSiteUrl(path), "_blank", "noopener,noreferrer");
+  }
+
+  function handlePointerNavigation(e, path, { onPrimaryActivate = null, onMiddleActivate = null } = {}) {
+    if (!path) return false;
+    const isPrimaryClick = e.type === "click" && e.button === 0;
+    const isMiddleClick = e.type === "auxclick" && e.button === 1;
+    if (!isPrimaryClick && !isMiddleClick) return false;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (isPrimaryClick && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) {
+      onPrimaryActivate?.();
+      openPathInNewTab(path);
+      return true;
+    }
+
+    if (isPrimaryClick) {
+      onPrimaryActivate?.();
+      navigateTo(path);
+      return true;
+    }
+
+    onMiddleActivate?.();
+    openPathInNewTab(path);
+    return true;
   }
 
   function waitForEmber(callback, maxWait = 15000) {
@@ -1544,6 +1579,26 @@
         align-items: center;
         gap: 8px;
         margin-bottom: 5px;
+      }
+      .sfp-topic-item .sfp-topic-user-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+        color: inherit;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      /* 防止父级 topic 链接的 hover/focus 样式把用户入口改成普通文本。 */
+      .sfp-topic-item .sfp-topic-user-link:hover,
+      .sfp-topic-item .sfp-topic-user-link:focus {
+        color: inherit;
+        text-decoration: none;
+      }
+      .sfp-topic-item .sfp-topic-user-link:focus-visible {
+        outline: 2px solid var(--tertiary);
+        outline-offset: 2px;
+        border-radius: 4px;
       }
       .sfp-topic-item .sfp-topic-avatar {
         width: 28px;
@@ -4361,12 +4416,14 @@
     let avatarUrl = "";
     let name = "";
     let username = "";
+    let userProfileUrl = "";
     if (topic.posters && topic.posters.length > 0) {
       const userId = topic.posters[0].user_id;
       const user = usersMap[userId];
       if (user) {
         name = user.name || "";
         username = user.username || "";
+        userProfileUrl = getUserProfileUrl(username);
         if (user.avatar_template) {
           avatarUrl = getAvatarUrl(user.avatar_template, 45);
         }
@@ -4374,14 +4431,19 @@
     }
 
     // 头像 HTML
-    const avatarHtml = avatarUrl
-      ? `<img class="sfp-topic-avatar" src="${avatarUrl}" alt="${escapeHtml(username)}" loading="lazy">`
-      : "";
+    const avatarHtml = userProfileUrl && avatarUrl
+      ? `<span class="sfp-topic-user-link sfp-topic-avatar-link" data-user-profile-url="${escapeAttr(userProfileUrl)}" data-user-profile-link="true"><img class="sfp-topic-avatar" src="${avatarUrl}" alt="${escapeHtml(username)}" loading="lazy"></span>`
+      : (avatarUrl ? `<img class="sfp-topic-avatar" src="${avatarUrl}" alt="${escapeHtml(username)}" loading="lazy">` : "");
 
     // 显示名称
     const displayName = name && name !== username
-      ? `<span class="sfp-topic-name">${escapeHtml(name)}</span>`
+      ? (userProfileUrl
+        ? `<span class="sfp-topic-user-link sfp-topic-name" data-user-profile-url="${escapeAttr(userProfileUrl)}" data-user-profile-link="true">${escapeHtml(name)}</span>`
+        : `<span class="sfp-topic-name">${escapeHtml(name)}</span>`)
       : "";
+    const usernameHtml = userProfileUrl
+      ? `<span class="sfp-topic-user-link sfp-topic-username" data-user-profile-url="${escapeAttr(userProfileUrl)}" data-user-profile-link="true">${escapeHtml(username)}</span>`
+      : `<span class="sfp-topic-username">${escapeHtml(username)}</span>`;
 
     const statusBadgesHtml = _topicStatusBadgesHtml(topic);
 
@@ -4408,7 +4470,7 @@
         <div class="sfp-topic-meta-col">
           <div class="sfp-topic-user-info">
             ${displayName}
-            <span class="sfp-topic-username">${escapeHtml(username)}</span>
+            ${usernameHtml}
           </div>
         </div>
         ${statusBadgesHtml}
@@ -4426,18 +4488,24 @@
 
     // 点击跳转
     item.addEventListener("click", (e) => {
-      if (e.button !== 0) return;
-      markTopicAsRead(topic, item);
-      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || item.target === "_blank") return;
-      e.preventDefault();
-      navigateTo(targetUrl);
+      const profileLink = e.target.closest?.("[data-user-profile-link='true']");
+      if (profileLink) {
+        const profileUrl = profileLink.getAttribute("data-user-profile-url") || "";
+        handlePointerNavigation(e, profileUrl);
+        return;
+      }
+      handlePointerNavigation(e, targetUrl, { onPrimaryActivate: () => markTopicAsRead(topic, item) });
     });
 
     // 中键使用原生链接打开新标签页，同时保持本地已读状态同步。
     item.addEventListener("auxclick", (e) => {
-      if (e.button === 1) {
-        markTopicAsRead(topic, item);
+      const profileLink = e.target.closest?.("[data-user-profile-link='true']");
+      if (profileLink) {
+        const profileUrl = profileLink.getAttribute("data-user-profile-url") || "";
+        handlePointerNavigation(e, profileUrl);
+        return;
       }
+      handlePointerNavigation(e, targetUrl, { onMiddleActivate: () => markTopicAsRead(topic, item) });
     });
 
     return item;
