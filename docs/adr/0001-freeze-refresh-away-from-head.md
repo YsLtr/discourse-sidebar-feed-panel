@@ -1,0 +1,3 @@
+# Freeze Refresh Away From Head
+
+The Feed Panel freezes automatic topic application once the user scrolls beyond the first visible screen, while continuing incoming activity tracking when a count display or automatic silent refresh needs it. The header action becomes the only return-to-head affordance, optional incoming counts live there instead of in a content-flow reminder, and refresh-style head updates reset loaded feed depth to the first page. This deliberately trades immediate deep-scroll freshness for stable reading DOM, simpler page-size-derived retention, and pagination that reloads older pages from local page depth rather than stale continuation URLs.
