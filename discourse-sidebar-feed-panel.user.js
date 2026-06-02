@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      1.0.2
+// @version      1.0.3
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -950,14 +950,13 @@
       }
       .sfp-feed-header .sfp-refresh-btn .sfp-refresh-count {
         display: inline-block;
-        min-width: 0;
-        max-width: 24px;
+        min-width: 3ch;
         color: var(--tertiary);
         font-size: 13px;
         font-weight: 700;
         line-height: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        text-align: center;
+        white-space: nowrap;
       }
       @keyframes sfp-spin {
         from { transform: rotate(0deg); }
@@ -2935,7 +2934,7 @@
   }
 
   function _formatIncomingCount(count) {
-    return count > 99 ? "99+" : String(count);
+    return count > 999 ? "999" : String(count);
   }
 
   function _refreshIconHtml() {
