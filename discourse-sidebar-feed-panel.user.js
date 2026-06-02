@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      1.0.1
+// @version      1.0.2
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -111,12 +111,11 @@
 
   // message-bus 只告诉我们“可能有变化的话题 id”。完整话题数据仍要从
   // /latest.json?topic_ids=... 拉取；本地 cache 只用于在显示提醒前做板块范围
-  // 粗筛，避免每条推送都立即请求详情。
+  // 粗筛，避免每条推送都立即请求详情。topicIds 保留完整累计候选；
+  // resident limit 只限制每次实际加载的最新候选数量，不能截断提醒计数。
   const sidebarIncomingState = {
     topicIds: [],
     topicIdSet: new Set(),
-    droppedTopicIds: [],
-    droppedTopicIdSet: new Set(),
     topicCache: new Map(),
     filteredTopicIds: [],
     filterRefreshTimer: null,
@@ -3246,10 +3245,11 @@
 
     // 这里故意只用 incoming candidate 条件，不套完整本地筛选。
     // cache 里的 payload 可能缺少 last_read_post_number/new_posts 等字段；
-    // 完整筛选留给 _applySidebarIncomingTopics 拉取详情后处理。
+    // 也可能完全没有 payload。无 cache 的 id 仍要进入 apply，才能通过
+    // /latest.json?topic_ids=... 补完整数据后再做最终筛选。
     sidebarIncomingState.filteredTopicIds = sidebarIncomingState.topicIds.filter((id) => {
       const topic = sidebarIncomingState.topicCache.get(Number(id));
-      return topic && _topicMatchesIncomingCandidate(topic, query);
+      return !topic || _topicMatchesIncomingCandidate(topic, query);
     });
     return sidebarIncomingState.filteredTopicIds;
   }
@@ -3425,8 +3425,6 @@
     // Idempotent cleanup for disabled incoming tracking and stale callbacks.
     sidebarIncomingState.topicIds = [];
     sidebarIncomingState.topicIdSet = new Set();
-    sidebarIncomingState.droppedTopicIds = [];
-    sidebarIncomingState.droppedTopicIdSet = new Set();
     sidebarIncomingState.topicCache.clear();
     sidebarIncomingState.filteredTopicIds = [];
     sidebarIncomingState.filterStable = false;
@@ -3442,8 +3440,6 @@
   function _resetSidebarIncomingCandidatesForQueryChange() {
     sidebarIncomingState.topicIds = [];
     sidebarIncomingState.topicIdSet = new Set();
-    sidebarIncomingState.droppedTopicIds = [];
-    sidebarIncomingState.droppedTopicIdSet = new Set();
     sidebarIncomingState.topicCache.clear();
     sidebarIncomingState.filteredTopicIds = [];
     sidebarIncomingState.filterStable = false;
@@ -3460,43 +3456,16 @@
     const numericId = Number(topicId);
     if (!Number.isFinite(numericId) || sidebarIncomingState.topicIdSet.has(numericId)) return false;
 
-    if (sidebarIncomingState.droppedTopicIdSet.has(numericId)) {
-      sidebarIncomingState.droppedTopicIdSet.delete(numericId);
-      sidebarIncomingState.droppedTopicIds = sidebarIncomingState.droppedTopicIds.filter((id) => Number(id) !== numericId);
-    }
-
     sidebarIncomingState.topicIdSet.add(numericId);
     sidebarIncomingState.topicIds.push(numericId);
     sidebarIncomingState.filterStable = false;
-    _compactSidebarIncomingCandidates();
     return true;
   }
 
-  function _rememberDroppedIncomingTopicIds(topicIds) {
-    topicIds.forEach((topicId) => {
-      const numericId = Number(topicId);
-      if (!Number.isFinite(numericId) || sidebarIncomingState.droppedTopicIdSet.has(numericId)) return;
-      sidebarIncomingState.droppedTopicIdSet.add(numericId);
-      sidebarIncomingState.droppedTopicIds.push(numericId);
-    });
-
-    while (sidebarIncomingState.droppedTopicIds.length > _residentTopicLimit()) {
-      const oldId = sidebarIncomingState.droppedTopicIds.shift();
-      sidebarIncomingState.droppedTopicIdSet.delete(oldId);
-    }
-  }
-
-  function _compactSidebarIncomingCandidates() {
-    const overflow = sidebarIncomingState.topicIds.length - _residentTopicLimit();
-    if (overflow <= 0) return;
-
-    const droppedIds = sidebarIncomingState.topicIds.splice(0, overflow);
-    droppedIds.forEach((id) => {
-      sidebarIncomingState.topicIdSet.delete(Number(id));
-      sidebarIncomingState.topicCache.delete(Number(id));
-    });
-    _rememberDroppedIncomingTopicIds(droppedIds);
-    _recomputeSidebarIncomingFilteredTopicIds();
+  function _getSidebarIncomingLoadTopicIds(topicIds = sidebarIncomingState.filteredTopicIds) {
+    const ids = Array.isArray(topicIds) ? topicIds : [];
+    const loadLimit = _residentTopicLimit();
+    return ids.length > loadLimit ? ids.slice(-loadLimit) : ids.slice();
   }
 
   function _removeSidebarIncomingTopicIds(topicIds) {
@@ -3508,8 +3477,6 @@
     sidebarIncomingState.topicIds = sidebarIncomingState.topicIds.filter((id) => !toRemove.has(Number(id)));
     sidebarIncomingState.topicIdSet = new Set(sidebarIncomingState.topicIds);
     toRemove.forEach((id) => sidebarIncomingState.topicCache.delete(Number(id)));
-    sidebarIncomingState.droppedTopicIds = sidebarIncomingState.droppedTopicIds.filter((id) => !toRemove.has(Number(id)));
-    sidebarIncomingState.droppedTopicIdSet = new Set(sidebarIncomingState.droppedTopicIds);
     _recomputeSidebarIncomingFilteredTopicIds();
   }
 
@@ -4053,7 +4020,8 @@
     const endRefreshBusy = _beginRefreshButtonBusy();
     let requestToken = null;
     try {
-      const incomingTopicIds = (await _refreshSidebarIncomingFilter()).slice();
+      const incomingCandidateIds = await _refreshSidebarIncomingFilter();
+      const incomingTopicIds = _getSidebarIncomingLoadTopicIds(incomingCandidateIds);
       if (incomingTopicIds.length === 0) {
         return;
       }
@@ -4074,7 +4042,7 @@
 
       _mergeAndRenderTopics(data.topic_list.topics, {
         mode: "prepend",
-        incomingCandidateIds: incomingTopicIds,
+        incomingCandidateIds,
         filterTopic: (topic) => _topicMatchesIncomingView(topic, requestQuery),
         resetFeedDepth,
       });
