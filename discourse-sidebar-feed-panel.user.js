@@ -6,6 +6,8 @@
 // @author       YsLtr
 // @match        https://linux.do/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=linux.do
+// @downloadURL https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js  
+// @updateURL  https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js  
 // @grant        GM_addStyle
 // @grant        GM_setValue
 // @grant        GM_getValue

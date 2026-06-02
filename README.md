@@ -23,7 +23,9 @@
 
 然后打开下面的直装链接：
 
-[安装 Discourse Sidebar Feed Panel](https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js)
+[从 github 安装](https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js)
+[从 Greasy Fork 安装](https://update.greasyfork.org/scripts/579280/Discourse%20Sidebar%20Feed%20Panel.user.js)
+[从 脚本猫 安装](https://scriptcat.org/scripts/code/6360/Discourse%20Sidebar%20Feed%20Panel.user.js)
 
 脚本管理器会自动弹出安装页面，确认安装即可。
 
