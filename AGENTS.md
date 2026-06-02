@@ -1,37 +1,31 @@
 # Discourse Sidebar Feed Panel — Active Handoff
 
-**Updated**: 2026-06-01 22:34:00 CST +0800
-**Project root**: `/home/ysltr/builds/discourse/userscript`
+**Updated**: 2026-06-02 15:16:53 CST +0800
+**Project root**: `C:\Users\28676\builds\discourse\userscript`
 **Branch**: `main`
-**Current objective**: Finish live validation after reinstalling/updating the userscript; current code also adds user-profile navigation from avatar/username/name.
+**Current objective**: Continue live validation of the userscript after the refresh/back-to-top button state fix.
 
 ## Current State
 
 - Main file: `discourse-sidebar-feed-panel.user.js`
-- Current userscript version in file: `0.6.100`
-- The touch-scroll fix is in place:
-  - `.sfp-feed-scroll` now uses `overscroll-behavior-y: contain` and `touch-action: pan-y pinch-zoom`.
-  - `isAtScrollBoundary(el, deltaY)` centralizes top/bottom boundary detection for wheel and touch paths.
-  - `touchstart` / `touchmove` / `touchend` / `touchcancel` listeners track one primary touch point and call `preventDefault()` only when the feed scroll container is already at a vertical boundary.
-  - Touch finger movement is inverted before boundary detection (`-deltaY`) because finger movement and `wheel.deltaY` have opposite direction semantics.
-  - `touchmove` intentionally does not call `stopPropagation()`; the older wheel path still keeps its existing propagation stop.
-- User/profile navigation update is also in place:
-  - avatar, display name, and `@username` now jump to `/u/<username>`.
-  - topic-row navigation still uses the existing SPA route-to logic.
-  - helper functions now centralize path opening, pointer navigation, and topic `markTopicAsRead()` side effects.
-  - middle-click on user-profile links opens the profile in a new tab without marking the topic as read.
-- `docs/adr/0001-freeze-refresh-away-from-head.md` still applies. The away-from-head refresh model remains in force:
-  - Header action button is still the only return-to-head affordance away from the head screen.
-  - Incoming count still lives inside the header action button and applies only after returning to the true feed head.
-  - Automatic refresh / silent refresh still pause away from true head and resume only at `scrollTop <= 1`.
-  - Resident topic retention still stays page-depth based.
+- Current userscript version in file: `1.0.1`
+- Latest fix: the header refresh button now follows the same away-from-head boundary used to pause automatic refresh.
+  - Once the feed scrolls past the first screen, the button becomes the back-to-top action.
+  - It stays as back-to-top while the user keeps scrolling or scrolls back within the first screen.
+  - It only returns to the refresh action after the feed reaches the true head (`scrollTop <= 1`), matching automatic refresh restart behavior.
+  - The back-to-top enter animation no longer force-restarts while already active.
+  - The button content is only rewritten when the action or incoming count changes, avoiding repeated SVG node replacement during scroll sync.
+- Existing touch-scroll and user-profile navigation changes remain in place:
+  - `.sfp-feed-scroll` contains vertical overscroll and tracks one primary touch point for boundary cancellation.
+  - Avatar, display name, and username navigate to `/u/<username>`.
+  - Topic-row navigation still marks topics read on normal activation; user-profile links do not.
+- `docs/adr/0001-freeze-refresh-away-from-head.md` still applies. The away-from-head refresh model remains in force.
 
 ## Validation
 
 - `node --check discourse-sidebar-feed-panel.user.js` passes.
-- `git diff --check -- discourse-sidebar-feed-panel.user.js` passes.
-- `$agent-browser-cli` previously found an active linux.do tab and confirmed the feed panel DOM exists there.
-- Full live validation is still pending because the browser must first load the updated `0.6.100` userscript. Do not claim a normal page refresh applies userscript metadata/code changes; reinstall/update in the userscript manager is required.
+- `git diff --check -- discourse-sidebar-feed-panel.user.js` passes with only the Windows LF-to-CRLF warning.
+- Full live validation in linux.do is still pending after installing/updating the userscript to `1.0.1`.
 
 ## Constraints
 
@@ -43,27 +37,22 @@
 
 ## Known Risk
 
-- The code fix has not yet been verified on a real touch interaction after installing `0.6.100`.
-- The touch handler tracks a single primary touch point by design. This is enough for boundary overscroll protection, but it is not a full multi-touch gesture recognizer.
-- Mouse hover/scrollbar jank appears less likely after the previous stabilization work; avoid speculative CSS state toggles on scroll unless there is measurement.
-- User-profile click handling was refactored to share navigation helpers with topic-row clicks; re-check middle-click/read-state behavior if future changes touch that helper.
+- The refresh/back-to-top button fix has only been statically verified, not validated in a real browser session.
+- The touch handler still tracks a single primary touch point by design. This is enough for boundary overscroll protection, but it is not a full multi-touch gesture recognizer.
+- If future work touches `_syncHeadActionState()`, keep the button state aligned with the automatic refresh pause/restart boundary.
 
 ## Next Steps
 
-1. Reinstall/update the local userscript to `0.6.100`.
-2. In the existing linux.do tab or a focused new tab, verify with real touch or Chrome DevTools touch emulation that:
-   - normal feed scrolling still works,
-   - pulling down at the top no longer scrolls/overscrolls the page outside the feed,
-   - pushing up at the bottom no longer scrolls/overscrolls the page outside the feed,
-   - `.sfp-tab-bar` horizontal touch scrolling still works.
-3. Verify user-profile clicks:
-   - avatar/name/username open `/u/<username>`
-   - middle-click opens a new tab
-   - topic rows still mark read on normal activation, but user-profile links do not.
-4. If live verification fails, inspect actual event direction/cancelability first before changing CSS or listener options.
+1. Install/update the local userscript to `1.0.1`.
+2. In linux.do, verify:
+   - scrolling past the first screen changes refresh to back-to-top with the enter animation,
+   - continuing to scroll while the animation is running does not make it flash or jump,
+   - scrolling back within the first screen but not to the top keeps the button as back-to-top,
+   - returning to `scrollTop <= 1` changes it back to refresh and restarts automatic refresh.
+3. Re-check the prior touch-scroll and user-profile navigation cases if doing full live validation.
 
 ## Suggested Skills
 
 - `$agent-browser-cli` for focused linux.do DOM/state checks.
-- `$diagnose` if the live touch repro still fails after installing `0.6.100`.
+- `$diagnose` if the live button animation or touch-scroll repro still fails.
 - `$handoff` again if more work remains.

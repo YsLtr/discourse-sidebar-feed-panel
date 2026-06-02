@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      1.0.0
+// @version      1.0.1
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -2205,6 +2205,7 @@
     _stopAutoSilentRefresh();
     _stopSidebarIncomingTracking();
     _resetRefreshButtonBusy();
+    feedRefreshBtn?.classList.remove("sfp-back-top-enter");
 
     if (feedContainer) {
       feedContainer.remove();
@@ -2929,7 +2930,8 @@
 
   function _getIncomingCountDisplayValue(query = FeedQuery.snapshot()) {
     if (!showIncomingHint || !_canShowSidebarIncomingHint(query)) return 0;
-    if (!_isAwayFromHead() && _isAutoSilentRefreshActive(query)) return 0;
+    const isAway = !_isAtFeedHead() && (lastHeadActionAwayState === true || _isAwayFromHead());
+    if (!isAway && _isAutoSilentRefreshActive(query)) return 0;
     return sidebarIncomingState.filterStable ? sidebarIncomingState.filteredTopicIds.length : 0;
   }
 
@@ -2974,8 +2976,7 @@
 
   function _playBackTopEnterAnimation() {
     if (!feedRefreshBtn) return;
-    feedRefreshBtn.classList.remove("sfp-back-top-enter");
-    void feedRefreshBtn.offsetWidth;
+    if (feedRefreshBtn.classList.contains("sfp-back-top-enter")) return;
     feedRefreshBtn.classList.add("sfp-back-top-enter");
     setTimeout(() => {
       feedRefreshBtn?.classList.remove("sfp-back-top-enter");
@@ -2985,11 +2986,16 @@
   function _syncHeadActionState({ restartAuto = true } = {}) {
     if (!feedRefreshBtn) return;
 
-    const isAway = _isAwayFromHead();
     const isAtHead = _isAtFeedHead();
+    const isAway = isAtHead ? false : (lastHeadActionAwayState === true || _isAwayFromHead());
     const incomingCount = _getIncomingCountDisplayValue();
     const showsCount = incomingCount > 0;
     const nextAction = showsCount ? "incoming" : (isAway ? "back-top" : "refresh");
+    const currentAction = feedRefreshBtn.dataset.action || "";
+    const nextIncomingCount = showsCount ? String(incomingCount) : "";
+    const shouldUpdateActionHtml =
+      currentAction !== nextAction ||
+      (showsCount && feedRefreshBtn.dataset.incomingCount !== nextIncomingCount);
     const nextTitle = showsCount
       ? `应用 ${incomingCount} 个新的或更新的话题`
       : (isAway ? "回到顶部" : "刷新");
@@ -2999,15 +3005,23 @@
 
     feedRefreshBtn.classList.toggle("sfp-away-from-head", isAway);
     feedRefreshBtn.classList.toggle("sfp-has-incoming-count", showsCount);
-    if (feedRefreshBtn.dataset.action !== nextAction) {
+    if (currentAction !== nextAction) {
       feedRefreshBtn.dataset.action = nextAction;
+    }
+    if (nextIncomingCount) {
+      feedRefreshBtn.dataset.incomingCount = nextIncomingCount;
+    } else {
+      delete feedRefreshBtn.dataset.incomingCount;
     }
     if (feedRefreshBtn.title !== nextTitle) {
       feedRefreshBtn.title = nextTitle;
       feedRefreshBtn.setAttribute("aria-label", nextTitle);
     }
-    if (feedRefreshBtn.innerHTML !== nextHtml) {
+    if (shouldUpdateActionHtml) {
       feedRefreshBtn.innerHTML = nextHtml;
+    }
+    if (nextAction !== "back-top") {
+      feedRefreshBtn.classList.remove("sfp-back-top-enter");
     }
     _syncRefreshButtonBusy();
 
