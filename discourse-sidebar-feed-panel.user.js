@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      1.0.3
+// @version      1.0.4
 // @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -118,6 +118,7 @@
     topicIdSet: new Set(),
     topicCache: new Map(),
     filteredTopicIds: [],
+    filteredLoadTopicIds: [],
     filterRefreshTimer: null,
     filterRefreshToken: 0,
     viewSettling: false,
@@ -3156,6 +3157,7 @@
     sidebarIncomingState.viewSettling = true;
     sidebarIncomingState.filterStable = false;
     sidebarIncomingState.filteredTopicIds = [];
+    sidebarIncomingState.filteredLoadTopicIds = [];
     sidebarIncomingState.filterRefreshToken++;
     if (sidebarIncomingState.filterRefreshTimer) {
       clearTimeout(sidebarIncomingState.filterRefreshTimer);
@@ -3238,6 +3240,7 @@
   function _recomputeSidebarIncomingFilteredTopicIds(query = FeedQuery.snapshot()) {
     if (!_canUseSidebarIncomingRefresh(query)) {
       sidebarIncomingState.filteredTopicIds = [];
+      sidebarIncomingState.filteredLoadTopicIds = [];
       sidebarIncomingState.filterStable = false;
       return sidebarIncomingState.filteredTopicIds;
     }
@@ -3246,10 +3249,18 @@
     // cache 里的 payload 可能缺少 last_read_post_number/new_posts 等字段；
     // 也可能完全没有 payload。无 cache 的 id 仍要进入 apply，才能通过
     // /latest.json?topic_ids=... 补完整数据后再做最终筛选。
-    sidebarIncomingState.filteredTopicIds = sidebarIncomingState.topicIds.filter((id) => {
+    const filteredTopicIds = [];
+    const filteredLoadTopicIds = [];
+    const loadLimit = _incomingLoadTopicLimit();
+    sidebarIncomingState.topicIds.forEach((id) => {
       const topic = sidebarIncomingState.topicCache.get(Number(id));
-      return !topic || _topicMatchesIncomingCandidate(topic, query);
+      if (topic && !_topicMatchesIncomingCandidate(topic, query)) return;
+      filteredTopicIds.push(id);
+      filteredLoadTopicIds.push(id);
+      if (filteredLoadTopicIds.length > loadLimit) filteredLoadTopicIds.shift();
     });
+    sidebarIncomingState.filteredTopicIds = filteredTopicIds;
+    sidebarIncomingState.filteredLoadTopicIds = filteredLoadTopicIds;
     return sidebarIncomingState.filteredTopicIds;
   }
 
@@ -3281,6 +3292,7 @@
     const token = ++sidebarIncomingState.filterRefreshToken;
     if (incomingTopicIds.length === 0) {
       sidebarIncomingState.filteredTopicIds = [];
+      sidebarIncomingState.filteredLoadTopicIds = [];
       sidebarIncomingState.filterStable = true;
       _syncIncomingHeadAction({ skipIncomingFilterRefresh: true });
       return [];
@@ -3399,8 +3411,8 @@
 
     // 推送 payload 不一定包含完整话题字段，但通常足够判断 id、分类和 archetype。
     // 先记录候选，真正插入列表前再拉完整数据，避免把不完整 payload 直接渲染。
-    const addedIncoming = _addSidebarIncomingTopicId(data.topic_id);
-    if (addedIncoming && data.payload) {
+    const queuedIncoming = _touchSidebarIncomingTopicId(data.topic_id);
+    if (queuedIncoming && data.payload) {
       sidebarIncomingState.topicCache.set(Number(data.topic_id), {
         ...(sidebarIncomingState.topicCache.get(Number(data.topic_id)) || {}),
         ...data.payload,
@@ -3426,6 +3438,7 @@
     sidebarIncomingState.topicIdSet = new Set();
     sidebarIncomingState.topicCache.clear();
     sidebarIncomingState.filteredTopicIds = [];
+    sidebarIncomingState.filteredLoadTopicIds = [];
     sidebarIncomingState.filterStable = false;
     sidebarIncomingState.applyQueued = false;
     if (sidebarIncomingState.filterRefreshTimer) {
@@ -3441,6 +3454,7 @@
     sidebarIncomingState.topicIdSet = new Set();
     sidebarIncomingState.topicCache.clear();
     sidebarIncomingState.filteredTopicIds = [];
+    sidebarIncomingState.filteredLoadTopicIds = [];
     sidebarIncomingState.filterStable = false;
     sidebarIncomingState.applyQueued = false;
     if (sidebarIncomingState.filterRefreshTimer) {
@@ -3451,20 +3465,34 @@
     _syncHeadActionState();
   }
 
-  function _addSidebarIncomingTopicId(topicId) {
+  function _touchSidebarIncomingTopicId(topicId) {
     const numericId = Number(topicId);
-    if (!Number.isFinite(numericId) || sidebarIncomingState.topicIdSet.has(numericId)) return false;
+    if (!Number.isFinite(numericId)) return false;
 
-    sidebarIncomingState.topicIdSet.add(numericId);
+    if (sidebarIncomingState.topicIdSet.has(numericId)) {
+      const existingIndex = sidebarIncomingState.topicIds.indexOf(numericId);
+      if (existingIndex !== -1) sidebarIncomingState.topicIds.splice(existingIndex, 1);
+    } else {
+      sidebarIncomingState.topicIdSet.add(numericId);
+    }
     sidebarIncomingState.topicIds.push(numericId);
     sidebarIncomingState.filterStable = false;
     return true;
   }
 
-  function _getSidebarIncomingLoadTopicIds(topicIds = sidebarIncomingState.filteredTopicIds) {
-    const ids = Array.isArray(topicIds) ? topicIds : [];
-    const loadLimit = _residentTopicLimit();
-    return ids.length > loadLimit ? ids.slice(-loadLimit) : ids.slice();
+  function _getSidebarIncomingLoadTopicIds() {
+    const loadLimit = _incomingLoadTopicLimit();
+    const expectedLength = Math.min(sidebarIncomingState.filteredTopicIds.length, loadLimit);
+    if (sidebarIncomingState.filteredLoadTopicIds.length !== expectedLength) {
+      sidebarIncomingState.filteredLoadTopicIds = sidebarIncomingState.filteredTopicIds.length > loadLimit
+        ? sidebarIncomingState.filteredTopicIds.slice(-loadLimit)
+        : sidebarIncomingState.filteredTopicIds.slice();
+    }
+    return sidebarIncomingState.filteredLoadTopicIds.slice();
+  }
+
+  function _incomingLoadTopicLimit() {
+    return Math.max(1, topicPageSize || 30);
   }
 
   function _removeSidebarIncomingTopicIds(topicIds) {
@@ -4020,7 +4048,7 @@
     let requestToken = null;
     try {
       const incomingCandidateIds = await _refreshSidebarIncomingFilter();
-      const incomingTopicIds = _getSidebarIncomingLoadTopicIds(incomingCandidateIds);
+      const incomingTopicIds = _getSidebarIncomingLoadTopicIds();
       if (incomingTopicIds.length === 0) {
         return;
       }
