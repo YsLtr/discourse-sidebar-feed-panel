@@ -1,62 +1,58 @@
 # Discourse Sidebar Feed Panel - Active Handoff
 
-**Updated**: 2026-06-03 15:48:11 CST +0800
-**Project root**: `/home/ysltr/builds/discourse/userscript`
+**Updated**: 2026-06-10 21:28:35 CST +0800
+**Project root**: `C:\Users\28676\builds\discourse\userscript`
 **Branch**: `main`
-**Current objective**: Preserve the incoming queue ordering/apply-window fix and continue live validation on linux.do.
+**Current objective**: Next session should fix the current regression: category tabs/categories are completely unavailable after the first-phase cross-site Discourse adaptation.
 
 ## Current State
 
-- Main file: `discourse-sidebar-feed-panel.user.js`
-- Current userscript version in file: `1.0.4`
-- Latest incoming fix keeps accurate unique-topic counts while making apply order match the most recent message-bus events:
-  - `sidebarIncomingState.topicIds` remains the full accumulated unique candidate list for count and cleanup.
-  - `_touchSidebarIncomingTopicId()` moves a duplicate topic id to the queue tail instead of ignoring it, so repeated activity is treated as recent.
-  - `topicCache` is refreshed on duplicate incoming payloads too.
-  - `filteredTopicIds` remains the full filtered candidate list for display count.
-  - `filteredLoadTopicIds` is a separate small apply list containing only the latest one page of filtered ids.
-  - `_incomingLoadTopicLimit()` is fixed at `Math.max(1, topicPageSize || 30)`; loading more old resident topics must not enlarge the incoming refresh request.
-  - `_applySidebarIncomingTopics()` still passes the full `incomingCandidateIds` to cleanup, so applying a one-page load clears all consumed queued candidates.
-- `todo.md` has the incoming queue optimization marked done.
+- Main file: `discourse-sidebar-feed-panel.user.js`, userscript version now `2.0.0`.
+- First-phase cross-site implementation is applied but not live-browser validated:
+  - built-in matches are `https://linux.do/*` and `https://www.nodeloc.com/*`;
+  - no global `https://*/*`, no automatic arbitrary-site Discourse detection, no in-script site enable/disable menu;
+  - preferences are origin-scoped via `sfp_site:<encoded origin>:<key>`;
+  - LinuxDO legacy global GM keys migrate copy-then-delete using `GM_deleteValue`;
+  - LinuxDO static `CATEGORY_CONFIG` / `TAB_CATEGORIES` were removed;
+  - category metadata, UI labels, controls, and feed routes now derive from Discourse site data.
+- Documentation for the agreed support model is in:
+  - `CONTEXT.md`
+  - `docs/cross-site-discourse-adaptation-plan.md`
+  - `docs/adr/0002-match-based-cross-site-support.md`
+  - `README.md`
+- `todo.md` records the completed first-phase items.
 
-## Validation
+## Known Regression To Fix Next
 
-- `node --check discourse-sidebar-feed-panel.user.js` passes.
-- `git diff --check -- discourse-sidebar-feed-panel.user.js` passes.
-- Local simulations passed:
-  - duplicate order example `1,2,3,2,4` becomes `[1,3,2,4]`, and a limit of 3 applies `[3,2,4]`;
-  - queue `[1,3,4,5,2,6]` keeps count `6` while fixed one-page apply list with page size 3 is `[5,2,6]`;
-  - the apply list remains bounded to one page, independent of resident window growth from loading older topics.
-- Full live validation on linux.do is still pending after installing/updating the userscript to `1.0.4`.
+- User reported: **类别完全无法获取**.
+- Likely starting point: `tabCategories` is built only by `_collectNavigationCategoryIds(site, rawById)` from `/site.json` fields such as `navigation_menu_categories`, `anonymous_sidebar_sections`, and related guesses.
+- Observed during implementation: LinuxDO and NodeLoc `/site.json` expose categories in `site.categories`, but `anonymous_sidebar_sections` only showed community links like `/latest`, `/u`, `/about`, not category links. That means `_buildTabCategories(...)` can return `[]`, leaving only the all-topics tab.
+- The agreed plan says phase one should seed **Feed Category Tabs** from the site's **Navigation Category Set**, but must **not** default to every visible top-level category. Do not silently change this product decision unless the user explicitly revises it.
 
-## Constraints
+## Constraints Still In Force
 
-- Sidebar minimum width remains `DEFAULT_WIDTH = 272`.
-- Preserve `0.6.21+` period behavior: `period=all` ranked orders stay on `/latest.json?order=...`; non-`all` ranked periods use `/top.json?period=...&order=...`.
-- Keep the intended internal horizontal scroll of `.sfp-tab-bar`; do not regress board filter scrolling or the closed-sidebar overflow fix.
-- Prefer Discourse/Horizon CSS variables and native DOM conventions over hardcoded approximations.
-- Do not reintroduce incoming queue compaction that caps the reminder count. If an upper bound is ever added, it must be treated as an explicit product tradeoff, not tied to resident topic count.
-- Incoming apply should request only the latest one page of candidates; loading more resident history should not increase the apply request size.
+- Feed Panel only replaces a Native Sidebar Host (`#d-sidebar` / `.sidebar-container`); no Standalone Feed Host in phase one.
+- Do not reintroduce LinuxDO static category presets.
+- Parent category tabs include subcategories by default; category URLs should preserve parent-chain slug paths and include `include_subcategories=true`.
+- Preserve ranked period behavior: `period=all` ranked orders stay on `/latest.json?order=...`; non-`all` ranked periods use `/top.json?period=...&order=...` or category `/l/top.json`.
+- Preserve incoming queue semantics: full Incoming Candidate count must stay separate from the limited detail fetch window and full candidate cleanup.
+- Keep `DEFAULT_WIDTH = 272` and existing sidebar scroll/overflow behavior.
 
-## Known Risk
+## Validation Already Run
 
-- The incoming order/apply-window fix has been statically and locally simulated, but not validated in a real linux.do browser session.
-- Notification count may briefly include no-payload unknown ids until apply resolves them; this is intentional and should favor over-reporting rather than missing real incoming topics.
-- If future work touches `_recomputeSidebarIncomingFilteredTopicIds()`, `_getSidebarIncomingLoadTopicIds()`, `_touchSidebarIncomingTopicId()`, or `_applySidebarIncomingTopics()`, preserve the distinction between full candidate count, latest-one-page detail load, and full candidate cleanup.
+- `node --check discourse-sidebar-feed-panel.user.js` passed.
+- `git diff --check -- discourse-sidebar-feed-panel.user.js README.md todo.md` passed, with only Windows LF-to-CRLF warnings.
+- NodeLoc endpoint smoke checks returned `200` for latest, created, top, and `/c/internet/5/l/latest.json?include_subcategories=true`.
 
-## Next Steps
+## Concrete Next Steps
 
-1. Install/update the local userscript to `1.0.4`.
-2. In linux.do, validate incoming behavior:
-   - repeated incoming events for an existing topic move that topic into the latest apply window;
-   - accumulating more than one page of incoming topics keeps the count increasing;
-   - applying incoming topics fetches only the latest one page but clears all consumed candidates;
-   - loading more old resident topics does not increase the incoming apply request size;
-   - category-specific views still filter as expected.
-3. Re-check the prior refresh/back-to-top animation, touch-scroll, and user-profile navigation cases if doing full live validation.
+1. Diagnose where Discourse exposes the actual navigation category set on LinuxDO and NodeLoc: page runtime services, preloaded payloads, DOM sidebar links, or another JSON endpoint.
+2. Fix `_collectNavigationCategoryIds(...)` / `_buildTabCategories(...)` so category tabs are available without falling back to all top-level categories.
+3. Re-run `node --check discourse-sidebar-feed-panel.user.js` and targeted URL-building smoke tests.
+4. Use a browser session to verify LinuxDO and NodeLoc category tabs render, switch, and fetch correctly.
 
 ## Suggested Skills
 
-- `$agent-browser-cli` for focused linux.do DOM/state checks.
-- `$diagnose` if live incoming count/apply behavior still fails.
-- `$handoff` again if more work remains.
+- `$agent-browser-cli` for inspecting live Discourse runtime data and sidebar DOM.
+- `$diagnose` if category source discovery is unclear or behavior differs between LinuxDO and NodeLoc.
+- `$handoff` again if the category regression remains unresolved.

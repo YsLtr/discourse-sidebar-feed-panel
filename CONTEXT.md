@@ -1,12 +1,36 @@
 # Discourse Sidebar Feed Panel
 
-This context describes the user-visible feed experience provided by the userscript that replaces the Discourse sidebar with a topic feed.
+This context describes the user-visible feed experience provided by the userscript that replaces a native Discourse sidebar area with a compact topic feed.
 
 ## Language
 
 **Feed Panel**:
-The sidebar replacement surface that shows Discourse topics as a compact feed.
-_Avoid_: Sidebar, list, panel when referring to the replaced experience
+The user-visible surface that replaces a native Discourse sidebar area with a compact topic feed.
+_Avoid_: List, panel when referring to the feed experience
+
+**Feed Panel Host**:
+The page region that carries the **Feed Panel**.
+_Avoid_: Sidebar when discussing all possible hosts
+
+**Native Sidebar Host**:
+A **Feed Panel Host** backed by Discourse's built-in sidebar area.
+_Avoid_: Sidebar replacement when the distinction from standalone hosting matters
+
+**Discourse Site**:
+A configured web origin where the userscript is expected to run against a Discourse forum.
+_Avoid_: Website when the distinction from unconfigured pages matters
+
+**Site Feed Preferences**:
+The saved **Feed Panel** configuration scoped to one **Discourse Site**.
+_Avoid_: Global settings when the value depends on a forum's categories, language, or activity pattern
+
+**Feed Category Tab**:
+A selectable **Feed Panel** scope backed by either all topics or one Discourse navigation-menu category.
+_Avoid_: Category tab when it could imply every site category
+
+**Navigation Category Set**:
+The Discourse-provided category set used to seed **Feed Category Tabs** for a site.
+_Avoid_: All categories, static category config
 
 **Topic Item**:
 A rendered entry in the **Feed Panel** representing one Discourse topic.
@@ -106,6 +130,17 @@ _Avoid_: Pagination cursor, authoritative next page URL
 
 ## Relationships
 
+- A **Feed Panel** is mounted into exactly one **Feed Panel Host** while active.
+- A **Feed Panel Host** must be a **Native Sidebar Host** in the current product scope.
+- **Site Feed Preferences** are scoped to one **Discourse Site**.
+- A **Discourse Site** is identified by web origin for activation and settings, not by Discourse base path.
+- A **Discourse Site** is either shipped in the userscript metadata or manually added by the user through the userscript manager.
+- The userscript does not maintain an in-script enable/disable state for a **Discourse Site**.
+- Existing LinuxDO global preferences are migrated into LinuxDO **Site Feed Preferences**.
+- **Feed Category Tabs** are seeded from the site's **Navigation Category Set**.
+- A missing **Navigation Category Set** falls back to only the all-topics **Feed Category Tab**.
+- **Feed Category Tabs** do not default to every visible top-level Discourse category.
+- A parent-category **Feed Category Tab** includes topics from its subcategories by default.
 - A **Feed Panel** contains zero or more **Topic Items**.
 - A **Topic Item** is backed by exactly one **Resident Topic**.
 - A **Topic Item** has at most one **Topic Display User**.

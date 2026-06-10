@@ -40,3 +40,9 @@
 -[x] 修复保留话题数与incoming队列数量混淆的问题
 -[x] 多话题数量显示问题 9...
 -[x] incoming队列优化
+-[x] 第一期开启跨站支持：内置 LinuxDO / NodeLoc match
+-[x] 偏好设置按 origin 存储，迁移并删除 LinuxDO 旧全局 key
+-[x] 移除 LinuxDO 静态分类配置，改用 Discourse 站点数据
+-[x] 仅从站点导航分类生成标签；缺失时回退到“全部”
+-[x] 分类请求支持父级 slug 路径和默认包含子分类
+-[] 双击回到顶部快速回顶（跳过动画）

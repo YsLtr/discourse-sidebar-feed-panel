@@ -1,16 +1,18 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      1.0.4
-// @description  将侧边栏改造为信息流面板，支持板块分类筛选、已读/未读过滤、拖拽调整宽度
+// @version      2.0.0
+// @description  将 Discourse 原生侧边栏改造为信息流面板，支持分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
+// @match        https://www.nodeloc.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=linux.do
 // @downloadURL https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js  
 // @updateURL  https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js  
 // @grant        GM_addStyle
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_deleteValue
 // @grant        unsafeWindow
 // @run-at       document-idle
 // @license      MIT
@@ -39,6 +41,60 @@
   const AUTO_REFRESH_ENABLED_KEY = "sfp_auto_refresh_enabled";
   const AUTO_REFRESH_INTERVAL_KEY = "sfp_auto_refresh_interval";
   const TAG_STYLE_CACHE_KEY = "sfp_tag_style_cache_v1";
+  const SITE_STORAGE_PREFIX = "sfp_site";
+  const LEGACY_LINUXDO_ORIGIN = "https://linux.do";
+  const STORAGE_MISSING = "__SFP_STORAGE_MISSING__";
+
+  const SITE_SCOPED_STORAGE_KEYS = [
+    STATE_KEY,
+    ORDER_KEY,
+    PERIOD_KEY,
+    WIDTH_KEY,
+    TAB_KEY,
+    TAB_ORDER_KEY,
+    FILTER_KEY,
+    HIDE_PINNED_KEY,
+    SHOW_INCOMING_HINT_KEY,
+    AUTO_SILENT_REFRESH_KEY,
+    AUTO_SILENT_REFRESH_INTERVAL_KEY,
+    AUTO_REFRESH_ENABLED_KEY,
+    AUTO_REFRESH_INTERVAL_KEY,
+    TAG_STYLE_CACHE_KEY,
+  ];
+
+  function _siteStorageKey(key) {
+    return `${SITE_STORAGE_PREFIX}:${encodeURIComponent(location.origin)}:${key}`;
+  }
+
+  function _getSiteValue(key, fallback) {
+    return GM_getValue(_siteStorageKey(key), fallback);
+  }
+
+  function _setSiteValue(key, value) {
+    GM_setValue(_siteStorageKey(key), value);
+  }
+
+  function _deleteLegacyValue(key) {
+    if (typeof GM_deleteValue === "function") GM_deleteValue(key);
+  }
+
+  function _migrateLegacyLinuxDoStorage() {
+    if (location.origin !== LEGACY_LINUXDO_ORIGIN) return;
+
+    SITE_SCOPED_STORAGE_KEYS.forEach((key) => {
+      const legacyValue = GM_getValue(key, STORAGE_MISSING);
+      if (legacyValue === STORAGE_MISSING) return;
+
+      const scopedKey = _siteStorageKey(key);
+      const scopedValue = GM_getValue(scopedKey, STORAGE_MISSING);
+      if (scopedValue === STORAGE_MISSING) {
+        GM_setValue(scopedKey, legacyValue);
+      }
+      _deleteLegacyValue(key);
+    });
+  }
+
+  _migrateLegacyLinuxDoStorage();
 
   // ========== 常量 ==========
   // DEFAULT_WIDTH 同时也是当前最小宽度。之前的需求要求“允许压缩的最小宽度
@@ -66,22 +122,22 @@
   // ========== 全局状态 ==========
   // currentOrder 历史上曾使用 default，后续需求把“默认”和“最新活动”合并。
   // 这里在启动时迁移旧值，避免旧用户升级后落到不存在的排序分支。
-  let feedModeEnabled = GM_getValue(STATE_KEY, false);
-  let currentOrder = GM_getValue(ORDER_KEY, "activity");
+  let feedModeEnabled = _getSiteValue(STATE_KEY, false);
+  let currentOrder = _getSiteValue(ORDER_KEY, "activity");
   if (currentOrder === "default") {
     currentOrder = "activity";
-    GM_setValue(ORDER_KEY, currentOrder);
+    _setSiteValue(ORDER_KEY, currentOrder);
   }
-  let currentPeriod = GM_getValue(PERIOD_KEY, "all");
-  let sfpSidebarWidth = GM_getValue(WIDTH_KEY, DEFAULT_WIDTH);
-  let currentTab = GM_getValue(TAB_KEY, "all");
-  let currentFilter = GM_getValue(FILTER_KEY, "all");
-  let hidePinned = GM_getValue(HIDE_PINNED_KEY, false);
-  let showIncomingHint = GM_getValue(SHOW_INCOMING_HINT_KEY, true);
-  let autoSilentRefreshEnabled = GM_getValue(AUTO_SILENT_REFRESH_KEY, false);
-  let autoSilentRefreshInterval = Math.max(0, Number(GM_getValue(AUTO_SILENT_REFRESH_INTERVAL_KEY, DEFAULT_AUTO_SILENT_REFRESH_INTERVAL)) || DEFAULT_AUTO_SILENT_REFRESH_INTERVAL);
-  let autoRefreshEnabled = GM_getValue(AUTO_REFRESH_ENABLED_KEY, false);
-  let autoRefreshInterval = Math.max(1, Number(GM_getValue(AUTO_REFRESH_INTERVAL_KEY, DEFAULT_AUTO_REFRESH_INTERVAL)) || DEFAULT_AUTO_REFRESH_INTERVAL);
+  let currentPeriod = _getSiteValue(PERIOD_KEY, "all");
+  let sfpSidebarWidth = _getSiteValue(WIDTH_KEY, DEFAULT_WIDTH);
+  let currentTab = _getSiteValue(TAB_KEY, "all");
+  let currentFilter = _getSiteValue(FILTER_KEY, "all");
+  let hidePinned = _getSiteValue(HIDE_PINNED_KEY, false);
+  let showIncomingHint = _getSiteValue(SHOW_INCOMING_HINT_KEY, true);
+  let autoSilentRefreshEnabled = _getSiteValue(AUTO_SILENT_REFRESH_KEY, false);
+  let autoSilentRefreshInterval = Math.max(0, Number(_getSiteValue(AUTO_SILENT_REFRESH_INTERVAL_KEY, DEFAULT_AUTO_SILENT_REFRESH_INTERVAL)) || DEFAULT_AUTO_SILENT_REFRESH_INTERVAL);
+  let autoRefreshEnabled = _getSiteValue(AUTO_REFRESH_ENABLED_KEY, false);
+  let autoRefreshInterval = Math.max(1, Number(_getSiteValue(AUTO_REFRESH_INTERVAL_KEY, DEFAULT_AUTO_REFRESH_INTERVAL)) || DEFAULT_AUTO_REFRESH_INTERVAL);
   let currentCategoryId = null;
 
   let allTopics = [];
@@ -233,6 +289,138 @@
     return escapeHtml(text).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
+  const I18N = {
+    "zh-CN": {
+      all: "全部",
+      orderActivity: "最新活动",
+      orderCreated: "最新发布",
+      orderViews: "最多浏览",
+      orderPosts: "最多回复",
+      orderLikes: "最多点赞",
+      orderOpLikes: "楼主点赞",
+      periodAll: "全部",
+      periodDaily: "每日",
+      periodWeekly: "每周",
+      periodMonthly: "每月",
+      periodQuarterly: "每季",
+      periodYearly: "每年",
+      filterAll: "全部",
+      filterUnseen: "未读",
+      filterRead: "已读",
+      hidePinned: "隐藏置顶",
+      toggleTitle: "切换侧边栏信息流",
+      refresh: "刷新",
+      settings: "设置",
+      incomingHintLabel: "新活动数量",
+      incomingHintTip: "在刷新按钮中显示当前板块范围内的新活动候选数量。离开首屏时点击数量会先回到顶部，再应用这些候选。",
+      autoSilentLabel: "自动静默刷新",
+      autoSilentTip: "在最新活动视图且停留首屏时按间隔自动应用新话题；离开首屏后暂停，只累计候选。",
+      silentIntervalLabel: "静默刷新间隔",
+      silentIntervalTip: "单位为秒，最小为 0。设为 0 时，有新活动会立即静默应用；大于 0 时按倒计时批量应用。",
+      autoRefreshLabel: "自动刷新",
+      autoRefreshTip: "用于非最新活动的排序视图，停留首屏时按间隔重新拉取当前列表。不要设置太快，频繁请求可能触发站点速率限制。",
+      autoRefreshIntervalLabel: "自动刷新间隔",
+      autoRefreshIntervalTip: "单位为秒，最小为 1。到达间隔后刷新当前筛选和排序下的列表。",
+      secondsSuffix: "s",
+      helpSuffix: "说明",
+      tabMore: "展开板块 / 排序",
+      tabPanelTitle: "拖动板块调整顺序",
+      close: "关闭",
+      loading: "加载中...",
+      emptyTopics: "暂无话题",
+      loadFailed: "加载失败",
+      retry: "重试",
+      noMatchingTopics: "无匹配话题",
+      noUnreadInCategory: "该板块暂无未读话题",
+      noUnread: "暂无未读话题",
+      noRead: "暂无已读话题",
+      currentPagePrefix: "当前页",
+      nextPageNoMatch: "下一页无符合条件的话题",
+      applyIncoming: "应用 {count} 个新的或更新的话题",
+      backToTop: "回到顶部",
+      hot: "热门",
+      pinned: "已置顶",
+      closedTitle: "此话题已被关闭；不再接受新回复",
+      loadMore: "加载更多",
+      noMore: "— 已经到底了 —",
+      requestFailed: "请求失败",
+    },
+    en: {
+      all: "All",
+      orderActivity: "Latest activity",
+      orderCreated: "Newest",
+      orderViews: "Most viewed",
+      orderPosts: "Most replies",
+      orderLikes: "Most liked",
+      orderOpLikes: "OP likes",
+      periodAll: "All",
+      periodDaily: "Daily",
+      periodWeekly: "Weekly",
+      periodMonthly: "Monthly",
+      periodQuarterly: "Quarterly",
+      periodYearly: "Yearly",
+      filterAll: "All",
+      filterUnseen: "Unread",
+      filterRead: "Read",
+      hidePinned: "Hide pinned",
+      toggleTitle: "Toggle sidebar feed",
+      refresh: "Refresh",
+      settings: "Settings",
+      incomingHintLabel: "New activity count",
+      incomingHintTip: "Show incoming candidates for the current category scope in the refresh button. Away from the head, clicking the count returns to the top before applying them.",
+      autoSilentLabel: "Auto silent refresh",
+      autoSilentTip: "In the latest activity view, automatically apply incoming topics while the feed is at the head. Away from the head, pause applying and keep accumulating candidates.",
+      silentIntervalLabel: "Silent interval",
+      silentIntervalTip: "Seconds. Minimum 0. With 0, incoming activity is applied immediately; otherwise candidates are batched by countdown.",
+      autoRefreshLabel: "Auto refresh",
+      autoRefreshTip: "For non-latest sorting views, re-fetch the current list while the feed is at the head. Avoid very short intervals to reduce rate-limit risk.",
+      autoRefreshIntervalLabel: "Refresh interval",
+      autoRefreshIntervalTip: "Seconds. Minimum 1. Refreshes the current filter and sorting view when the interval elapses.",
+      secondsSuffix: "s",
+      helpSuffix: " help",
+      tabMore: "Expand categories / order",
+      tabPanelTitle: "Drag categories to reorder",
+      close: "Close",
+      loading: "Loading...",
+      emptyTopics: "No topics",
+      loadFailed: "Load failed",
+      retry: "Retry",
+      noMatchingTopics: "No matching topics",
+      noUnreadInCategory: "No unread topics in this category",
+      noUnread: "No unread topics",
+      noRead: "No read topics",
+      currentPagePrefix: "Current page: ",
+      nextPageNoMatch: "Next page has no matching topics",
+      applyIncoming: "Apply {count} new or updated topics",
+      backToTop: "Back to top",
+      hot: "Hot",
+      pinned: "Pinned",
+      closedTitle: "This topic is closed; it no longer accepts replies",
+      loadMore: "Load more",
+      noMore: "No more topics",
+      requestFailed: "Request failed",
+    },
+  };
+
+  function getUiLocale() {
+    const candidates = [
+      document.documentElement?.getAttribute("lang"),
+      document.documentElement?.getAttribute("xml:lang"),
+      getDiscourse()?.SiteSettings?.default_locale,
+      navigator.language,
+    ];
+    const language = candidates.find((value) => String(value || "").trim()) || "en";
+    return /^zh/i.test(language) ? "zh-CN" : "en";
+  }
+
+  function t(key, params = {}) {
+    const messages = I18N[getUiLocale()] || I18N.en;
+    const template = messages[key] || I18N.en[key] || key;
+    return String(template).replace(/\{(\w+)\}/g, (_, name) => {
+      return params[name] === undefined ? `{${name}}` : String(params[name]);
+    });
+  }
+
   function formatRelativeTime(dateStr) {
     const date = new Date(dateStr);
     if (Number.isNaN(date.getTime())) return "";
@@ -242,6 +430,16 @@
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
+    if (getUiLocale() !== "zh-CN") {
+      const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+      if (seconds < 60) return rtf.format(-Math.max(1, seconds), "second");
+      if (minutes < 60) return rtf.format(-minutes, "minute");
+      if (hours < 24) return rtf.format(-hours, "hour");
+      if (days < 30) return rtf.format(-days, "day");
+      const months = Math.floor(days / 30);
+      if (months < 12) return rtf.format(-months, "month");
+      return rtf.format(-Math.floor(months / 12), "year");
+    }
     if (seconds < 60) return `${Math.max(1, seconds)}秒前`;
     if (minutes < 60) return `${minutes}分钟前`;
     if (hours < 24) return `${hours}小时前`;
@@ -313,79 +511,33 @@
     check();
   }
 
-  // ========== 分类配置 ==========
-  const CATEGORY_CONFIG = {
-    4: { name: "开发调优", icon: "code", color: "#32c3c3", tabId: "develop" },
-    20: { name: "开发调优, Lv1", icon: "code", color: "#32c3c3" },
-    31: { name: "开发调优, Lv2", icon: "code", color: "#32c3c3" },
-    88: { name: "开发调优, Lv3", icon: "code", color: "#32c3c3" },
-    98: { name: "国产替代", icon: "seedling", color: "#D12C25", tabId: "domestic" },
-    99: { name: "国产替代, Lv1", icon: "seedling", color: "#D12C25" },
-    100: { name: "国产替代, Lv2", icon: "seedling", color: "#D12C25" },
-    101: { name: "国产替代, Lv3", icon: "seedling", color: "#D12C25" },
-    14: { name: "资源荟萃", icon: "square-share-nodes", color: "#12A89D", tabId: "resource" },
-    83: { name: "资源荟萃, Lv1", icon: "square-share-nodes", color: "#12A89D" },
-    84: { name: "资源荟萃, Lv2", icon: "square-share-nodes", color: "#12A89D" },
-    85: { name: "资源荟萃, Lv3", icon: "square-share-nodes", color: "#12A89D" },
-    94: { name: "网盘资源", icon: "hard-drive", color: "#16b176" },
-    95: { name: "网盘资源, Lv1", icon: "hard-drive", color: "#16b176" },
-    96: { name: "网盘资源, Lv2", icon: "hard-drive", color: "#16b176" },
-    97: { name: "网盘资源, Lv3", icon: "hard-drive", color: "#16b176" },
-    42: { name: "文档共建", icon: "book", color: "#9cb6c4", tabId: "wiki" },
-    75: { name: "文档共建, Lv1", icon: "book", color: "#9cb6c4" },
-    76: { name: "文档共建, Lv2", icon: "book", color: "#9cb6c4" },
-    77: { name: "文档共建, Lv3", icon: "book", color: "#9cb6c4" },
-    10: { name: "跳蚤市场", icon: "coins", color: "#ED207B", tabId: "trade" },
-    106: { name: "积分乐园", icon: "credit-card", color: "#fcca44", tabId: "credit" },
-    107: { name: "积分乐园, Lv1", icon: "credit-card", color: "#fcca44" },
-    108: { name: "积分乐园, Lv2", icon: "credit-card", color: "#fcca44" },
-    109: { name: "积分乐园, Lv3", icon: "credit-card", color: "#fcca44" },
-    27: { name: "非我莫属", icon: "briefcase", color: "#a8c6fe", tabId: "job" },
-    72: { name: "非我莫属, Lv1", icon: "briefcase", color: "#a8c6fe" },
-    73: { name: "非我莫属, Lv2", icon: "briefcase", color: "#a8c6fe" },
-    74: { name: "非我莫属, Lv3", icon: "briefcase", color: "#a8c6fe" },
-    32: { name: "读书成诗", icon: "book-open-reader", color: "#e0d900", tabId: "reading" },
-    69: { name: "读书成诗, Lv1", icon: "book-open-reader", color: "#e0d900" },
-    70: { name: "读书成诗, Lv2", icon: "book-open-reader", color: "#e0d900" },
-    71: { name: "读书成诗, Lv3", icon: "book-open-reader", color: "#e0d900" },
-    46: { name: "扬帆起航", icon: "rocket", color: "#ff9838", tabId: "startup" },
-    66: { name: "扬帆起航, Lv1", icon: "rocket", color: "#ff9838" },
-    67: { name: "扬帆起航, Lv2", icon: "rocket", color: "#ff9838" },
-    68: { name: "扬帆起航, Lv3", icon: "rocket", color: "#ff9838" },
-    34: { name: "前沿快讯", icon: "newspaper", color: "#BB8FCE", tabId: "news" },
-    78: { name: "前沿快讯, Lv1", icon: "newspaper", color: "#BB8FCE" },
-    79: { name: "前沿快讯, Lv2", icon: "newspaper", color: "#BB8FCE" },
-    80: { name: "前沿快讯, Lv3", icon: "newspaper", color: "#BB8FCE" },
-    36: { name: "福利羊毛", icon: "piggy-bank", color: "#E45735", tabId: "welfare" },
-    60: { name: "福利羊毛, Lv1", icon: "piggy-bank", color: "#E45735" },
-    61: { name: "福利羊毛, Lv2", icon: "piggy-bank", color: "#E45735" },
-    62: { name: "福利羊毛, Lv3", icon: "piggy-bank", color: "#E45735" },
-    11: { name: "搞七捻三", icon: "droplet", color: "#3AB54A", tabId: "gossip" },
-    35: { name: "搞七捻三, Lv1", icon: "droplet", color: "#3AB54A" },
-    89: { name: "搞七捻三, Lv2", icon: "droplet", color: "#3AB54A" },
-    21: { name: "搞七捻三, Lv3", icon: "droplet", color: "#3AB54A" },
-    102: { name: "社区孵化", icon: "lightbulb", color: "#ffbb00", tabId: "incubation" },
-    103: { name: "社区孵化, Lv1", icon: "lightbulb", color: "#ffbb00" },
-    104: { name: "社区孵化, Lv2", icon: "lightbulb", color: "#ffbb00" },
-    105: { name: "社区孵化, Lv3", icon: "lightbulb", color: "#ffbb00" },
-    110: { name: "虫洞广场", icon: "hurricane", color: "#ff00f7", tabId: "square" },
-    2: { name: "运营反馈", icon: "comments", color: "#808281", tabId: "feedback" },
-    30: { name: "运营反馈, 活动", icon: "comments", color: "#808281" },
-    63: { name: "运营反馈, Lv1", icon: "comments", color: "#808281" },
-    64: { name: "运营反馈, Lv2", icon: "comments", color: "#808281" },
-    65: { name: "运营反馈, Lv3", icon: "comments", color: "#808281" },
-    45: { name: "深海幽域", icon: "water", color: "#45B7D1", tabId: "muted" },
-    57: { name: "深海幽域, Lv1", icon: "water", color: "#45B7D1" },
-    58: { name: "深海幽域, Lv2", icon: "water", color: "#45B7D1" },
-    59: { name: "深海幽域, Lv3", icon: "water", color: "#45B7D1" },
-  };
-
-  // 有 tabId 的主分类（用于标签页渲染）
-  const TAB_CATEGORIES = Object.entries(CATEGORY_CONFIG)
-    .filter(([, v]) => v.tabId)
-    .map(([id, v]) => ({ id: Number(id), ...v }));
+  // ========== 站点数据 / 分类 ==========
+  const ORDER_OPTION_DEFS = [
+    { labelKey: "orderActivity", value: "activity", capability: "latest" },
+    { labelKey: "orderCreated", value: "created", capability: "new" },
+    { labelKey: "orderViews", value: "views", capability: "top" },
+    { labelKey: "orderPosts", value: "posts", capability: "top" },
+    { labelKey: "orderLikes", value: "likes", capability: "top" },
+    { labelKey: "orderOpLikes", value: "op_likes", capability: "top" },
+  ];
+  const PERIOD_OPTION_DEFS = [
+    { labelKey: "periodAll", value: "all" },
+    { labelKey: "periodDaily", value: "daily" },
+    { labelKey: "periodWeekly", value: "weekly" },
+    { labelKey: "periodMonthly", value: "monthly" },
+    { labelKey: "periodQuarterly", value: "quarterly" },
+    { labelKey: "periodYearly", value: "yearly" },
+  ];
+  const FILTER_OPTION_DEFS = [
+    { labelKey: "filterAll", value: "all" },
+    { labelKey: "filterUnseen", value: "unseen" },
+    { labelKey: "filterRead", value: "read" },
+  ];
 
   const categoryMetaById = new Map();
+  let tabCategories = [];
+  let siteCapabilities = _createDefaultSiteCapabilities();
+  let siteControlsSignature = "";
   const tagStyleByKey = new Map();
   const SAFE_ICON_RE = /^[A-Za-z0-9_-]+$/;
   const SAFE_COLOR_RE = /^#?[A-Fa-f0-9]{3,8}$/;
@@ -418,27 +570,271 @@
     return `<svg class="${className}" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#${safeIcon}"></use></svg>`;
   }
 
-  function _categoryFallbackMeta(id) {
-    const config = CATEGORY_CONFIG[id];
-    if (!config) return null;
-    return _normalizeCategoryMeta({ id }, config, config.parent_category_id ? _getCategoryMeta(config.parent_category_id) : null);
+  function _categoryColorMarkerHtml(color) {
+    return `<span class="sfp-category-color-marker" style="--sfp-category-marker-color:#${_normalizeHexColor(color, "888")}" aria-hidden="true"></span>`;
   }
 
-  function _normalizeCategoryMeta(raw = {}, fallback = {}, parent = null) {
-    const id = Number(raw.id ?? fallback.id);
-    const icon = _safeIconName(raw.icon || fallback.icon || parent?.icon || "folder");
+  function _createDefaultSiteCapabilities() {
+    return {
+      orderValues: new Set(ORDER_OPTION_DEFS.map((option) => option.value)),
+      periodValues: new Set(PERIOD_OPTION_DEFS.map((option) => option.value)),
+      filterValues: new Set(FILTER_OPTION_DEFS.map((option) => option.value)),
+      rawFilters: new Set(),
+      rawTopMenuItems: new Set(),
+    };
+  }
+
+  function _stringSet(values) {
+    return new Set((Array.isArray(values) ? values : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean));
+  }
+
+  function _updateSiteCapabilities(site) {
+    const rawFilters = _stringSet(site?.filters);
+    const rawTopMenuItems = _stringSet(site?.top_menu_items);
+    _stringSet(site?.anonymous_top_menu_items).forEach((item) => rawTopMenuItems.add(item));
+    rawTopMenuItems.forEach((item) => rawFilters.add(item));
+
+    const supportsLatest = rawFilters.size === 0 || rawFilters.has("latest");
+    const supportsNew = rawFilters.has("new");
+    const supportsTop = rawFilters.has("top");
+    const orderValues = new Set();
+    if (supportsLatest) orderValues.add("activity");
+    if (supportsNew || supportsLatest) orderValues.add("created");
+    if (supportsTop) {
+      ["views", "posts", "likes", "op_likes"].forEach((order) => orderValues.add(order));
+    }
+    if (orderValues.size === 0) orderValues.add("activity");
+
+    const sitePeriods = _stringSet(site?.periods);
+    const periodValues = sitePeriods.size > 0
+      ? new Set(PERIOD_OPTION_DEFS.map((option) => option.value).filter((value) => sitePeriods.has(value)))
+      : new Set(PERIOD_OPTION_DEFS.map((option) => option.value));
+    if (periodValues.size === 0) periodValues.add("all");
+
+    const filterValues = new Set(["all"]);
+    if (rawFilters.has("unseen") || rawFilters.has("unread") || rawFilters.has("new")) {
+      filterValues.add("unseen");
+    }
+    if (rawFilters.has("read")) filterValues.add("read");
+
+    siteCapabilities = {
+      orderValues,
+      periodValues,
+      filterValues,
+      rawFilters,
+      rawTopMenuItems,
+    };
+  }
+
+  function _getOrderOptions() {
+    return ORDER_OPTION_DEFS
+      .filter((option) => siteCapabilities.orderValues.has(option.value))
+      .map((option) => ({ label: t(option.labelKey), value: option.value }));
+  }
+
+  function _getPeriodOptions() {
+    return PERIOD_OPTION_DEFS
+      .filter((option) => siteCapabilities.periodValues.has(option.value))
+      .map((option) => ({ label: t(option.labelKey), value: option.value }));
+  }
+
+  function _getFilterOptions() {
+    return FILTER_OPTION_DEFS
+      .filter((option) => siteCapabilities.filterValues.has(option.value))
+      .map((option) => ({ label: t(option.labelKey), value: option.value }));
+  }
+
+  function _categoryTabId(id) {
+    return `cat-${Number(id)}`;
+  }
+
+  function _findTabCategoryByTabId(tabId) {
+    return tabCategories.find((cat) => {
+      return cat.tabId === tabId || cat.legacyTabIds?.includes(tabId);
+    }) || null;
+  }
+
+  function _categoryIdFromPath(value) {
+    if (!value || typeof value !== "string") return null;
+    let path = value;
+    try {
+      path = new URL(value, location.origin).pathname;
+    } catch (e) {
+      path = value.split("?")[0].split("#")[0];
+    }
+
+    const parts = path.split("/").filter(Boolean);
+    if (parts[0] !== "c") return null;
+
+    for (let index = parts.length - 1; index >= 1; index--) {
+      const id = Number(parts[index]);
+      if (Number.isInteger(id) && id > 0) return id;
+    }
+    return null;
+  }
+
+  function _collectNavigationCategoryIds(site, rawById) {
+    const ids = [];
+    const seen = new Set();
+    const addId = (value) => {
+      const id = Number(value);
+      if (!Number.isInteger(id) || id <= 0 || !rawById.has(id) || seen.has(id)) return;
+      seen.add(id);
+      ids.push(id);
+    };
+    const addRecord = (record) => {
+      if (!record) return;
+      if (typeof record === "number" || typeof record === "string") {
+        addId(record);
+        const pathId = _categoryIdFromPath(String(record));
+        if (pathId) addId(pathId);
+        return;
+      }
+      if (typeof record !== "object") return;
+      addId(record.category_id ?? record.categoryId ?? record.category?.id);
+      if ((record.type === "category" || record.section_type === "category" || record.slug || record.topic_count !== undefined) && record.id !== undefined) {
+        addId(record.id);
+      }
+      [record.value, record.url, record.href, record.path, record.link, record.route].forEach((path) => {
+        const pathId = _categoryIdFromPath(path);
+        if (pathId) addId(pathId);
+      });
+    };
+    const addRecords = (records) => {
+      if (!Array.isArray(records)) return;
+      records.forEach(addRecord);
+    };
+
+    [
+      site?.navigation_menu_categories,
+      site?.navigation_menu_site_categories,
+      site?.default_navigation_menu_categories,
+      site?.anonymous_default_navigation_menu_categories,
+    ].forEach(addRecords);
+
+    [
+      site?.anonymous_sidebar_sections,
+      site?.sidebar_sections,
+      site?.navigation_menu_sections,
+    ].forEach((sections) => {
+      if (!Array.isArray(sections)) return;
+      sections.forEach((section) => {
+        addRecord(section);
+        addRecords(section?.links);
+      });
+    });
+
+    return ids;
+  }
+
+  function _buildTabCategories(site, categories, rawById) {
+    return _collectNavigationCategoryIds(site, rawById)
+      .map((id) => _getCategoryMeta(id))
+      .filter((meta) => meta?.name)
+      .map((meta) => ({
+        id: meta.id,
+        tabId: _categoryTabId(meta.id),
+        legacyTabIds: [meta.slug].filter(Boolean),
+        name: meta.name,
+        icon: meta.icon,
+        color: `#${meta.color}`,
+        slug: meta.slug,
+      }));
+  }
+
+  function _normalizeCurrentSiteState() {
+    let changed = false;
+    const orderOptions = _getOrderOptions();
+    const periodOptions = _getPeriodOptions();
+    const filterOptions = _getFilterOptions();
+
+    if (!siteCapabilities.orderValues.has(currentOrder)) {
+      currentOrder = orderOptions[0]?.value || "activity";
+      _setSiteValue(ORDER_KEY, currentOrder);
+      changed = true;
+    }
+    if (!siteCapabilities.periodValues.has(currentPeriod)) {
+      currentPeriod = siteCapabilities.periodValues.has("all") ? "all" : (periodOptions[0]?.value || "all");
+      _setSiteValue(PERIOD_KEY, currentPeriod);
+      changed = true;
+    }
+    if (!siteCapabilities.filterValues.has(currentFilter)) {
+      currentFilter = filterOptions[0]?.value || "all";
+      _setSiteValue(FILTER_KEY, currentFilter);
+      changed = true;
+    }
+
+    if (currentTab === "all") {
+      currentCategoryId = null;
+    } else {
+      const tab = _findTabCategoryByTabId(currentTab);
+      if (tab) {
+        currentCategoryId = tab.id;
+        if (currentTab !== tab.tabId) {
+          currentTab = tab.tabId;
+          _setSiteValue(TAB_KEY, currentTab);
+          changed = true;
+        }
+      } else {
+        currentTab = "all";
+        currentCategoryId = null;
+        _setSiteValue(TAB_KEY, currentTab);
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  function _siteControlsStateSignature() {
+    return JSON.stringify({
+      locale: getUiLocale(),
+      orders: _getOrderOptions().map((option) => option.value),
+      periods: _getPeriodOptions().map((option) => option.value),
+      filters: _getFilterOptions().map((option) => option.value),
+      tabs: tabCategories.map((cat) => `${cat.id}:${cat.name}:${cat.icon}:${cat.color}`),
+      currentTab,
+      currentOrder,
+      currentPeriod,
+      currentFilter,
+      hidePinned,
+    });
+  }
+
+  function _syncSiteDerivedControls({ force = false } = {}) {
+    const nextSignature = _siteControlsStateSignature();
+    if (!force && nextSignature === siteControlsSignature) return;
+    siteControlsSignature = nextSignature;
+
+    if (feedHeaderEl) {
+      feedHeaderEl.replaceChildren();
+      _buildHeaderControls(feedHeaderEl);
+    }
+
+    const tabShell = feedContainer?.querySelector(".sfp-tab-shell");
+    if (tabShell) _rerenderTabBar(tabShell);
+
+    const filterBar = feedContainer?.querySelector(".sfp-filter-bar");
+    if (filterBar) filterBar.replaceWith(_buildFilterBar());
+  }
+
+  function _normalizeCategoryMeta(raw = {}, parent = null) {
+    const id = Number(raw.id);
+    const icon = _safeIconName(raw.icon || "");
     return {
       id,
-      name: raw.name || fallback.name || "",
-      color: _normalizeHexColor(raw.color || fallback.color, "888"),
-      text_color: _normalizeHexColor(raw.text_color || fallback.text_color, "FFFFFF"),
+      name: raw.name || "",
+      color: _normalizeHexColor(raw.color, "888"),
+      text_color: _normalizeHexColor(raw.text_color, "FFFFFF"),
       icon,
-      style_type: _safeCategoryStyleType(raw.style_type || fallback.style_type, !!icon),
-      slug: raw.slug || fallback.tabId || "",
-      parent_category_id: raw.parent_category_id || fallback.parent_category_id || null,
+      style_type: _safeCategoryStyleType(raw.style_type, !!icon),
+      slug: raw.slug || "",
+      parent_category_id: raw.parent_category_id || null,
       parent_color: parent ? _normalizeHexColor(parent.color, "888") : null,
       parent_text_color: parent ? _normalizeHexColor(parent.text_color, "FFFFFF") : null,
-      read_restricted: !!(raw.read_restricted || fallback.read_restricted),
+      read_restricted: !!raw.read_restricted,
       description_text: raw.description_text || raw.description_excerpt || raw.description || "",
       description_excerpt: raw.description_excerpt || raw.description_text || raw.description || "",
     };
@@ -447,7 +843,7 @@
   function _getCategoryMeta(id) {
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) return null;
-    return categoryMetaById.get(numericId) || _categoryFallbackMeta(numericId);
+    return categoryMetaById.get(numericId) || null;
   }
 
   function getCategoryTabMeta(cat) {
@@ -461,16 +857,16 @@
   }
 
   function _getSavedTabOrder() {
-    const savedOrder = GM_getValue(TAB_ORDER_KEY, []);
+    const savedOrder = _getSiteValue(TAB_ORDER_KEY, []);
     if (!Array.isArray(savedOrder)) return [];
     return savedOrder.map((id) => Number(id)).filter((id) => Number.isFinite(id));
   }
 
   function _getOrderedTabCategories() {
     const savedOrder = _getSavedTabOrder();
-    if (!savedOrder.length) return [...TAB_CATEGORIES];
+    if (!savedOrder.length) return [...tabCategories];
 
-    return [...TAB_CATEGORIES].sort((a, b) => {
+    return [...tabCategories].sort((a, b) => {
       const idxA = savedOrder.indexOf(a.id);
       const idxB = savedOrder.indexOf(b.id);
       if (idxA === -1 && idxB === -1) return 0;
@@ -484,12 +880,15 @@
     const order = Array.from(grid.querySelectorAll(".sfp-tab-grid-item[data-category-id]"))
       .map((item) => Number(item.dataset.categoryId))
       .filter((id) => Number.isFinite(id));
-    GM_setValue(TAB_ORDER_KEY, order);
+    _setSiteValue(TAB_ORDER_KEY, order);
   }
 
   function _buildCategoryTabContent(cat) {
     const tabMeta = getCategoryTabMeta(cat);
-    return `${_svgIcon(tabMeta.icon)}<span>${escapeHtml(tabMeta.name)}</span>`;
+    const iconHtml = tabMeta.icon
+      ? _svgIcon(tabMeta.icon)
+      : _categoryColorMarkerHtml(tabMeta.color);
+    return `${iconHtml}<span>${escapeHtml(tabMeta.name)}</span>`;
   }
 
   function _cssEscape(value) {
@@ -571,17 +970,25 @@
         const categories = Array.isArray(site?.categories) ? site.categories : [];
         const rawById = new Map(categories.map((cat) => [Number(cat.id), cat]));
 
+        _updateSiteCapabilities(site);
+        categoryMetaById.clear();
+
         categories.forEach((cat) => {
           const id = Number(cat.id);
           if (!Number.isFinite(id)) return;
           const parent = cat.parent_category_id ? rawById.get(Number(cat.parent_category_id)) : null;
-          const fallback = CATEGORY_CONFIG[id] || {};
-          categoryMetaById.set(id, _normalizeCategoryMeta(cat, fallback, parent));
+          categoryMetaById.set(id, _normalizeCategoryMeta(cat, parent));
         });
+
+        tabCategories = _buildTabCategories(site, categories, rawById);
+        _normalizeCurrentSiteState();
 
         categoryMetaLoaded = true;
       } catch (e) {
         console.warn("[SFP] load category metadata failed:", e);
+        tabCategories = [];
+        _normalizeCurrentSiteState();
+        categoryMetaLoaded = true;
       } finally {
         categoryMetaPromise = null;
       }
@@ -675,7 +1082,7 @@
     if (tagStyleByKey.size > 0) return true;
 
     try {
-      const cache = GM_getValue(TAG_STYLE_CACHE_KEY, null);
+      const cache = _getSiteValue(TAG_STYLE_CACHE_KEY, null);
       if (!cache || cache.version !== TAG_STYLE_CACHE_VERSION || !Array.isArray(cache.entries)) {
         return false;
       }
@@ -703,7 +1110,7 @@
     if (tagStyleByKey.size === 0) return;
 
     try {
-      GM_setValue(TAG_STYLE_CACHE_KEY, {
+      _setSiteValue(TAG_STYLE_CACHE_KEY, {
         version: TAG_STYLE_CACHE_VERSION,
         savedAt: Date.now(),
         entries: Array.from(tagStyleByKey.entries()),
@@ -1290,6 +1697,14 @@
         fill: currentColor;
         flex-shrink: 0;
       }
+      .sfp-category-color-marker {
+        width: 0.72em;
+        height: 0.72em;
+        border-radius: 50%;
+        background: var(--sfp-category-marker-color, currentColor);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent);
+        flex: 0 0 auto;
+      }
       .sfp-tab-more-btn {
         display: inline-flex;
         align-items: center;
@@ -1400,6 +1815,10 @@
         height: 12px;
         fill: currentColor;
         flex: 0 0 auto;
+      }
+      .sfp-tab-grid-item .sfp-category-color-marker {
+        width: 0.75em;
+        height: 0.75em;
       }
       .sfp-tab-grid-item span {
         min-width: 0;
@@ -1946,14 +2365,14 @@
 
     toggleBtn = document.createElement("button");
     toggleBtn.className = "sfp-toggle-btn" + (feedModeEnabled ? " active" : "");
-    toggleBtn.title = "切换侧边栏信息流";
+    toggleBtn.title = t("toggleTitle");
     toggleBtn.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="7" height="18" rx="1" fill="currentColor" opacity="0.6"/><rect x="13" y="3" width="8" height="18" rx="1" fill="currentColor"/></svg>`;
 
     toggleBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       e.preventDefault();
       feedModeEnabled = !feedModeEnabled;
-      GM_setValue(STATE_KEY, feedModeEnabled);
+      _setSiteValue(STATE_KEY, feedModeEnabled);
       toggleBtn.classList.toggle("active", feedModeEnabled);
       if (feedModeEnabled) {
         activateFeed();
@@ -2083,7 +2502,7 @@
         resizerEl.classList.remove("sfp-resizing");
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
-        GM_setValue(WIDTH_KEY, sfpSidebarWidth);
+        _setSiteValue(WIDTH_KEY, sfpSidebarWidth);
         document.removeEventListener("mousemove", onMouseMove);
         document.removeEventListener("mouseup", onMouseUp);
       };
@@ -2231,29 +2650,13 @@
 
   // ========== Header 控件 ==========
   function _buildHeaderControls(header) {
-    // Order 自定义下拉
-    const orderOptions = [
-      { label: "最新活动", value: "activity" },
-      { label: "最新发布", value: "created" },
-      { label: "最多浏览", value: "views" },
-      { label: "最多回复", value: "posts" },
-      { label: "最多点赞", value: "likes" },
-      { label: "楼主点赞", value: "op_likes" },
-    ];
-
-    const periodOptions = [
-      { label: "全部", value: "all" },
-      { label: "每日", value: "daily" },
-      { label: "每周", value: "weekly" },
-      { label: "每月", value: "monthly" },
-      { label: "每季", value: "quarterly" },
-      { label: "每年", value: "yearly" },
-    ];
+    const orderOptions = _getOrderOptions();
+    const periodOptions = _getPeriodOptions();
 
     // Period 下拉（先创建，因为 order 切换时需要引用）
     const periodSelect = _buildCustomSelect(periodOptions, currentPeriod, (value) => {
       currentPeriod = value;
-      GM_setValue(PERIOD_KEY, currentPeriod);
+      _setSiteValue(PERIOD_KEY, currentPeriod);
       _resetAutoLoadState();
       loadTopics();
     });
@@ -2263,7 +2666,7 @@
     // Order 下拉
     const orderSelect = _buildCustomSelect(orderOptions, currentOrder, (value) => {
       currentOrder = value;
-      GM_setValue(ORDER_KEY, currentOrder);
+      _setSiteValue(ORDER_KEY, currentOrder);
       _updatePeriodVisibility(periodSelect);
       _beginSidebarIncomingViewSettling();
       _syncDefaultViewControls();
@@ -2273,7 +2676,7 @@
     orderSelect.classList.add("sfp-order-select");
 
     function _updatePeriodVisibility(ps) {
-      ps.style.display = _needsPeriodForUrl(currentOrder) ? "" : "none";
+      ps.style.display = _needsPeriodForUrl(currentOrder) && periodOptions.length > 1 ? "" : "none";
     }
 
     header.appendChild(orderSelect);
@@ -2289,8 +2692,8 @@
     const refreshBtn = document.createElement("button");
     refreshBtn.className = "sfp-refresh-btn";
     refreshBtn.type = "button";
-    refreshBtn.title = "刷新";
-    refreshBtn.setAttribute("aria-label", "刷新");
+    refreshBtn.title = t("refresh");
+    refreshBtn.setAttribute("aria-label", t("refresh"));
     refreshBtn.innerHTML = _refreshIconHtml();
     refreshBtn.addEventListener("click", _handleHeadActionClick);
     feedRefreshBtn = refreshBtn;
@@ -2309,7 +2712,7 @@
     const btn = document.createElement("button");
     btn.className = "sfp-settings-btn";
     btn.type = "button";
-    btn.title = "设置";
+    btn.title = t("settings");
     btn.innerHTML = `
       <span class="sfp-settings-line sfp-settings-line-1"></span>
       <span class="sfp-settings-line sfp-settings-line-2"></span>
@@ -2326,29 +2729,29 @@
     if (isLatestActivityView) {
       panel.innerHTML = `
         <div class="sfp-setting-row sfp-incoming-hint-row">
-          ${_buildSettingLabelHtml("新活动数量", "在刷新按钮中显示当前板块范围内的新活动候选数量。离开首屏时点击数量会先回到顶部，再应用这些候选。")}
+          ${_buildSettingLabelHtml(t("incomingHintLabel"), t("incomingHintTip"))}
           <input type="checkbox" class="sfp-incoming-hint-input"${showIncomingHint ? " checked" : ""}>
         </div>
         <div class="sfp-setting-row sfp-auto-silent-row">
-          ${_buildSettingLabelHtml("自动静默刷新", "在最新活动视图且停留首屏时按间隔自动应用新话题；离开首屏后暂停，只累计候选。")}
+          ${_buildSettingLabelHtml(t("autoSilentLabel"), t("autoSilentTip"))}
           <input type="checkbox" class="sfp-auto-silent-input"${autoSilentRefreshEnabled ? " checked" : ""}>
         </div>
         <div class="sfp-setting-interval sfp-auto-silent-interval${_isAutoSilentRefreshActive() ? " visible" : ""}">
-          ${_buildSettingLabelHtml("静默刷新间隔", "单位为秒，最小为 0。设为 0 时，有新活动会立即静默应用；大于 0 时按倒计时批量应用。")}
+          ${_buildSettingLabelHtml(t("silentIntervalLabel"), t("silentIntervalTip"))}
           <input type="number" class="sfp-auto-silent-refresh-interval-input" min="0" step="1" value="${autoSilentRefreshInterval}">
-          <span>s</span>
+          <span>${escapeHtml(t("secondsSuffix"))}</span>
         </div>
       `;
     } else {
       panel.innerHTML = `
         <div class="sfp-setting-row sfp-auto-refresh-row">
-          ${_buildSettingLabelHtml("自动刷新", "用于非最新活动的排序视图，停留首屏时按间隔重新拉取当前列表。不要设置太快，频繁请求可能触发站点速率限制。")}
+          ${_buildSettingLabelHtml(t("autoRefreshLabel"), t("autoRefreshTip"))}
           <input type="checkbox" class="sfp-auto-refresh-input"${autoRefreshEnabled ? " checked" : ""}>
         </div>
         <div class="sfp-setting-interval sfp-auto-refresh-interval${autoRefreshEnabled ? " visible" : ""}">
-          ${_buildSettingLabelHtml("自动刷新间隔", "单位为秒，最小为 1。到达间隔后刷新当前筛选和排序下的列表。")}
+          ${_buildSettingLabelHtml(t("autoRefreshIntervalLabel"), t("autoRefreshIntervalTip"))}
           <input type="number" class="sfp-auto-refresh-interval-input" min="1" step="1" value="${autoRefreshInterval}">
-          <span>s</span>
+          <span>${escapeHtml(t("secondsSuffix"))}</span>
         </div>
       `;
     }
@@ -2412,7 +2815,7 @@
     if (incomingHintInput) {
       _bindCheckboxSetting(incomingHintInput, (checked) => {
         showIncomingHint = checked;
-        GM_setValue(SHOW_INCOMING_HINT_KEY, showIncomingHint);
+        _setSiteValue(SHOW_INCOMING_HINT_KEY, showIncomingHint);
         _syncSettingsPanelState(wrapper);
         _syncSidebarIncomingTracking();
         _syncHeadActionState();
@@ -2427,7 +2830,7 @@
     if (autoSilentInput) {
       _bindCheckboxSetting(autoSilentInput, (checked) => {
         autoSilentRefreshEnabled = checked;
-        GM_setValue(AUTO_SILENT_REFRESH_KEY, autoSilentRefreshEnabled);
+        _setSiteValue(AUTO_SILENT_REFRESH_KEY, autoSilentRefreshEnabled);
         _syncSettingsPanelState(wrapper);
         _syncSidebarIncomingTracking();
         _startAutoSilentRefresh();
@@ -2440,7 +2843,7 @@
 
     _bindNumberSetting(silentIntervalInput, 0, DEFAULT_AUTO_SILENT_REFRESH_INTERVAL, (seconds) => {
       autoSilentRefreshInterval = seconds;
-      GM_setValue(AUTO_SILENT_REFRESH_INTERVAL_KEY, autoSilentRefreshInterval);
+      _setSiteValue(AUTO_SILENT_REFRESH_INTERVAL_KEY, autoSilentRefreshInterval);
       _startAutoSilentRefresh();
       _syncHeadActionState();
       if (_isAutoSilentRefreshActive() && autoSilentRefreshInterval === 0) {
@@ -2454,7 +2857,7 @@
     if (autoRefreshInput) {
       _bindCheckboxSetting(autoRefreshInput, (checked) => {
         autoRefreshEnabled = checked;
-        GM_setValue(AUTO_REFRESH_ENABLED_KEY, autoRefreshEnabled);
+        _setSiteValue(AUTO_REFRESH_ENABLED_KEY, autoRefreshEnabled);
         intervalRow.classList.toggle("visible", autoRefreshEnabled);
         _syncSettingsPanelHeight(wrapper);
         _startAutoRefresh();
@@ -2464,7 +2867,7 @@
 
     _bindNumberSetting(intervalInput, 1, DEFAULT_AUTO_REFRESH_INTERVAL, (seconds) => {
       autoRefreshInterval = seconds;
-      GM_setValue(AUTO_REFRESH_INTERVAL_KEY, autoRefreshInterval);
+      _setSiteValue(AUTO_REFRESH_INTERVAL_KEY, autoRefreshInterval);
       _startAutoRefresh();
       _syncHeadActionState();
     });
@@ -2481,7 +2884,7 @@
       <span class="sfp-setting-label">
         <span>${escapeHtml(label)}</span>
         <span class="sfp-setting-help-wrap">
-          <button type="button" class="sfp-setting-help" aria-label="${escapeHtml(label)}说明" data-tooltip="${escapeHtml(tooltip)}">
+          <button type="button" class="sfp-setting-help" aria-label="${escapeHtml(label + t("helpSuffix"))}" data-tooltip="${escapeHtml(tooltip)}">
             <svg viewBox="0 0 1024 1024" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><path d="M514.048 54.272q95.232 0 178.688 36.352t145.92 98.304 98.304 145.408 35.84 178.688-35.84 178.176-98.304 145.408-145.92 98.304-178.688 35.84-178.176-35.84-145.408-98.304-98.304-145.408-35.84-178.176 35.84-178.688 98.304-145.408 145.408-98.304 178.176-36.352zM515.072 826.368q26.624 0 44.544-17.92t17.92-43.52q0-26.624-17.92-44.544t-44.544-17.92-44.544 17.92-17.92 44.544q0 25.6 17.92 43.52t44.544 17.92zM567.296 574.464q-1.024-16.384 20.48-34.816t48.128-40.96 49.152-50.688 24.576-65.024q2.048-39.936-8.192-74.752t-33.792-59.904-60.928-39.936-87.552-14.848q-62.464 0-103.936 22.016t-67.072 53.248-35.84 64.512-9.216 55.808q1.024 26.624 16.896 38.912t34.304 12.8 33.792-10.24 15.36-31.232q0-12.288 7.68-30.208t20.992-34.304 32.256-27.648 42.496-11.264q46.08 0 73.728 23.04t25.6 57.856q0 17.408-10.24 32.256t-26.112 28.672-33.792 27.648-33.792 28.672-26.624 32.256-11.776 37.888l1.024 38.912q0 15.36 14.336 29.184t37.888 14.848q23.552-1.024 37.376-15.36t12.8-32.768l0-24.576z"></path></svg>
           </button>
         </span>
@@ -2581,13 +2984,14 @@
 
   // ========== 自定义下拉组件 ==========
   function _buildCustomSelect(options, selectedValue, onChange) {
+    const safeOptions = options.length ? options : [{ label: "", value: selectedValue || "" }];
     const wrapper = document.createElement("span");
     wrapper.className = "sfp-custom-select";
 
     const btn = document.createElement("button");
     btn.className = "sfp-custom-select-btn";
     btn.type = "button";
-    const selected = options.find((o) => o.value === selectedValue) || options[0];
+    const selected = safeOptions.find((o) => o.value === selectedValue) || safeOptions[0];
     btn.textContent = selected.label;
 
     const dropdown = document.createElement("div");
@@ -2595,7 +2999,7 @@
 
     let _currentSelected = selectedValue;
 
-    options.forEach((opt) => {
+    safeOptions.forEach((opt) => {
       const item = document.createElement("button");
       item.className = "sfp-custom-select-option" + (opt.value === selectedValue ? " selected" : "");
       item.type = "button";
@@ -2651,8 +3055,8 @@
     const moreBtn = document.createElement("button");
     moreBtn.type = "button";
     moreBtn.className = "sfp-tab-more-btn";
-    moreBtn.title = "展开板块 / 排序";
-    moreBtn.setAttribute("aria-label", "展开板块 / 排序");
+    moreBtn.title = t("tabMore");
+    moreBtn.setAttribute("aria-label", t("tabMore"));
     moreBtn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M7 10a2 2 0 1 1 .01 0H7zm5 0a2 2 0 1 1 .01 0H12zm5 0a2 2 0 1 1 .01 0H17zM7 16a2 2 0 1 1 .01 0H7zm5 0a2 2 0 1 1 .01 0H12zm5 0a2 2 0 1 1 .01 0H17z"/></svg>`;
 
     const panel = document.createElement("div");
@@ -2661,9 +3065,9 @@
       <div class="sfp-tab-panel-header">
         <span class="sfp-tab-panel-title">
           <svg viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M10 4h10v2H10V4zM4 3.5h4v3H4v-3zM10 11h10v2H10v-2zM4 10.5h4v3H4v-3zM10 18h10v2H10v-2zM4 17.5h4v3H4v-3z"/></svg>
-          <span>拖动板块调整顺序</span>
+          <span>${escapeHtml(t("tabPanelTitle"))}</span>
         </span>
-        <button type="button" class="sfp-tab-panel-close" title="关闭" aria-label="关闭">
+        <button type="button" class="sfp-tab-panel-close" title="${escapeAttr(t("close"))}" aria-label="${escapeAttr(t("close"))}">
           <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4 6.4 5z"/></svg>
         </button>
       </div>
@@ -2675,7 +3079,7 @@
     const allTab = document.createElement("span");
     allTab.className = "sfp-tab-item" + (currentTab === "all" ? " active" : "");
     allTab.dataset.tab = "all";
-    allTab.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg><span>全部</span>`;
+    allTab.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg><span>${escapeHtml(t("all"))}</span>`;
     bar.appendChild(allTab);
 
     const allGridItem = document.createElement("span");
@@ -2736,7 +3140,7 @@
 
       currentTab = tabId;
       currentCategoryId = catId;
-      GM_setValue(TAB_KEY, currentTab);
+      _setSiteValue(TAB_KEY, currentTab);
       _beginSidebarIncomingViewSettling();
       _syncDefaultViewControls();
       _resetAutoLoadState();
@@ -2839,11 +3243,7 @@
     const bar = document.createElement("div");
     bar.className = "sfp-filter-bar";
 
-    const filters = [
-      { label: "全部", value: "all" },
-      { label: "未读", value: "unseen" },
-      { label: "已读", value: "read" },
-    ];
+    const filters = _getFilterOptions();
 
     filters.forEach((f) => {
       const item = document.createElement("span");
@@ -2863,7 +3263,7 @@
     const pinnedToggle = document.createElement("span");
     pinnedToggle.className = "sfp-filter-item" + (hidePinned ? " active" : "");
     pinnedToggle.dataset.filter = "hide-pinned";
-    pinnedToggle.textContent = "隐藏置顶";
+    pinnedToggle.textContent = t("hidePinned");
     bar.appendChild(pinnedToggle);
 
     bar.addEventListener("click", (e) => {
@@ -2873,7 +3273,7 @@
       const filterVal = item.dataset.filter;
       if (filterVal === "hide-pinned") {
         hidePinned = !hidePinned;
-        GM_setValue(HIDE_PINNED_KEY, hidePinned);
+        _setSiteValue(HIDE_PINNED_KEY, hidePinned);
         item.classList.toggle("active", hidePinned);
         _resetAutoLoadState();
         renderTopics();
@@ -2881,7 +3281,7 @@
       } else {
         if (filterVal === currentFilter) return;
         currentFilter = filterVal;
-        GM_setValue(FILTER_KEY, currentFilter);
+        _setSiteValue(FILTER_KEY, currentFilter);
         _beginSidebarIncomingViewSettling();
         _syncDefaultViewControls();
         _resetAutoLoadState();
@@ -2901,11 +3301,14 @@
       currentCategoryId = null;
       return;
     }
-    const cat = TAB_CATEGORIES.find((c) => c.tabId === currentTab);
+    const cat = _findTabCategoryByTabId(currentTab);
     if (cat) {
       currentCategoryId = cat.id;
-    } else {
+      currentTab = cat.tabId;
+    } else if (categoryMetaLoaded) {
       currentTab = "all";
+      currentCategoryId = null;
+    } else {
       currentCategoryId = null;
     }
   }
@@ -2996,8 +3399,8 @@
       currentAction !== nextAction ||
       (showsCount && feedRefreshBtn.dataset.incomingCount !== nextIncomingCount);
     const nextTitle = showsCount
-      ? `应用 ${incomingCount} 个新的或更新的话题`
-      : (isAway ? "回到顶部" : "刷新");
+      ? t("applyIncoming", { count: incomingCount })
+      : (isAway ? t("backToTop") : t("refresh"));
     const nextHtml = showsCount
       ? `<span class="sfp-refresh-count">${escapeHtml(_formatIncomingCount(incomingCount))}</span>`
       : (isAway ? _backTopIconHtml() : _refreshIconHtml());
@@ -3592,6 +3995,26 @@
     }
   }
 
+  function _categoryPath(categoryId) {
+    const targetCategoryId = Number(categoryId);
+    if (!Number.isFinite(targetCategoryId)) return "";
+
+    const chain = [];
+    const seen = new Set();
+    let meta = _getCategoryMeta(targetCategoryId);
+    while (meta && !seen.has(meta.id)) {
+      seen.add(meta.id);
+      chain.unshift(meta);
+      const parentId = Number(meta.parent_category_id);
+      if (!Number.isFinite(parentId) || parentId === meta.id) break;
+      meta = _getCategoryMeta(parentId);
+    }
+
+    const slugs = chain.map((cat) => cat.slug).filter(Boolean);
+    if (slugs.length === 0) slugs.push("category");
+    return `/c/${slugs.map((slug) => encodeURIComponent(slug)).join("/")}/${targetCategoryId}`;
+  }
+
   const FeedQuery = {
     snapshot() {
       return {
@@ -3628,17 +4051,19 @@
       // period=all 的“最多浏览/回复/点赞”等排序继续走 latest.json?order=...，
       // 保留此前版本的 ranked order 行为。
       if (query.tab !== "all" && query.categoryId) {
-        const cat = CATEGORY_CONFIG[query.categoryId];
-        const tabId = cat?.tabId || query.tab;
-        const params = [`page=${page}`];
+        const categoryPath = _categoryPath(query.categoryId);
+        const params = [
+          `page=${page}`,
+          "include_subcategories=true",
+        ];
         if (useTopList) {
           params.push(`period=${encodeURIComponent(query.period)}`);
           params.push(`order=${encodeURIComponent(query.order)}`);
-          return `/c/${tabId}/${query.categoryId}/l/top.json?${params.join("&")}`;
+          return `${categoryPath}/l/top.json?${params.join("&")}`;
         }
 
         params.push(`order=${encodeURIComponent(query.order)}`);
-        return `/c/${tabId}/${query.categoryId}/l/latest.json?${params.join("&")}`;
+        return `${categoryPath}/l/latest.json?${params.join("&")}`;
       }
 
       if (useTopList) {
@@ -3705,7 +4130,7 @@
       return;
     }
 
-    const requestQuery = FeedQuery.snapshot();
+    let requestQuery = null;
     const requestToken = ++activeLoadToken;
     activeLoadMoreToken++;
     activeRefreshToken++;
@@ -3727,13 +4152,17 @@
     lastHeadActionAwayState = null;
 
     if (feedListEl) {
-      feedListEl.innerHTML = `<div class="sfp-loading"><div class="sfp-spinner"></div>加载中...</div>`;
+      feedListEl.innerHTML = `<div class="sfp-loading"><div class="sfp-spinner"></div>${escapeHtml(t("loading"))}</div>`;
     }
     _syncHeadActionState();
 
     try {
       _startTagStyleIndexLoad();
       await loadCategoryMetadata();
+      if (requestToken !== activeLoadToken) return;
+      requestQuery = FeedQuery.snapshot();
+      _resetAutoLoadState();
+      _syncSiteDerivedControls();
       if (requestToken !== activeLoadToken || !FeedQuery.isCurrent(requestQuery)) return;
       _refreshCategoryTabs();
 
@@ -3751,19 +4180,19 @@
         _removeSidebarIncomingTopicIds(topics.map((topic) => topic.id));
         _syncIncomingHeadAction();
       } else {
-        if (feedListEl) feedListEl.innerHTML = `<div class="sfp-empty">暂无话题</div>`;
+        if (feedListEl) feedListEl.innerHTML = `<div class="sfp-empty">${escapeHtml(t("emptyTopics"))}</div>`;
         hasMorePages = false;
       }
     } catch (e) {
-      if (requestToken !== activeLoadToken || !FeedQuery.isCurrent(requestQuery)) return;
+      if (requestToken !== activeLoadToken || (requestQuery && !FeedQuery.isCurrent(requestQuery))) return;
       console.error("[SFP] loadTopics error:", e);
       if (feedListEl) {
         feedListEl.innerHTML = `
           <div class="sfp-error">
-            <div class="sfp-error-icon">⚠️</div>
-            <div class="sfp-error-msg">加载失败</div>
+            <div class="sfp-error-icon">!</div>
+            <div class="sfp-error-msg">${escapeHtml(t("loadFailed"))}</div>
             <div class="sfp-error-detail">${escapeHtml(e.message)}</div>
-            <button class="sfp-retry-btn">重试</button>
+            <button class="sfp-retry-btn">${escapeHtml(t("retry"))}</button>
           </div>`;
         feedListEl.querySelector(".sfp-retry-btn")?.addEventListener("click", () => loadTopics());
       }
@@ -3815,7 +4244,7 @@
         if (newTopics.length === 0) {
           if (hasMorePages) {
             _renderPaginationFooter({
-              note: !isAutoLoad ? "下一页无符合条件的话题" : "",
+              note: !isAutoLoad ? t("nextPageNoMatch") : "",
             });
           } else {
             _showNoMore();
@@ -3831,7 +4260,7 @@
 
           if (isAutoLoad) _recordAutoLoadFilterResult(filteredNew.length);
           _renderPaginationFooter({
-            note: !isAutoLoad && filteredNew.length === 0 ? "下一页无符合条件的话题" : "",
+            note: !isAutoLoad && filteredNew.length === 0 ? t("nextPageNoMatch") : "",
           });
         }
       } else {
@@ -4215,10 +4644,10 @@
   function _topicStatusBadgesHtml(topic) {
     const statusBadges = [];
     if (topic.is_hot) {
-      statusBadges.push('<span class="topic-status-card --hot"><svg class="fa d-icon d-icon-fire svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#fire"></use></svg><p class="topic-status-card__name">热门</p></span>');
+      statusBadges.push(`<span class="topic-status-card --hot"><svg class="fa d-icon d-icon-fire svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#fire"></use></svg><p class="topic-status-card__name">${escapeHtml(t("hot"))}</p></span>`);
     }
     if (topic.pinned || topic.pinned_globally) {
-      statusBadges.push('<span class="topic-status-card --pinned"><svg class="fa d-icon d-icon-thumbtack svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#thumbtack"></use></svg><p class="topic-status-card__name">已置顶</p></span>');
+      statusBadges.push(`<span class="topic-status-card --pinned"><svg class="fa d-icon d-icon-thumbtack svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#thumbtack"></use></svg><p class="topic-status-card__name">${escapeHtml(t("pinned"))}</p></span>`);
     }
     return statusBadges.length
       ? `<span class="sfp-topic-status-badges">${statusBadges.join("")}</span>`
@@ -4249,7 +4678,7 @@
     feedListEl.innerHTML = "";
 
     if (allTopics.length === 0) {
-      feedListEl.innerHTML = `<div class="sfp-empty">暂无话题</div>`;
+      feedListEl.innerHTML = `<div class="sfp-empty">${escapeHtml(t("emptyTopics"))}</div>`;
       _syncHeadActionState();
       return;
     }
@@ -4259,18 +4688,18 @@
 
     if (filtered.length === 0) {
       // 构建更精确的空状态消息
-      let emptyMsg = "无匹配话题";
+      let emptyMsg = t("noMatchingTopics");
       if (currentFilter === "unseen") {
-        emptyMsg = currentTab !== "all" ? "该板块暂无未读话题" : "暂无未读话题";
+        emptyMsg = currentTab !== "all" ? t("noUnreadInCategory") : t("noUnread");
       } else if (currentFilter === "read") {
-        emptyMsg = "暂无已读话题";
+        emptyMsg = t("noRead");
       }
 
       // 有数据但筛选后为空 → 显示当前页提示，分页控件由底部统一渲染
       if (hasMorePages && !isLoadingMore) {
-        feedListEl.innerHTML = `<div class="sfp-empty">当前页${emptyMsg}</div>`;
+        feedListEl.innerHTML = `<div class="sfp-empty">${escapeHtml(t("currentPagePrefix") + emptyMsg)}</div>`;
       } else {
-        feedListEl.innerHTML = `<div class="sfp-empty">${emptyMsg}</div>`;
+        feedListEl.innerHTML = `<div class="sfp-empty">${escapeHtml(emptyMsg)}</div>`;
       }
     } else {
       filtered.forEach((topic) => {
@@ -4460,7 +4889,7 @@
 
     // 标题
     const closedHtml = topic.closed
-      ? '<span class="topic-statuses"><span title="此话题已被关闭；不再接受新回复" class="topic-status --closed"><svg class="fa d-icon d-icon-lock svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#lock"></use></svg></span></span>'
+      ? `<span class="topic-statuses"><span title="${escapeAttr(t("closedTitle"))}" class="topic-status --closed"><svg class="fa d-icon d-icon-lock svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#lock"></use></svg></span></span>`
       : "";
 
     // 分类
@@ -4607,7 +5036,7 @@
     if (hasMorePages) {
       const loadMoreEl = document.createElement("div");
       loadMoreEl.className = "sfp-load-more";
-      loadMoreEl.textContent = "加载更多";
+      loadMoreEl.textContent = t("loadMore");
       loadMoreEl.addEventListener("click", () => {
         loadMoreEl.remove();
         loadMoreTopics({ source: "manual" });
@@ -4623,7 +5052,7 @@
     _removePaginationFooter();
     const el = document.createElement("div");
     el.className = "sfp-load-more";
-    el.innerHTML = `<span class="sfp-load-more-spinner"></span>加载中...`;
+    el.innerHTML = `<span class="sfp-load-more-spinner"></span>${escapeHtml(t("loading"))}`;
     if (feedListEl) feedListEl.appendChild(el);
   }
 
@@ -4639,7 +5068,7 @@
   function _appendNoMore() {
     const el = document.createElement("div");
     el.className = "sfp-no-more";
-    el.textContent = "— 已经到底了 —";
+    el.textContent = t("noMore");
     if (feedListEl) feedListEl.appendChild(el);
   }
 
@@ -4648,8 +5077,8 @@
     const el = document.createElement("div");
     el.className = "sfp-load-more sfp-load-more-error";
     el.innerHTML = `
-      <span>请求失败</span>
-      <button type="button" class="sfp-load-more-retry">重试</button>
+      <span>${escapeHtml(t("requestFailed"))}</span>
+      <button type="button" class="sfp-load-more-retry">${escapeHtml(t("retry"))}</button>
     `;
     el.querySelector(".sfp-load-more-retry")?.addEventListener("click", () => {
       loadMoreTopics({ source: "manual" });
