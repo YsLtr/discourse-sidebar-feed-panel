@@ -1,33 +1,32 @@
 # Discourse Sidebar Feed Panel - Active Handoff
 
-**Updated**: 2026-06-11 12:42:25 CST +08:00
-**Project root**: `C:\Users\28676\builds\discourse\userscript`
-**Branch**: `main`
-**Current objective**: Continue after category/tag cache persistence work; no active blocker is known.
+**Updated**: 2026-06-11 16:08:06 CST +08:00  
+**Project root**: `C:\Users\28676\builds\discourse\userscript`  
+**Branch**: `main`  
+**Current objective**: Double-click fast back-to-top is implemented; no active blocker is known.
 
 ## Current State
 
-- Main file: `discourse-sidebar-feed-panel.user.js`, userscript version now `2.0.4`.
-- Category metadata is now cached per site origin in GM storage as `sfp_category_data_cache_v1`.
-  - `loadCategoryMetadata()` reads this cache first and only fetches `/site.json` plus `/categories_and_latest.json` when the cache is missing or invalid.
-  - The cached source includes category records, navigation/category-list tabs, site filter/top-menu/period capabilities, and top tag metadata needed to avoid a startup `/site.json` request from the tag style path.
-  - When the category cache is used, it primes `siteDataCache` before tag style indexing.
-- Tag style cache remains the existing per-origin `sfp_tag_style_cache_v1` design.
-- The only exposed cache clear entry is the combined clear:
-  - userscript menu: `SFP: 清空分类和标签缓存`
-  - console API: `SFPFeedPanel.clearCaches()`
-  - Separate public clear/get APIs for category-only or tag-only cache were intentionally removed per user request.
-- `todo.md` now marks "分类标签本地缓存" complete; pending items are double-click fast back-to-top and "隐藏置顶只隐藏已读".
+- Main file: `discourse-sidebar-feed-panel.user.js`, userscript version now `2.0.5`.
+- Double-click fast back-to-top is implemented in `_handleHeadActionClick()`:
+  - second-or-later click is detected with `event?.detail >= 2`;
+  - acceleration only applies when the current header button action is `"back-top"`;
+  - it calls `_returnToHead({ animated: false })`, so the smooth scroll animation is skipped and the feed jumps to the head immediately.
+- The implementation intentionally avoids timers, previous-click action memory, `dblclick` listeners, and animation-state tokens. User clarified that the back-to-top icon remains active until the scroll reaches the head, so current action is sufficient.
+- Incoming count behavior is unchanged: `"incoming"` still follows its existing flow, returning to the head before applying candidates when needed.
+- `todo.md` marks "双击回到顶部快速回顶（跳过动画）" complete. Remaining pending item: "隐藏置顶只隐藏已读".
+- Prior category/tag cache work remains in place:
+  - category metadata cache key: `sfp_category_data_cache_v1`;
+  - tag style cache key: `sfp_tag_style_cache_v1`;
+  - only exposed clear entry is the combined `SFP: 清空分类和标签缓存` / `SFPFeedPanel.clearCaches()`.
 
-## Validation Run
+## Validation
 
-- Static checks passed:
+- Static checks passed after the final simplification:
   - `node --check discourse-sidebar-feed-panel.user.js`
-  - `git diff --check -- discourse-sidebar-feed-panel.user.js todo.md` passed, with only the normal Windows LF-to-CRLF warning.
-- Local VM startup probe passed before the final public-API cleanup:
-  - With an existing category cache, startup requested only `/latest.json?order=activity&page=0`.
-  - It did not request `/site.json` or `/categories_and_latest.json`.
-- The public clear-entry cleanup was then verified by `rg`: only `SFP: 清空分类和标签缓存` and `SFPFeedPanel.clearCaches()` remain.
+  - `git diff --check -- discourse-sidebar-feed-panel.user.js todo.md`
+- `git diff --check` only reports the normal Windows LF-to-CRLF warning for touched files.
+- Live browser validation has not been rerun after the double-click change.
 
 ## Constraints Still In Force
 
@@ -40,17 +39,17 @@
 
 ## Known Risks / Open Questions
 
-- Live visual verification after reinstall/reload is still useful, especially on `https://community.openai.com/*`, to confirm cached category tabs render as expected after the first fetch.
-- Clearing caches intentionally reloads the feed if feed mode is active, so the next load will rebuild both category metadata and tag style cache.
+- Manual verification is still useful: reload/update the installed userscript, scroll the feed, single-click the back-to-top icon to confirm smooth scroll, then double-click it to confirm immediate jump.
+- OpenAI community category-cache visual validation from the previous handoff is still useful if touching category/tag behavior again.
 
 ## Concrete Next Steps
 
-1. Reload/update the installed userscript and confirm category tabs still render on OpenAI community after first load and after a page reload.
-2. Use the userscript menu `SFP: 清空分类和标签缓存` once to verify the next load refetches category/tag data and then returns to cached startup behavior.
-3. If continuing feature work, pick from `todo.md`: double-click fast back-to-top or "隐藏置顶只隐藏已读".
+1. Reinstall/reload the userscript and manually test double-click back-to-top on a live Discourse sidebar feed.
+2. If continuing feature work, implement `todo.md` item: "隐藏置顶只隐藏已读".
+3. Use the combined cache-clear menu/API only if validating cache rebuild behavior.
 
 ## Suggested Skills
 
-- `$agent-browser-cli` for live Discourse DOM inspection, screenshots, clicks, endpoint checks, and menu/API behavior validation.
-- `$diagnose` for any site-specific layout, cache, or category-data regressions.
+- `$agent-browser-cli` for live Discourse DOM inspection, clicks, screenshots, endpoint checks, and userscript menu/API validation.
+- `$diagnose` for any site-specific layout, cache, scroll, or incoming-count regressions.
 - `$handoff` again before ending the next session.

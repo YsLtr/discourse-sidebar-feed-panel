@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      2.0.4
+// @version      2.0.5
 // @description  将 Discourse 原生侧边栏改造为信息流面板，支持分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -3688,6 +3688,7 @@
       _syncHeadActionState({ restartAuto });
       return _isAtFeedHead();
     }
+
     const scrollResult = await _waitForFeedScrollHead();
     if (scrollResult === "timeout" && feedScrollEl && !_isAtFeedHead()) {
       feedScrollEl.scrollTop = 0;
@@ -3696,9 +3697,19 @@
     return scrollResult !== "interrupted" && _isAtFeedHead();
   }
 
-  async function _handleHeadActionClick() {
+  async function _handleHeadActionClick(event) {
     if (!feedRefreshBtn || feedRefreshBtn.getAttribute("aria-busy") === "true") return;
     const action = feedRefreshBtn.dataset.action || "refresh";
+
+    if (event?.detail >= 2 && action === "back-top") {
+      if (!_isAtFeedHead()) {
+        await _returnToHead({ animated: false });
+      } else {
+        _syncHeadActionState();
+      }
+      return;
+    }
+
     if (action === "incoming") {
       if (!_isAtFeedHead()) {
         const reachedHead = await _returnToHead({ animated: true, restartAuto: false });
