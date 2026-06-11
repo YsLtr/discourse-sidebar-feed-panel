@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      2.0.0
+// @version      2.0.1
 // @description  将 Discourse 原生侧边栏改造为信息流面板，支持分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -195,6 +195,9 @@
   let siteDataPromise = null;
   let siteDataLoaded = false;
   let siteDataCache = null;
+  let categoriesAndLatestPromise = null;
+  let categoriesAndLatestLoaded = false;
+  let categoriesAndLatestCache = null;
   let pendingTabBarScrollTab = null;
   let toggleBtn = null;
   let feedContainer = null;
@@ -675,7 +678,28 @@
     return null;
   }
 
-  function _collectNavigationCategoryIds(site, rawById) {
+  function _categoryListCategories(data) {
+    return Array.isArray(data?.category_list?.categories) ? data.category_list.categories : [];
+  }
+
+  function _mergeCategoryRecords(...categoryLists) {
+    const rawById = new Map();
+    categoryLists.forEach((categoryList) => {
+      if (!Array.isArray(categoryList)) return;
+      categoryList.forEach((cat) => {
+        const id = Number(cat?.id);
+        if (!Number.isFinite(id)) return;
+        rawById.set(id, {
+          ...(rawById.get(id) || {}),
+          ...cat,
+          id,
+        });
+      });
+    });
+    return Array.from(rawById.values());
+  }
+
+  function _collectNavigationCategoryIds(site, rawById, categoryListCategories = []) {
     const ids = [];
     const seen = new Set();
     const addId = (value) => {
@@ -726,11 +750,13 @@
       });
     });
 
+    if (ids.length === 0) addRecords(categoryListCategories);
+
     return ids;
   }
 
-  function _buildTabCategories(site, categories, rawById) {
-    return _collectNavigationCategoryIds(site, rawById)
+  function _buildTabCategories(site, navigationCategories, rawById) {
+    return _collectNavigationCategoryIds(site, rawById, navigationCategories)
       .map((id) => _getCategoryMeta(id))
       .filter((meta) => meta?.name)
       .map((meta) => ({
@@ -960,17 +986,44 @@
     return siteDataPromise;
   }
 
+  async function loadCategoriesAndLatestData() {
+    if (categoriesAndLatestLoaded) return categoriesAndLatestCache;
+    if (categoriesAndLatestPromise) return categoriesAndLatestPromise;
+
+    categoriesAndLatestPromise = (async () => {
+      const resp = await fetch("/categories_and_latest.json", { headers: { "X-CSRF-Token": getCsrfToken() } });
+      if (!resp.ok) throw new Error(`categories_and_latest.json ${resp.status}`);
+      categoriesAndLatestCache = await resp.json();
+      categoriesAndLatestLoaded = true;
+      return categoriesAndLatestCache;
+    })().finally(() => {
+      categoriesAndLatestPromise = null;
+    });
+
+    return categoriesAndLatestPromise;
+  }
+
   async function loadCategoryMetadata() {
     if (categoryMetaLoaded) return;
     if (categoryMetaPromise) return categoryMetaPromise;
 
     categoryMetaPromise = (async () => {
       try {
-        const site = await loadSiteData();
-        const categories = Array.isArray(site?.categories) ? site.categories : [];
+        const [siteResult, categoriesAndLatestResult] = await Promise.allSettled([
+          loadSiteData(),
+          loadCategoriesAndLatestData(),
+        ]);
+        const site = siteResult.status === "fulfilled" ? siteResult.value : null;
+        const categoriesAndLatest = categoriesAndLatestResult.status === "fulfilled" ? categoriesAndLatestResult.value : null;
+        if (siteResult.status === "rejected") console.warn("[SFP] load site data failed:", siteResult.reason);
+        if (categoriesAndLatestResult.status === "rejected") console.warn("[SFP] load categories_and_latest failed:", categoriesAndLatestResult.reason);
+        if (!site && !categoriesAndLatest) throw new Error("site category metadata unavailable");
+
+        const navigationCategories = _categoryListCategories(categoriesAndLatest);
+        const categories = _mergeCategoryRecords(site?.categories, navigationCategories);
         const rawById = new Map(categories.map((cat) => [Number(cat.id), cat]));
 
-        _updateSiteCapabilities(site);
+        _updateSiteCapabilities(site || {});
         categoryMetaById.clear();
 
         categories.forEach((cat) => {
@@ -980,7 +1033,7 @@
           categoryMetaById.set(id, _normalizeCategoryMeta(cat, parent));
         });
 
-        tabCategories = _buildTabCategories(site, categories, rawById);
+        tabCategories = _buildTabCategories(site || {}, navigationCategories, rawById);
         _normalizeCurrentSiteState();
 
         categoryMetaLoaded = true;
