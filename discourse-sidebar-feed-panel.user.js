@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      2.0.1
+// @version      2.0.2
 // @description  将 Discourse 原生侧边栏改造为信息流面板，支持分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
 // @match        https://www.nodeloc.com/*
+// @match        https://forum.chrultrabook.com/*
+// @match        https://community.openai.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=linux.do
 // @downloadURL https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js  
 // @updateURL  https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js  
@@ -718,7 +720,12 @@
       }
       if (typeof record !== "object") return;
       addId(record.category_id ?? record.categoryId ?? record.category?.id);
-      if ((record.type === "category" || record.section_type === "category" || record.slug || record.topic_count !== undefined) && record.id !== undefined) {
+      const recordType = String(record.type || record.section_type || "").toLowerCase();
+      const isCategoryRecord = recordType === "category" ||
+        record.topic_count !== undefined ||
+        record.parent_category_id !== undefined ||
+        record.read_restricted !== undefined;
+      if (isCategoryRecord && record.id !== undefined) {
         addId(record.id);
       }
       [record.value, record.url, record.href, record.path, record.link, record.route].forEach((path) => {
@@ -1274,7 +1281,7 @@
         width: 28px;
         height: 28px;
         border: none;
-        background: var(--primary-very-low);
+        background: var(--secondary);
         color: var(--primary-medium);
         cursor: pointer;
         border-radius: 6px;
@@ -1493,7 +1500,7 @@
         width: 204px;
         height: var(--sfp-settings-shell-height, 128px);
         overflow: visible;
-        background: var(--primary-very-low);
+        background: var(--secondary);
         border: 1px solid var(--primary-low);
         border-radius: 8px;
         box-shadow: 0 8px 24px color-mix(in srgb, var(--primary) 14%, transparent);
@@ -1656,7 +1663,9 @@
         border-top: 5px solid currentColor;
       }
       .sfp-custom-select-dropdown {
-        position: fixed;
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
         min-width: 100%;
         background: var(--secondary);
         border: 1px solid var(--primary-low);
@@ -3078,13 +3087,6 @@
       const shouldOpen = !wrapper.classList.contains("open");
       _closeFloatingPanels(wrapper);
       wrapper.classList.toggle("open", shouldOpen);
-      const isOpen = shouldOpen;
-      if (isOpen) {
-        const btnRect = btn.getBoundingClientRect();
-        dropdown.style.top = (btnRect.bottom + 4) + "px";
-        dropdown.style.left = btnRect.left + "px";
-        dropdown.style.minWidth = btnRect.width + "px";
-      }
     });
 
     wrapper.appendChild(btn);
