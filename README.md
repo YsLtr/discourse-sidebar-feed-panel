@@ -1,64 +1,157 @@
 # Discourse Sidebar Feed Panel
 
-把 Discourse 原生侧边栏改造成信息流面板的用户脚本。第一期内置支持 [LINUX DO](https://linux.do/) 和 [NodeLoc](https://www.nodeloc.com/)，其他 Discourse 论坛可由用户在脚本管理器中手动添加匹配规则。
+中文 | [English](README.en.md)
+
+把 Discourse 原生侧边栏改造成信息流面板的用户脚本。安装后可在支持的 Discourse 论坛里用更紧凑的侧边栏查看话题、分类、新活动和已读状态。
+
+当前版本：`2.1.0`
 
 ## 功能
 
-- 在侧边栏中显示话题信息流
+- 在 Discourse 原生侧边栏中显示话题信息流
+- 支持最新活动、最新发布、最多浏览、最多回复、最多点赞、楼主点赞等排序，实际选项会按站点能力显示
+- 支持全部、未读、已读过滤，实际选项会按站点能力显示
 - 支持从站点导航分类生成分类标签；站点没有提供导航分类时仅显示“全部”
-- 支持已读、未读、全部过滤
-- 支持隐藏置顶话题
+- 支持父分类标签默认包含子分类话题
 - 支持拖拽调整侧边栏宽度
-- 支持新活动提醒
-- 支持自动刷新和静默刷新
-- 支持保存宽度、排序、标签页、筛选等偏好设置
+- 支持新活动数量提醒、回到顶部、手动刷新、自动静默刷新和普通自动刷新
+- 支持在“最新活动”视图隐藏列表顶部已读的置顶话题
+- 支持按站点保存宽度、排序、周期、分类、筛选、刷新等偏好设置
+- 支持中文和英文界面文案，未知语言回退到英文
+
+## 已知可用站点
+
+以下站点已内置匹配规则，安装脚本后无需手动添加：
+
+| 站点 | 匹配规则 |
+| --- | --- |
+| [LINUX DO](https://linux.do/) | `https://linux.do/*` |
+| [NodeLoc](https://www.nodeloc.com/) | `https://www.nodeloc.com/*` |
+| [Chrultrabook Forum](https://forum.chrultrabook.com/) | `https://forum.chrultrabook.com/*` |
+| [OpenAI Community](https://community.openai.com/) | `https://community.openai.com/*` |
+
+其他 Discourse 论坛可以手动添加匹配规则后尝试使用。
 
 ## 安装
 
-先安装任一用户脚本管理器：
+先安装一个用户脚本管理器，三选一即可：
 
 - [Tampermonkey](https://www.tampermonkey.net/)
 - [Violentmonkey](https://violentmonkey.github.io/)
 - [ScriptCat / 脚本猫](https://scriptcat.org/)
 
-然后打开下面的直装链接：
+然后打开任一直装链接：
 
-[从 github 安装](https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js)
-[从 Greasy Fork 安装](https://update.greasyfork.org/scripts/579280/Discourse%20Sidebar%20Feed%20Panel.user.js)
-[从 脚本猫 安装](https://scriptcat.org/scripts/code/6360/Discourse%20Sidebar%20Feed%20Panel.user.js)
+- [从 GitHub 安装](https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js)
+- [从 Greasy Fork 安装](https://update.greasyfork.org/scripts/579280/Discourse%20Sidebar%20Feed%20Panel.user.js)
+- [从脚本猫安装](https://scriptcat.org/scripts/code/6360/Discourse%20Sidebar%20Feed%20Panel.user.js)
 
-脚本管理器会自动弹出安装页面，确认安装即可。
+脚本管理器会弹出安装页面，点击“安装”或“确认安装”。如果浏览器只是把 `.user.js` 当文本打开，通常是用户脚本管理器没有安装或没有启用。
 
-## 使用
+## 怎么打开
 
-安装后访问内置支持的网站，脚本会在页面加载完成后自动运行：
+1. 安装脚本后，刷新一个已知可用站点，例如 `https://linux.do/`。
+2. 确认浏览器右上角的用户脚本管理器里，这个脚本在当前站点是启用状态。
+3. 如果站点原生侧边栏被收起，先用站点自己的侧边栏按钮打开侧边栏。脚本只接管 Discourse 原生侧边栏，不会在没有侧边栏的位置创建独立面板。
+4. 看站点顶部 Logo 右侧，会出现一个小的双栏图标按钮。点击它即可切换到信息流面板。
+5. 按钮高亮表示信息流面板已开启；再点一次会恢复原生侧边栏。
 
-- `https://linux.do/*`
-- `https://www.nodeloc.com/*`
+开启状态会按站点保存。下次进入同一站点时，如果原生侧边栏存在，脚本会自动恢复信息流面板。
 
-要在其他 Discourse 论坛上使用，请在 Tampermonkey、Violentmonkey 或脚本猫的脚本设置中手动添加该论坛的 match/include，例如：
+## 基本使用
+
+信息流面板顶部从左到右通常包含：
+
+- 排序下拉：切换最新活动、最新发布、最多浏览、最多回复、最多点赞、楼主点赞等。
+- 周期下拉：在浏览、回复、点赞类排序下选择全部、每日、每周、每月、每季、每年。
+- 设置按钮：打开当前视图相关设置。
+- 刷新按钮：在顶部时刷新；滚动离开顶部后变成回到顶部；有新活动数量时点击会应用新活动。
+
+分类标签位于顶部控件下方：
+
+- “全部”显示当前排序下的全站话题。
+- 其他标签来自站点自己的导航分类，不会默认列出所有顶级分类。
+- 父分类标签会默认包含子分类话题。
+- 右侧更多按钮可展开分类/排序面板，并拖动分类调整显示顺序。
+
+筛选栏位于分类标签下方：
+
+- “全部”显示当前范围内所有话题。
+- “未读”只显示站点认为未读或未看的话题。
+- “已读”只显示站点认为已读的话题。
+- 具体可用筛选项取决于站点公开的 Discourse 能力。
+
+话题列表支持：
+
+- 点击话题标题进入原帖。
+- 滚动到底部自动加载更多，也可以点击底部“加载更多”。
+- 拖动侧边栏边缘调整宽度，宽度会按站点保存。
+
+## 设置说明
+
+设置按钮中的选项会根据当前排序变化。
+
+在“最新活动”视图中：
+
+- 新活动数量：在刷新按钮上显示当前板块范围内的新活动候选数量。
+- 隐藏置顶：只在加载首页时隐藏列表顶部已经读过的置顶话题；未读置顶仍会保留；加载更多和新活动队列不受影响。
+- 自动静默刷新：停留在顶部时自动应用新活动；滚动离开顶部后暂停插入，只累积候选。
+- 静默刷新间隔：单位为秒，`0` 表示收到候选后尽快应用。
+
+在非“最新活动”排序中：
+
+- 自动刷新：停留在顶部时按间隔重新拉取当前排序和筛选下的列表。
+- 自动刷新间隔：单位为秒，最小为 `1`。不建议设置过快，频繁请求可能触发站点速率限制。
+
+## 在其他 Discourse 论坛使用
+
+脚本只内置上面列出的站点。要在其他 Discourse 论坛上使用，需要在用户脚本管理器里为本脚本添加自定义匹配规则。
+
+匹配规则示例：
 
 ```text
-https://example.com/*
+https://forum.example.com/*
 ```
 
-第一期不会全网宽匹配，也不会自动检测任意网站是否为 Discourse。手动添加到非 Discourse 网站或不兼容论坛时，出错由用户自行处理。
+常见入口：
 
-侧边栏中的信息流面板提供：
+- Tampermonkey：管理面板 -> 找到本脚本 -> 设置 -> 用户匹配或 include/match -> 添加站点规则 -> 保存。
+- Violentmonkey：管理面板 -> 找到本脚本 -> 设置 -> 自定义匹配规则 -> 添加站点规则 -> 保存。
+- ScriptCat / 脚本猫：脚本管理 -> 找到本脚本 -> 设置 -> 匹配规则或用户匹配 -> 添加站点规则 -> 保存。
 
-- 排序切换
-- 分类标签
-- 已读/未读过滤
-- 刷新设置
-- 面板宽度调整
+添加后刷新目标论坛。如果站点是兼容的 Discourse 且有原生侧边栏，顶部 Logo 右侧会出现切换按钮。手动添加到非 Discourse 网站或不兼容论坛时，出错由用户自行处理。
 
-设置会按网站 origin 保存在浏览器的用户脚本存储中，刷新页面或重新打开网站后会自动恢复。旧版 LinuxDO 全局设置会在升级后迁移到 LinuxDO 站点设置，并删除旧 key。
+## 常见问题
+
+### 安装后没有变化
+
+- 确认当前网址是否命中脚本匹配规则。
+- 确认用户脚本管理器已启用，并且本脚本在当前站点没有被禁用。
+- 刷新页面，等待 Discourse 页面加载完成。
+- 确认站点原生侧边栏存在；移动端或很窄的窗口通常没有可接管的原生侧边栏。
+
+### 看不到双栏切换按钮
+
+按钮会插入到站点顶部 Logo 右侧。如果 Logo 区域没有加载、页面不是标准 Discourse 布局、脚本未匹配当前网址，按钮都不会出现。
+
+### 只有“全部”分类
+
+这通常表示站点没有向前端公开导航分类，或分类缓存还没刷新。可从用户脚本管理器菜单执行 `SFP: 清空分类和标签缓存`，或在控制台执行：
+
+```js
+SFPFeedPanel.clearCaches()
+```
+
+### 如何关闭
+
+点击顶部 Logo 右侧的双栏按钮即可恢复原生侧边栏。也可以在用户脚本管理器中禁用本脚本，或删除为某个站点手动添加的匹配规则。
 
 ## 限制
 
 - 只替换 Discourse 原生侧边栏；没有可用原生侧边栏的站点不会挂载独立信息流面板。
 - 分类标签依赖站点数据中的导航分类，不会默认展示所有顶级分类。
-- 脚本不提供站内启用/禁用菜单；是否运行由脚本管理器的 match/include 控制。
+- 脚本不提供站内启用/禁用菜单；是否运行由用户脚本管理器的 match/include 控制。
+- 手动匹配的站点需要自行承担兼容性风险。
 
 ## 权限说明
 
@@ -68,25 +161,22 @@ https://example.com/*
 - `GM_setValue`：保存用户设置
 - `GM_getValue`：读取用户设置
 - `GM_deleteValue`：迁移旧版 LinuxDO 全局设置后删除旧 key
+- `GM_registerMenuCommand`：提供清空分类和标签缓存的脚本管理器菜单
 - `unsafeWindow`：访问 Discourse 页面运行环境中的必要对象
 
-脚本匹配范围为：
+脚本内置匹配范围为：
 
 ```text
 https://linux.do/*
 https://www.nodeloc.com/*
+https://forum.chrultrabook.com/*
+https://community.openai.com/*
 ```
 
 ## 更新
 
-如果通过 GitHub Raw 链接安装，脚本管理器通常会自动检查更新。也可以在脚本管理器中手动检查更新。
+如果通过 GitHub Raw、Greasy Fork 或脚本猫安装，脚本管理器通常会自动检查更新。也可以在脚本管理器的管理面板里手动检查更新。
 
 ## 许可证
 
 MIT
-
-## 致谢
-
-[linux-do-timeline](https://linux.do/t/topic/1548156)
-[发个脚本的优化](https://linux.do/t/topic/1548771)
-[LINUX DO](https://linux.do/)
