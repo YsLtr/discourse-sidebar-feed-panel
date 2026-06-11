@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      2.0.2
+// @version      2.0.4
 // @description  将 Discourse 原生侧边栏改造为信息流面板，支持分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -15,6 +15,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
+// @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
 // @run-at       document-idle
 // @license      MIT
@@ -42,6 +43,7 @@
   const AUTO_SILENT_REFRESH_INTERVAL_KEY = "sfp_auto_silent_refresh_interval";
   const AUTO_REFRESH_ENABLED_KEY = "sfp_auto_refresh_enabled";
   const AUTO_REFRESH_INTERVAL_KEY = "sfp_auto_refresh_interval";
+  const CATEGORY_DATA_CACHE_KEY = "sfp_category_data_cache_v1";
   const TAG_STYLE_CACHE_KEY = "sfp_tag_style_cache_v1";
   const SITE_STORAGE_PREFIX = "sfp_site";
   const LEGACY_LINUXDO_ORIGIN = "https://linux.do";
@@ -61,6 +63,7 @@
     AUTO_SILENT_REFRESH_INTERVAL_KEY,
     AUTO_REFRESH_ENABLED_KEY,
     AUTO_REFRESH_INTERVAL_KEY,
+    CATEGORY_DATA_CACHE_KEY,
     TAG_STYLE_CACHE_KEY,
   ];
 
@@ -74,6 +77,10 @@
 
   function _setSiteValue(key, value) {
     GM_setValue(_siteStorageKey(key), value);
+  }
+
+  function _deleteSiteValue(key) {
+    if (typeof GM_deleteValue === "function") GM_deleteValue(_siteStorageKey(key));
   }
 
   function _deleteLegacyValue(key) {
@@ -119,6 +126,7 @@
   const AUTO_LOAD_MAX_REQUESTS_PER_WINDOW = 3;
   const AUTO_LOAD_MAX_EMPTY_FILTER_RESULTS = 3;
   const SETTINGS_BUTTON_SIZE = 28;
+  const CATEGORY_DATA_CACHE_VERSION = 1;
   const TAG_STYLE_CACHE_VERSION = 1;
 
   // ========== 全局状态 ==========
@@ -879,6 +887,122 @@
     return categoryMetaById.get(numericId) || null;
   }
 
+  function _cloneJsonArray(value) {
+    if (!Array.isArray(value)) return [];
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function _createCategoryDataCacheSource(site = {}, navigationCategories = []) {
+    return {
+      site: {
+        categories: _cloneJsonArray(site?.categories),
+        filters: _cloneJsonArray(site?.filters),
+        periods: _cloneJsonArray(site?.periods),
+        top_menu_items: _cloneJsonArray(site?.top_menu_items),
+        anonymous_top_menu_items: _cloneJsonArray(site?.anonymous_top_menu_items),
+        top_tags: _cloneJsonArray(site?.top_tags),
+        can_tag_topics: site?.can_tag_topics,
+        navigation_menu_categories: _cloneJsonArray(site?.navigation_menu_categories),
+        navigation_menu_site_categories: _cloneJsonArray(site?.navigation_menu_site_categories),
+        default_navigation_menu_categories: _cloneJsonArray(site?.default_navigation_menu_categories),
+        anonymous_default_navigation_menu_categories: _cloneJsonArray(site?.anonymous_default_navigation_menu_categories),
+        anonymous_sidebar_sections: _cloneJsonArray(site?.anonymous_sidebar_sections),
+        sidebar_sections: _cloneJsonArray(site?.sidebar_sections),
+        navigation_menu_sections: _cloneJsonArray(site?.navigation_menu_sections),
+      },
+      navigationCategories: _cloneJsonArray(navigationCategories),
+    };
+  }
+
+  function _applyCategoryDataSource(source, { primeSiteData = false } = {}) {
+    const site = source?.site || {};
+    const navigationCategories = Array.isArray(source?.navigationCategories) ? source.navigationCategories : [];
+    const categories = _mergeCategoryRecords(site?.categories, navigationCategories);
+    const rawById = new Map(categories.map((cat) => [Number(cat.id), cat]));
+
+    _updateSiteCapabilities(site);
+    categoryMetaById.clear();
+
+    categories.forEach((cat) => {
+      const id = Number(cat.id);
+      if (!Number.isFinite(id)) return;
+      const parent = cat.parent_category_id ? rawById.get(Number(cat.parent_category_id)) : null;
+      categoryMetaById.set(id, _normalizeCategoryMeta(cat, parent));
+    });
+
+    tabCategories = _buildTabCategories(site, navigationCategories, rawById);
+    _normalizeCurrentSiteState();
+    if (primeSiteData && !siteDataLoaded) {
+      siteDataCache = site;
+      siteDataLoaded = true;
+    }
+    categoryMetaLoaded = true;
+  }
+
+  function _loadCategoryDataCache() {
+    try {
+      const cache = _getSiteValue(CATEGORY_DATA_CACHE_KEY, null);
+      if (!cache || cache.version !== CATEGORY_DATA_CACHE_VERSION || !cache.source) return null;
+
+      const source = cache.source;
+      if (!source.site || !Array.isArray(source.site.categories) || !Array.isArray(source.navigationCategories)) {
+        return null;
+      }
+      return source;
+    } catch (e) {
+      console.warn("[SFP] load category data cache failed:", e);
+      return null;
+    }
+  }
+
+  function _saveCategoryDataCache(source) {
+    try {
+      _setSiteValue(CATEGORY_DATA_CACHE_KEY, {
+        version: CATEGORY_DATA_CACHE_VERSION,
+        savedAt: Date.now(),
+        source,
+      });
+    } catch (e) {
+      console.warn("[SFP] save category data cache failed:", e);
+    }
+  }
+
+  function _resetRuntimeCategoryData() {
+    categoryMetaPromise = null;
+    categoryMetaLoaded = false;
+    categoryMetaById.clear();
+    tabCategories = [];
+    siteDataPromise = null;
+    siteDataLoaded = false;
+    siteDataCache = null;
+    categoriesAndLatestPromise = null;
+    categoriesAndLatestLoaded = false;
+    categoriesAndLatestCache = null;
+  }
+
+  function _resetRuntimeTagStyleData() {
+    tagStylePromise = null;
+    tagStyleLoaded = false;
+    tagStyleByKey.clear();
+  }
+
+  function clearDataCaches({ reload = false } = {}) {
+    _deleteSiteValue(CATEGORY_DATA_CACHE_KEY);
+    _deleteSiteValue(TAG_STYLE_CACHE_KEY);
+    _resetRuntimeCategoryData();
+    _resetRuntimeTagStyleData();
+    console.info("[SFP] category data and tag style caches cleared");
+
+    if (reload && feedModeEnabled) {
+      _resetAutoLoadState();
+      loadTopics();
+    }
+  }
+
   function getCategoryTabMeta(cat) {
     const meta = _getCategoryMeta(cat.id);
     return {
@@ -1016,6 +1140,12 @@
 
     categoryMetaPromise = (async () => {
       try {
+        const cachedSource = _loadCategoryDataCache();
+        if (cachedSource) {
+          _applyCategoryDataSource(cachedSource, { primeSiteData: true });
+          return;
+        }
+
         const [siteResult, categoriesAndLatestResult] = await Promise.allSettled([
           loadSiteData(),
           loadCategoriesAndLatestData(),
@@ -1027,23 +1157,9 @@
         if (!site && !categoriesAndLatest) throw new Error("site category metadata unavailable");
 
         const navigationCategories = _categoryListCategories(categoriesAndLatest);
-        const categories = _mergeCategoryRecords(site?.categories, navigationCategories);
-        const rawById = new Map(categories.map((cat) => [Number(cat.id), cat]));
-
-        _updateSiteCapabilities(site || {});
-        categoryMetaById.clear();
-
-        categories.forEach((cat) => {
-          const id = Number(cat.id);
-          if (!Number.isFinite(id)) return;
-          const parent = cat.parent_category_id ? rawById.get(Number(cat.parent_category_id)) : null;
-          categoryMetaById.set(id, _normalizeCategoryMeta(cat, parent));
-        });
-
-        tabCategories = _buildTabCategories(site || {}, navigationCategories, rawById);
-        _normalizeCurrentSiteState();
-
-        categoryMetaLoaded = true;
+        const source = _createCategoryDataCacheSource(site || {}, navigationCategories);
+        _applyCategoryDataSource(source);
+        _saveCategoryDataCache(source);
       } catch (e) {
         console.warn("[SFP] load category metadata failed:", e);
         tabCategories = [];
@@ -4212,8 +4328,8 @@
     _syncHeadActionState();
 
     try {
-      _startTagStyleIndexLoad();
       await loadCategoryMetadata();
+      _startTagStyleIndexLoad();
       if (requestToken !== activeLoadToken) return;
       requestQuery = FeedQuery.snapshot();
       _resetAutoLoadState();
@@ -5197,11 +5313,27 @@
     return { start, stop };
   })();
 
+  function _setupCacheControlEntrypoints() {
+    if (typeof GM_registerMenuCommand === "function") {
+      GM_registerMenuCommand("SFP: 清空分类和标签缓存", () => clearDataCaches({ reload: true }));
+    }
+
+    try {
+      const targetWindow = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+      const api = targetWindow.SFPFeedPanel || {};
+      api.clearCaches = () => clearDataCaches({ reload: true });
+      targetWindow.SFPFeedPanel = api;
+    } catch (e) {
+      console.warn("[SFP] setup cache controls failed:", e);
+    }
+  }
+
   // ========== 初始化 ==========
   let globalHelpTooltip = null;
 
   function init() {
     injectStyles();
+    _setupCacheControlEntrypoints();
     _setupPageActivityTracking();
 
     globalHelpTooltip = document.createElement("div");
