@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      2.0.5
+// @version      2.1.0
 // @description  将 Discourse 原生侧边栏改造为信息流面板，支持分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -37,7 +37,7 @@
   const TAB_KEY = "sfp_current_tab";
   const TAB_ORDER_KEY = "sfp_tab_order";
   const FILTER_KEY = "sfp_current_filter";
-  const HIDE_PINNED_KEY = "sfp_hide_pinned";
+  const HIDE_PINNED_KEY = "sfp_activity_hide_pinned";
   const SHOW_INCOMING_HINT_KEY = "sfp_show_incoming_hint";
   const AUTO_SILENT_REFRESH_KEY = "sfp_auto_silent_refresh";
   const AUTO_SILENT_REFRESH_INTERVAL_KEY = "sfp_auto_silent_refresh_interval";
@@ -328,6 +328,7 @@
       incomingHintTip: "在刷新按钮中显示当前板块范围内的新活动候选数量。离开首屏时点击数量会先回到顶部，再应用这些候选。",
       autoSilentLabel: "自动静默刷新",
       autoSilentTip: "在最新活动视图且停留首屏时按间隔自动应用新话题；离开首屏后暂停，只累计候选。",
+      hidePinnedTip: "只在最新活动视图加载首页时，排除列表顶部已读的置顶话题。新活动队列和加载更多不会应用这个设置。",
       silentIntervalLabel: "静默刷新间隔",
       silentIntervalTip: "单位为秒，最小为 0。设为 0 时，有新活动会立即静默应用；大于 0 时按倒计时批量应用。",
       autoRefreshLabel: "自动刷新",
@@ -383,6 +384,7 @@
       incomingHintTip: "Show incoming candidates for the current category scope in the refresh button. Away from the head, clicking the count returns to the top before applying them.",
       autoSilentLabel: "Auto silent refresh",
       autoSilentTip: "In the latest activity view, automatically apply incoming topics while the feed is at the head. Away from the head, pause applying and keep accumulating candidates.",
+      hidePinnedTip: "Only in the latest activity view, exclude read pinned topics at the top when loading the first page. Incoming topics and load more are not affected.",
       silentIntervalLabel: "Silent interval",
       silentIntervalTip: "Seconds. Minimum 0. With 0, incoming activity is applied immediately; otherwise candidates are batched by countdown.",
       autoRefreshLabel: "Auto refresh",
@@ -840,7 +842,6 @@
       currentOrder,
       currentPeriod,
       currentFilter,
-      hidePinned,
     });
   }
 
@@ -2910,6 +2911,10 @@
           ${_buildSettingLabelHtml(t("incomingHintLabel"), t("incomingHintTip"))}
           <input type="checkbox" class="sfp-incoming-hint-input"${showIncomingHint ? " checked" : ""}>
         </div>
+        <div class="sfp-setting-row sfp-hide-pinned-row">
+          ${_buildSettingLabelHtml(t("hidePinned"), t("hidePinnedTip"))}
+          <input type="checkbox" class="sfp-hide-pinned-input"${hidePinned ? " checked" : ""}>
+        </div>
         <div class="sfp-setting-row sfp-auto-silent-row">
           ${_buildSettingLabelHtml(t("autoSilentLabel"), t("autoSilentTip"))}
           <input type="checkbox" class="sfp-auto-silent-input"${autoSilentRefreshEnabled ? " checked" : ""}>
@@ -3003,6 +3008,17 @@
       });
     }
 
+    const hidePinnedInput = panel.querySelector(".sfp-hide-pinned-input");
+    if (hidePinnedInput) {
+      _bindCheckboxSetting(hidePinnedInput, (checked) => {
+        hidePinned = checked;
+        _setSiteValue(HIDE_PINNED_KEY, hidePinned);
+        _syncSettingsPanelState(wrapper);
+        _resetAutoLoadState();
+        loadTopics();
+      });
+    }
+
     const autoSilentInput = panel.querySelector(".sfp-auto-silent-input");
     const silentIntervalInput = panel.querySelector(".sfp-auto-silent-refresh-interval-input");
     if (autoSilentInput) {
@@ -3075,6 +3091,7 @@
     if (!panel) return;
 
     const incomingHintInput = panel.querySelector(".sfp-incoming-hint-input");
+    const hidePinnedInput = panel.querySelector(".sfp-hide-pinned-input");
     const autoSilentInput = panel.querySelector(".sfp-auto-silent-input");
     const autoSilentRow = panel.querySelector(".sfp-auto-silent-row");
     const autoSilentIntervalRow = panel.querySelector(".sfp-auto-silent-interval");
@@ -3082,6 +3099,7 @@
     const autoRefreshIntervalRow = panel.querySelector(".sfp-auto-refresh-interval");
 
     if (incomingHintInput) incomingHintInput.checked = showIncomingHint;
+    if (hidePinnedInput) hidePinnedInput.checked = hidePinned;
     if (autoSilentInput) autoSilentInput.checked = autoSilentRefreshEnabled;
     if (autoRefreshInput) autoRefreshInput.checked = autoRefreshEnabled;
 
@@ -3424,43 +3442,21 @@
       bar.appendChild(item);
     });
 
-    // 分隔
-    const sep = document.createElement("span");
-    sep.style.cssText = "color:var(--primary-low,#ddd);margin:0 2px;";
-    sep.textContent = "|";
-    bar.appendChild(sep);
-
-    // 隐藏置顶开关
-    const pinnedToggle = document.createElement("span");
-    pinnedToggle.className = "sfp-filter-item" + (hidePinned ? " active" : "");
-    pinnedToggle.dataset.filter = "hide-pinned";
-    pinnedToggle.textContent = t("hidePinned");
-    bar.appendChild(pinnedToggle);
-
     bar.addEventListener("click", (e) => {
       const item = e.target.closest(".sfp-filter-item");
       if (!item) return;
 
       const filterVal = item.dataset.filter;
-      if (filterVal === "hide-pinned") {
-        hidePinned = !hidePinned;
-        _setSiteValue(HIDE_PINNED_KEY, hidePinned);
-        item.classList.toggle("active", hidePinned);
-        _resetAutoLoadState();
-        renderTopics();
-        return;
-      } else {
-        if (filterVal === currentFilter) return;
-        currentFilter = filterVal;
-        _setSiteValue(FILTER_KEY, currentFilter);
-        _beginSidebarIncomingViewSettling();
-        _syncDefaultViewControls();
-        _resetAutoLoadState();
-        bar.querySelectorAll(".sfp-filter-item[data-filter]:not([data-filter=\"hide-pinned\"])").forEach((i) => i.classList.remove("active"));
-        item.classList.add("active");
-        renderTopics();
-        _finishSidebarIncomingViewSettling();
-      }
+      if (filterVal === currentFilter) return;
+      currentFilter = filterVal;
+      _setSiteValue(FILTER_KEY, currentFilter);
+      _beginSidebarIncomingViewSettling();
+      _syncDefaultViewControls();
+      _resetAutoLoadState();
+      bar.querySelectorAll(".sfp-filter-item[data-filter]").forEach((i) => i.classList.remove("active"));
+      item.classList.add("active");
+      renderTopics();
+      _finishSidebarIncomingViewSettling();
     });
 
     return bar;
@@ -4077,7 +4073,7 @@
   }
 
   function _incomingLoadTopicLimit() {
-    return Math.max(1, topicPageSize || 30);
+    return Math.max(1, topicPageSize);
   }
 
   function _removeSidebarIncomingTopicIds(topicIds) {
@@ -4205,7 +4201,6 @@
         order: currentOrder,
         period: currentPeriod,
         filter: currentFilter,
-        hidePinned,
       };
     },
 
@@ -4218,7 +4213,6 @@
         query.order,
         query.period,
         query.filter,
-        query.hidePinned ? "hide-pinned" : "show-pinned",
       ].join("|");
     },
 
@@ -4289,6 +4283,29 @@
     return resp.json();
   }
 
+  function _shouldExcludeTopReadPinnedTopics(query, page) {
+    return hidePinned && page === 0 && _isLatestActivityView(query);
+  }
+
+  function _excludeTopReadPinnedTopics(topics, query, page) {
+    if (!_shouldExcludeTopReadPinnedTopics(query, page) || !Array.isArray(topics)) {
+      return topics;
+    }
+
+    let firstNonPinnedIndex = 0;
+    while (firstNonPinnedIndex < topics.length && _isPinnedTopic(topics[firstNonPinnedIndex])) {
+      firstNonPinnedIndex++;
+    }
+
+    if (firstNonPinnedIndex === 0) return topics;
+
+    const topPinnedTopics = topics.slice(0, firstNonPinnedIndex);
+    const visibleTopPinnedTopics = topPinnedTopics.filter((topic) => _hasUnreadMarker(topic));
+    if (visibleTopPinnedTopics.length === topPinnedTopics.length) return topics;
+
+    return visibleTopPinnedTopics.concat(topics.slice(firstNonPinnedIndex));
+  }
+
   function _needsPeriodForUrl(order) {
     return ["views", "posts", "likes", "op_likes"].includes(order);
   }
@@ -4353,8 +4370,9 @@
       _processUsers(data);
 
       if (data?.topic_list?.topics) {
-        const topics = data.topic_list.topics;
-        if (topics.length > 0) topicPageSize = topics.length;
+        const rawTopics = data.topic_list.topics;
+        const topics = _excludeTopReadPinnedTopics(rawTopics, requestQuery, 0);
+        topicPageSize = rawTopics.length;
         topics.forEach((t) => loadedTopicIds.add(t.id));
         allTopics = topics;
         hasMorePages = !!data.topic_list.more_topics_url;
@@ -4414,7 +4432,6 @@
 
       if (data?.topic_list?.topics) {
         const topics = data.topic_list.topics;
-        if (topics.length > 0) topicPageSize = Math.max(topicPageSize, topics.length);
         currentPage++;
         const newTopics = topics.filter((t) => {
           if (loadedTopicIds.has(t.id)) return false;
@@ -4525,7 +4542,7 @@
   }
 
   function _residentTopicLimit() {
-    return Math.max(1, topicPageSize || 30) * (Math.max(0, currentPage) + 1);
+    return Math.max(1, topicPageSize) * (Math.max(0, currentPage) + 1);
   }
 
   function _resetLoadedFeedDepth() {
@@ -4575,7 +4592,6 @@
     const topicMap = new Map(topics.map((topic) => [topic.id, topic]));
     let highlightTopicIds = [];
     if (resetFeedDepth) _resetLoadedFeedDepth();
-    if (topics.length > 0) topicPageSize = Math.max(topicPageSize, topics.length);
 
     if (mode === "replace-head") {
       highlightTopicIds = topics
@@ -4586,7 +4602,7 @@
     } else {
       highlightTopicIds = topics.map((topic) => topic.id);
       allTopics = topics.concat(allTopics.filter((topic) => !topicMap.has(topic.id)));
-      if (resetFeedDepth) hasMorePages = allTopics.length >= Math.max(1, topicPageSize || 30);
+      if (resetFeedDepth) hasMorePages = allTopics.length >= Math.max(1, topicPageSize);
     }
 
     topics.forEach((topic) => loadedTopicIds.add(topic.id));
@@ -4622,8 +4638,9 @@
       _processUsers(data);
 
       if (!data?.topic_list?.topics) return false;
+      const topics = _excludeTopReadPinnedTopics(data.topic_list.topics, requestQuery, 0);
 
-      return _mergeAndRenderTopics(data.topic_list.topics, {
+      return _mergeAndRenderTopics(topics, {
         mode: "replace-head",
         moreTopicsUrl: data.topic_list.more_topics_url,
         clearIncomingForQuery: requestQuery,
@@ -4861,6 +4878,7 @@
 
     if (allTopics.length === 0) {
       feedListEl.innerHTML = `<div class="sfp-empty">${escapeHtml(t("emptyTopics"))}</div>`;
+      _renderPaginationFooter();
       _syncHeadActionState();
       return;
     }
@@ -4898,6 +4916,10 @@
   function _topicBaseUrl(topic) {
     const slug = topic.slug || "topic";
     return `/t/${slug}/${topic.id}`;
+  }
+
+  function _isPinnedTopic(topic) {
+    return !!(topic && (topic.pinned || topic.pinned_globally));
   }
 
   function _hasLastReadPostNumber(topic) {
@@ -4957,12 +4979,9 @@
 
   // 未读/已读筛选复用 _isTopicRead，避免和渲染、点击后本地 patch 的语义分叉。
   function _applyFilter(topics) {
-    if (!hidePinned && currentFilter === "all") return topics;
+    if (currentFilter === "all") return topics;
 
     let result = topics;
-    if (hidePinned) {
-      result = result.filter((t) => !t.pinned && !t.pinned_globally);
-    }
     if (currentFilter === "unseen") {
       result = result.filter((t) => _hasUnreadMarker(t));
     }
