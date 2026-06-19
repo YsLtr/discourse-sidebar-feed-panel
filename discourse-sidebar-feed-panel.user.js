@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      2.1.0
+// @version      2.1.1
 // @description  将 Discourse 原生侧边栏改造为信息流面板，支持分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -524,6 +524,25 @@
       }
     }
     check();
+  }
+
+  function waitForStableHeaderMount(callback) {
+    waitForEmber(() => {
+      const run = () => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            callback();
+          });
+        });
+      };
+
+      if (document.readyState === "complete") {
+        run();
+        return;
+      }
+
+      window.addEventListener("load", run, { once: true });
+    });
   }
 
   // ========== 站点数据 / 分类 ==========
@@ -5372,7 +5391,7 @@
     globalHelpTooltip.style.display = "none";
     document.body.appendChild(globalHelpTooltip);
 
-    waitForEmber(() => {
+    waitForStableHeaderMount(() => {
       createToggle();
 
       RouteWatcher.start();
