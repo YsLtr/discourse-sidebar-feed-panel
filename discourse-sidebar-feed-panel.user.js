@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      2.1.1
+// @version      2.1.2
 // @description  将 Discourse 原生侧边栏改造为信息流面板，支持分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -3188,8 +3188,13 @@
   function _syncRefreshButtonBusy() {
     if (!feedRefreshBtn) return;
     const isBusy = refreshBusyCount > 0;
+    const wasBusy = feedRefreshBtn.classList.contains("spinning");
     feedRefreshBtn.classList.toggle("spinning", isBusy);
     feedRefreshBtn.setAttribute("aria-busy", isBusy ? "true" : "false");
+    // busy 状态翻转时重同步头部按钮：旋转期间保持刷新图标，结束后再切换回箭头形态。
+    if (wasBusy !== isBusy) {
+      _scheduleHeadActionStateSync();
+    }
   }
 
   function _resetRefreshButtonBusy() {
@@ -3576,9 +3581,11 @@
 
     const isAtHead = _isAtFeedHead();
     const isAway = isAtHead ? false : (lastHeadActionAwayState === true || _isAwayFromHead());
+    // 刷新旋转期间不切换成箭头形态，避免箭头跟着旋转；结束后由 busy 翻转触发的重同步再切换。
+    const isBusy = refreshBusyCount > 0;
     const incomingCount = _getIncomingCountDisplayValue();
     const showsCount = incomingCount > 0;
-    const nextAction = showsCount ? "incoming" : (isAway ? "back-top" : "refresh");
+    const nextAction = showsCount ? "incoming" : (isAway && !isBusy ? "back-top" : "refresh");
     const currentAction = feedRefreshBtn.dataset.action || "";
     const nextIncomingCount = showsCount ? String(incomingCount) : "";
     const shouldUpdateActionHtml =
@@ -3586,10 +3593,10 @@
       (showsCount && feedRefreshBtn.dataset.incomingCount !== nextIncomingCount);
     const nextTitle = showsCount
       ? t("applyIncoming", { count: incomingCount })
-      : (isAway ? t("backToTop") : t("refresh"));
+      : (nextAction === "back-top" ? t("backToTop") : t("refresh"));
     const nextHtml = showsCount
       ? `<span class="sfp-refresh-count">${escapeHtml(_formatIncomingCount(incomingCount))}</span>`
-      : (isAway ? _backTopIconHtml() : _refreshIconHtml());
+      : (nextAction === "back-top" ? _backTopIconHtml() : _refreshIconHtml());
 
     feedRefreshBtn.classList.toggle("sfp-away-from-head", isAway);
     feedRefreshBtn.classList.toggle("sfp-has-incoming-count", showsCount);
@@ -3607,6 +3614,10 @@
     }
     if (shouldUpdateActionHtml) {
       feedRefreshBtn.innerHTML = nextHtml;
+      // 箭头实际显示时才播放入场动画；旋转期间被抑制的切换会在刷新结束后补播。
+      if (nextAction === "back-top") {
+        _playBackTopEnterAnimation();
+      }
     }
     if (nextAction !== "back-top") {
       feedRefreshBtn.classList.remove("sfp-back-top-enter");
@@ -3618,7 +3629,6 @@
       if (isAway) {
         _stopAutoRefresh();
         _stopAutoSilentRefresh();
-        if (!showsCount) _playBackTopEnterAnimation();
       } else if (restartAuto && isAtHead) {
         _restartAutomaticRefreshTimers();
       }
