@@ -16,6 +16,7 @@ Current version: `2.1.0`
 - Supports drag resizing for the sidebar
 - Supports incoming activity count, return to top, manual refresh, automatic silent refresh, and ordinary automatic refresh
 - Supports hiding read pinned topics at the top of the Latest activity first page
+- Compares lists on refresh; topics that vanish because they were unlisted, hidden, or deleted stay in place with an "Unavailable" badge so you can check them yourself
 - Stores width, order, period, category, filter, and refresh preferences per site origin
 - Supports Chinese and English UI text, with English fallback for unknown languages
 
@@ -141,6 +142,12 @@ This usually means the site did not expose navigation categories to the frontend
 ```js
 SFPFeedPanel.clearCaches()
 ```
+
+### What is the "Unavailable" badge on a topic?
+
+On each refresh the feed compares the new list with the previous one. A topic that should still be inside the current list window but is no longer returned by the server stays in place and gets an "Unavailable" badge. This usually means it was unlisted (for example temporarily hidden after community flags), deleted, or moved into a restricted category; click the topic to check what actually happened.
+
+Badged topics do not consume the regular retention quota and stay in place; they are removed once the count of topics newly entering the list exceeds the current retention count, and a full reload (switching category, order, or filter) also clears them. Topics that simply sink down the list do not trigger the badge.
 
 ### How do I turn it off?
 

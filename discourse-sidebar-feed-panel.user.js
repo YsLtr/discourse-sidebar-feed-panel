@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      2.1.2
+// @version      2.2.0
 // @description  将 Discourse 原生侧边栏改造为信息流面板，支持分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -194,6 +194,10 @@
   let sidebarMessageBus = null;
   let sidebarLatestMessageBusCallback = null;
   let sidebarNewMessageBusCallback = null;
+  // 话题删除/恢复生命周期跟踪与 incoming 跟踪相互独立：incoming 只在最新活动
+  // 视图启用，而 /delete 等事件对任何排序视图都值得即时标记。
+  let sidebarLifecycleMessageBus = null;
+  let sidebarLifecycleMessageBusCallback = null;
   let activeLoadToken = 0;
   let activeLoadMoreToken = 0;
   let activeRefreshToken = 0;
@@ -354,6 +358,8 @@
       backToTop: "回到顶部",
       hot: "热门",
       pinned: "已置顶",
+      topicUnavailable: "话题异常",
+      topicUnavailableTip: "此话题已从服务器列表中消失，可能被取消公开、隐藏或删除。点击可自行确认实际情况。",
       closedTitle: "此话题已被关闭；不再接受新回复",
       loadMore: "加载更多",
       noMore: "— 已经到底了 —",
@@ -410,6 +416,8 @@
       backToTop: "Back to top",
       hot: "Hot",
       pinned: "Pinned",
+      topicUnavailable: "Unavailable",
+      topicUnavailableTip: "This topic disappeared from the server list; it may be unlisted, hidden, or deleted. Click to check what happened.",
       closedTitle: "This topic is closed; it no longer accepts replies",
       loadMore: "Load more",
       noMore: "No more topics",
@@ -2141,6 +2149,9 @@
         opacity: 0.48;
         filter: grayscale(0.85);
       }
+      .sfp-topic-item.sfp-topic-unavailable {
+        opacity: 0.62;
+      }
       .sfp-topic-item.sfp-topic-unavailable .sfp-topic-title-line {
         text-decoration: line-through;
       }
@@ -2318,6 +2329,11 @@
         --badge-accent: var(--primary-medium);
         --badge-bg: var(--primary-very-low);
         --badge-border: var(--primary-low);
+      }
+      .sfp-topic-item .topic-status-card.--unavailable {
+        --badge-accent: var(--danger);
+        --badge-bg: var(--danger-low, var(--d-hover, var(--tertiary-low)));
+        --badge-border: color-mix(in srgb, var(--danger) 28%, transparent);
       }
       .sfp-topic-item .topic-status-card__name {
         color: var(--badge-accent);
@@ -2733,6 +2749,7 @@
       sidebar.classList.add("sfp-feed-mode");
       animateSidebarWidth(sfpSidebarWidth);
       setupResizer();
+      _startSidebarTopicLifecycleTracking();
       _syncDefaultViewControls();
       _syncIncomingHeadAction();
       _syncHeadActionState();
@@ -2798,6 +2815,7 @@
 
     // 无限滚动
     _setupScrollLoadMore();
+    _startSidebarTopicLifecycleTracking();
   }
 
   function deactivateFeed() {
@@ -2820,6 +2838,7 @@
     _stopAutoRefresh();
     _stopAutoSilentRefresh();
     _stopSidebarIncomingTracking();
+    _stopSidebarTopicLifecycleTracking();
     _resetRefreshButtonBusy();
     feedRefreshBtn?.classList.remove("sfp-back-top-enter");
 
@@ -4010,6 +4029,58 @@
     _clearSidebarIncomingCandidates();
   }
 
+  // ========== 话题删除/恢复即时标记 ==========
+  // Discourse 的 /delete（软删除）、/destroy（彻底删除）无条件广播，
+  // /recover 对应恢复；开启 experimental_topic_category_change_notification
+  // 的站点还会对 unlist/relist 复用这两个频道。默认站点手动 unlist 和
+  // 举报隐藏不广播，只能靠刷新时的凭空消失检测兜底，两条路径互补。
+  function _startSidebarTopicLifecycleTracking() {
+    if (!feedModeEnabled) return;
+    if (sidebarLifecycleMessageBusCallback) return;
+
+    const messageBus = getMessageBus();
+    if (!messageBus?.subscribe) {
+      // 无 message-bus 时静默降级：仅刷新检测仍可工作。
+      return;
+    }
+
+    sidebarLifecycleMessageBus = messageBus;
+    sidebarLifecycleMessageBusCallback = (data) => _handleSidebarTopicLifecycleMessage(data);
+    messageBus.subscribe("/delete", sidebarLifecycleMessageBusCallback, _getMessageBusLastId(messageBus, "/delete"));
+    messageBus.subscribe("/recover", sidebarLifecycleMessageBusCallback, _getMessageBusLastId(messageBus, "/recover"));
+    messageBus.subscribe("/destroy", sidebarLifecycleMessageBusCallback, _getMessageBusLastId(messageBus, "/destroy"));
+  }
+
+  function _stopSidebarTopicLifecycleTracking() {
+    if (sidebarLifecycleMessageBus?.unsubscribe && sidebarLifecycleMessageBusCallback) {
+      sidebarLifecycleMessageBus.unsubscribe("/delete", sidebarLifecycleMessageBusCallback);
+      sidebarLifecycleMessageBus.unsubscribe("/recover", sidebarLifecycleMessageBusCallback);
+      sidebarLifecycleMessageBus.unsubscribe("/destroy", sidebarLifecycleMessageBusCallback);
+    }
+    sidebarLifecycleMessageBus = null;
+    sidebarLifecycleMessageBusCallback = null;
+  }
+
+  function _handleSidebarTopicLifecycleMessage(data) {
+    if (!data?.topic_id) return;
+    const topicId = Number(data.topic_id);
+    if (!Number.isFinite(topicId)) return;
+
+    const topic = allTopics.find((candidate) => Number(candidate.id) === topicId);
+    if (data.message_type === "recover") {
+      if (!topic?.sfpUnavailable) return;
+      topic.sfpUnavailable = false;
+      delete topic.sfpUnavailablePushed;
+      if (feedListEl) renderTopics();
+      return;
+    }
+
+    if (data.message_type !== "delete" && data.message_type !== "destroy") return;
+    if (!topic || topic.sfpUnavailable) return;
+    _markTopicUnavailable(topic);
+    if (feedListEl) renderTopics();
+  }
+
   function _handleSidebarIncomingMessage(data) {
     if (!data || !["latest", "new_topic"].includes(data.message_type)) return;
     if (!data.topic_id) return;
@@ -4580,9 +4651,27 @@
 
   function _trimResidentTopicsAfterRefresh() {
     const keepCount = _residentTopicLimit();
-    if (allTopics.length <= keepCount) return false;
 
-    const trimmedTopics = allTopics.splice(keepCount);
+    // 异常话题停留在原位置，既不占用保留名额也不参与裁剪；它随刷新
+    // 逐渐被新内容推到下方，直到全量刷新或超出异常保留上限才清除。
+    const retainedTopics = [];
+    const trimmedTopics = [];
+    let keptCount = 0;
+    for (const topic of allTopics) {
+      if (topic?.sfpUnavailable) {
+        retainedTopics.push(topic);
+        continue;
+      }
+      if (keptCount < keepCount) {
+        retainedTopics.push(topic);
+        keptCount++;
+      } else {
+        trimmedTopics.push(topic);
+      }
+    }
+    if (trimmedTopics.length === 0) return false;
+
+    allTopics = retainedTopics;
     trimmedTopics.forEach((topic) => loadedTopicIds.delete(topic.id));
     _rebuildUsersMapForResidentTopics();
     return true;
@@ -4634,7 +4723,12 @@
       if (resetFeedDepth) hasMorePages = allTopics.length >= Math.max(1, topicPageSize);
     }
 
+    const newEntrantCount = topics.reduce(
+      (count, topic) => (loadedTopicIds.has(topic.id) ? count : count + 1),
+      0
+    );
     topics.forEach((topic) => loadedTopicIds.add(topic.id));
+    if (newEntrantCount > 0) _expireUnavailableTopicsByPush(newEntrantCount);
     _trimResidentTopicsAfterRefresh();
 
     const scrollAnchor = _captureFeedScrollAnchor();
@@ -4667,6 +4761,9 @@
       _processUsers(data);
 
       if (!data?.topic_list?.topics) return false;
+      // 先用未经本地处理的原始 page-0 与旧数据比对，标记凭空消失的话题，
+      // 再走合并渲染；被标记的旧条目会在合并的 retained 尾部保留下来。
+      _detectVanishedHeadTopics(data.topic_list.topics, requestQuery);
       const topics = _excludeTopReadPinnedTopics(data.topic_list.topics, requestQuery, 0);
 
       return _mergeAndRenderTopics(topics, {
@@ -4877,6 +4974,9 @@
     if (topic.pinned || topic.pinned_globally) {
       statusBadges.push(`<span class="topic-status-card --pinned"><svg class="fa d-icon d-icon-thumbtack svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#thumbtack"></use></svg><p class="topic-status-card__name">${escapeHtml(t("pinned"))}</p></span>`);
     }
+    if (_isTopicUnavailable(topic)) {
+      statusBadges.push(`<span class="topic-status-card --unavailable" title="${escapeAttr(t("topicUnavailableTip"))}">${_svgIcon("far-eye-slash")}<p class="topic-status-card__name">${escapeHtml(t("topicUnavailable"))}</p></span>`);
+    }
     return statusBadges.length
       ? `<span class="sfp-topic-status-badges">${statusBadges.join("")}</span>`
       : "";
@@ -4890,13 +4990,115 @@
     return `${timeStr}${unreadDotHtml}`;
   }
 
-  function _isTopicExplicitlyUnavailable(topic) {
-    return !!topic && (
-      topic.deleted_at ||
-      topic.deleted ||
-      topic.hidden ||
-      topic.visible === false
+  // “话题异常”只由本地消失检测和 message-bus 生命周期事件标记，不读
+  // 列表 JSON 的 visible/deleted 等字段：staff 的列表会正常返回
+  // visible:false 的话题，那不是消失，不应打异常标。
+  function _isTopicUnavailable(topic) {
+    return !!topic?.sfpUnavailable;
+  }
+
+  function _markTopicUnavailable(topic) {
+    if (!topic || topic.sfpUnavailable) return false;
+    topic.sfpUnavailable = true;
+    topic.sfpUnavailablePushed = 0;
+    return true;
+  }
+
+  // 异常话题的淘汰以“新返回条数”为基准：每次合并把真正新进入列表的
+  // 条数累加到每个异常话题上，相当于它被新内容压下去的深度；累计达到
+  // 当前保留话题数目（_residentTopicLimit，由首页条数和加载深度得出）
+  // 时移除。早标记的话题累计更深、先过期，天然按 FIFO 清出。
+  function _expireUnavailableTopicsByPush(newEntrantCount) {
+    if (newEntrantCount <= 0) return;
+
+    const keepCount = _residentTopicLimit();
+    const expiredIds = new Set();
+    for (const topic of allTopics) {
+      if (!topic?.sfpUnavailable) continue;
+      topic.sfpUnavailablePushed = (topic.sfpUnavailablePushed || 0) + newEntrantCount;
+      if (topic.sfpUnavailablePushed >= keepCount) expiredIds.add(topic.id);
+    }
+    if (expiredIds.size === 0) return;
+
+    allTopics = allTopics.filter((topic) => !expiredIds.has(topic.id));
+    expiredIds.forEach((topicId) => loadedTopicIds.delete(topicId));
+    _rebuildUsersMapForResidentTopics();
+  }
+
+  // 各排序视图在服务端的排序键。凭空消失检测用它比较“本应仍在
+  // page-0 窗口内的话题是否被更旧的条目顶替”：activity/created 是时间，
+  // 其余是列表 JSON 的计数字段（op_like_count 仅出现在列表序列化中）。
+  function _feedSortKeyValue(topic, order) {
+    if (!topic) return null;
+    switch (order) {
+      case "created": {
+        const created = Date.parse(topic.created_at || "");
+        return Number.isFinite(created) ? created : null;
+      }
+      case "views":
+        return Number.isFinite(topic.views) ? topic.views : null;
+      case "posts":
+        return Number.isFinite(topic.posts_count) ? topic.posts_count : null;
+      case "likes":
+        return Number.isFinite(topic.like_count) ? topic.like_count : null;
+      case "op_likes":
+        return Number.isFinite(topic.op_like_count) ? topic.op_like_count : null;
+      case "activity":
+      default: {
+        const bumped = Date.parse(topic.bumped_at || "");
+        return Number.isFinite(bumped) ? bumped : null;
+      }
+    }
+  }
+
+  // 与上一次的 page-0 数据比较，找出“凭空消失”的话题并标记为异常：
+  // 本应仍在窗口内（排序键比新 page-0 中最旧的非置顶话题还新），却
+  // 不再被服务端返回。只做本地比对，不发请求确认具体状态。
+  // - 自然下沉：被更新的话题挤出窗口，排序键不会超过窗口内最旧值；
+  // - 超出保留数被裁：trim 发生在检测之后，候选取自裁剪前的数据；
+  // - 置顶话题：Discourse 只在 activity/default 排序让置顶浮动到顶部
+  //   （lib/topic_query.rb apply_pinning），这些排序里置顶话题可能只是
+  //   被解除置顶而合法离开窗口，候选和见证都要跳过；其余排序置顶按
+  //   正常位次参与比较。
+  function _detectVanishedHeadTopics(rawTopics, query) {
+    if (!Array.isArray(rawTopics) || rawTopics.length === 0) return;
+    if (allTopics.length === 0) return;
+    // 周期榜（top.json?period=...）按“周期内有活动”过滤成员，话题可能
+    // 只因活动滚出周期而离开窗口，排序键比较会误标，因此只在 period=all
+    // 的纯排序（latest.json?order=...）上检测。
+    if (_needsPeriodForUrl(query.order) && query.period !== "all") return;
+
+    const pinnedFloats = !query.order || ["activity", "default"].includes(query.order);
+    const newTopicIds = new Set(
+      rawTopics.map((topic) => Number(topic?.id)).filter(Number.isFinite)
     );
+
+    let windowMinKeyValue = null;
+    for (const topic of rawTopics) {
+      if (pinnedFloats && (topic?.pinned || topic?.pinned_globally)) continue;
+      const keyValue = _feedSortKeyValue(topic, query.order);
+      if (keyValue === null) continue;
+      if (windowMinKeyValue === null || keyValue < windowMinKeyValue) {
+        windowMinKeyValue = keyValue;
+      }
+    }
+    // 窗口内没有可比较的话题时无法判断，宁可漏报也不误标。
+    if (windowMinKeyValue === null) return;
+
+    // 只检查上一次 page-0 窗口内的条目；加载更多拉进来的深页条目
+    // 本来就不在 page-0 语义内，缺失是正常现象。
+    const candidateWindow = Math.min(rawTopics.length, allTopics.length);
+    for (let index = 0; index < candidateWindow; index++) {
+      const topic = allTopics[index];
+      if (!topic || newTopicIds.has(Number(topic.id))) continue;
+      if (pinnedFloats && (topic.pinned || topic.pinned_globally)) continue;
+      if (topic.sfpUnavailable) continue;
+      const keyValue = _feedSortKeyValue(topic, query.order);
+      // 排序键相同（同一秒/同一计数）时顺序不确定，只用严格更新的
+      // 键做判断，避免误标。
+      if (keyValue === null || keyValue <= windowMinKeyValue) continue;
+      _markTopicUnavailable(topic);
+    }
   }
 
   // ========== 渲染 ==========
@@ -5077,6 +5279,9 @@
     }
     if (_isTopicRead(topic)) {
       item.classList.add("sfp-read");
+    }
+    if (_isTopicUnavailable(topic)) {
+      item.classList.add("sfp-topic-unavailable");
     }
     if (isNew) {
       _triggerTopicHighlight(item);
