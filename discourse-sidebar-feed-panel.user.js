@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      2.2.0
+// @version      2.2.1
 // @description  将 Discourse 原生侧边栏改造为信息流面板，支持分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -4695,6 +4695,7 @@
     filterTopic = null,
     clearIncomingForQuery = null,
     resetFeedDepth = true,
+    sortQuery = null,
   } = {}) {
     const shouldFilterTopics = mode !== "replace-head" && typeof filterTopic === "function";
     const topics = shouldFilterTopics
@@ -4716,6 +4717,8 @@
         .filter((topic) => !loadedTopicIds.has(topic.id))
         .map((topic) => topic.id);
       allTopics = topics.concat(allTopics.filter((topic) => !topicMap.has(topic.id)));
+      // 异常话题按排序键插回原位次，避免被整段新鲜 page-0 压出首屏。
+      if (sortQuery) _interleaveUnavailableTopicsBySortKey(sortQuery, topics.length);
       hasMorePages = !!moreTopicsUrl;
     } else {
       highlightTopicIds = topics.map((topic) => topic.id);
@@ -4771,6 +4774,7 @@
         moreTopicsUrl: data.topic_list.more_topics_url,
         clearIncomingForQuery: requestQuery,
         resetFeedDepth: true,
+        sortQuery: requestQuery,
       });
     } catch (e) {
       console.warn(`[SFP] ${logPrefix} error:`, e);
@@ -5048,6 +5052,43 @@
         const bumped = Date.parse(topic.bumped_at || "");
         return Number.isFinite(bumped) ? bumped : null;
       }
+    }
+  }
+
+  // replace-head 合并会把整段新鲜 page-0 拼在头部，被标记的异常话题若
+  // 任其留在 retained 尾部，即使两次刷新之间只有少量新内容，也会被压
+  // 到首屏之外看不见。这里按排序键把异常话题插回其应有位次（夹在老
+  // 邻居之间），维持“保留在原位置”的可见性。
+  function _interleaveUnavailableTopicsBySortKey(query, freshLength) {
+    if (allTopics.length <= freshLength) return;
+
+    const anomalies = [];
+    for (let index = allTopics.length - 1; index >= freshLength; index--) {
+      if (allTopics[index]?.sfpUnavailable) {
+        anomalies.unshift(allTopics.splice(index, 1)[0]);
+      }
+    }
+    if (anomalies.length === 0) return;
+
+    // activity/default 排序中置顶会浮到头部且排序键可能很旧，插入扫描
+    // 时跳过它们，避免异常话题被插到置顶块之前。
+    const pinnedFloats = !query?.order || ["activity", "default"].includes(query.order);
+    for (const anomaly of anomalies) {
+      const keyValue = _feedSortKeyValue(anomaly, query.order);
+      let insertIndex = 0;
+      if (keyValue !== null) {
+        while (insertIndex < allTopics.length) {
+          const resident = allTopics[insertIndex];
+          if (pinnedFloats && (resident.pinned || resident.pinned_globally)) {
+            insertIndex++;
+            continue;
+          }
+          const residentKey = _feedSortKeyValue(resident, query.order);
+          if (residentKey !== null && residentKey < keyValue) break;
+          insertIndex++;
+        }
+      }
+      allTopics.splice(insertIndex, 0, anomaly);
     }
   }
 
