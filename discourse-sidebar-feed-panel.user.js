@@ -4712,6 +4712,15 @@
     }
 
     const topicMap = new Map(topics.map((topic) => [topic.id, topic]));
+    // 点击话题时会立即在 Resident Topic 上补已读状态，但并发刷新拿到的
+    // 列表快照可能仍是未读。合并前把这份单调状态带到新对象上，避免同 id
+    // 的服务器快照覆盖刚刚发生的本地点击。
+    allTopics.forEach((residentTopic) => {
+      const fetchedTopic = topicMap.get(residentTopic.id);
+      if (fetchedTopic && _isTopicRead(residentTopic) && !_isTopicRead(fetchedTopic)) {
+        _applyReadMarker(fetchedTopic);
+      }
+    });
     let highlightTopicIds = [];
     if (resetFeedDepth) _resetLoadedFeedDepth();
 
