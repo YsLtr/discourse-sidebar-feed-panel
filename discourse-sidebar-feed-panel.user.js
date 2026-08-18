@@ -2201,6 +2201,9 @@
         opacity: 0.75;
         vertical-align: middle;
       }
+      .sfp-topic-item .sfp-unread-dot.sfp-unread-dot--hidden {
+        visibility: hidden;
+      }
 
       /* 头像 + 用户信息行 */
       .sfp-topic-item .sfp-topic-header {
@@ -5246,7 +5249,7 @@
     if (existing && existing !== topic) _applyReadMarker(existing);
     itemElement.classList.add("sfp-read");
     const dot = itemElement.querySelector(".sfp-unread-dot");
-    if (dot) dot.remove();
+    if (dot) dot.classList.add("sfp-unread-dot--hidden");
   }
 
   // 未读/已读筛选复用 _isTopicRead，避免和渲染、点击后本地 patch 的语义分叉。
