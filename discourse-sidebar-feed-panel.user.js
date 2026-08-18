@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discourse Sidebar Feed Panel
 // @namespace    https://linux.do/
-// @version      2.2.1
+// @version      2.2.2
 // @description  将 Discourse 原生侧边栏改造为信息流面板，支持分类筛选、已读/未读过滤、拖拽调整宽度
 // @author       YsLtr
 // @match        https://linux.do/*
@@ -5000,9 +5000,10 @@
 
   function _topicTimeHtml(topic) {
     const timeStr = formatRelativeTime(topic.bumped_at || topic.last_posted_at || topic.created_at);
-    const unreadDotHtml = _hasUnreadMarker(topic)
-      ? '<span class="sfp-unread-dot" aria-hidden="true"></span>'
-      : "";
+    const unreadDotClass = _hasUnreadMarker(topic)
+      ? "sfp-unread-dot"
+      : "sfp-unread-dot sfp-unread-dot--hidden";
+    const unreadDotHtml = `<span class="${unreadDotClass}" aria-hidden="true"></span>`;
     return `${timeStr}${unreadDotHtml}`;
   }
 
