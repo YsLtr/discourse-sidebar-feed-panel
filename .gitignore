@@ -14,7 +14,7 @@ Thumbs.db
 perf/
 *.trace.json
 
-# Build and test output (distribution will be configured for Releases later)
+# Build and test output (distribution is uploaded to GitHub Releases)
 node_modules/
 dist/
 coverage/

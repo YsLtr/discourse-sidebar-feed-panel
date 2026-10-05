@@ -22,8 +22,16 @@ export async function checkArtifact() {
   const baseline = JSON.parse(baselineText);
   const pkg = JSON.parse(pkgText);
   baseline.version = [pkg.version];
+  const releaseURL = `https://github.com/YsLtr/discourse-sidebar-feed-panel/releases/latest/download/${fileName}`;
+  baseline.downloadURL = [releaseURL];
+  baseline.updateURL = [releaseURL];
   for (const values of Object.values(baseline)) values.sort();
   assert.deepEqual(metadata(source), baseline, 'Published identity, permissions and match rules must be preserved');
+  const legacy = await read(fileName);
+  assert.deepEqual(metadata(legacy), { ...baseline, version: ['3.0.0'] }, 'Raw migration snapshot must retain its identity and Release update URLs');
+  if (pkg.version === '3.0.0') {
+    assert.equal(legacy.replace(/\r\n/g, '\n'), source.replace(/\r\n/g, '\n'), '3.0.0 Raw migration snapshot must match the release build');
+  }
   assert.deepEqual((await readdir(new URL('dist/', root))).sort(), [fileName], 'Build must contain one self-contained userscript');
   assert(!/@vite\/client|localhost:\d+|127\.0\.0\.1:\d+|__monkeyWindow-/.test(source), 'Development bridge leaked into production');
   const ast = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
@@ -37,6 +45,7 @@ export async function checkArtifact() {
   for (const name of ['README.md', 'README.en.md']) {
     const doc = await read(name);
     assert(doc.includes(`\`${pkg.version}\``), `${name} version is stale`);
+    assert(doc.includes(`](${releaseURL})`), `${name} must link to the latest Release asset`);
   }
   return source;
 }

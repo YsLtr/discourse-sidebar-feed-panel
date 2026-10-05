@@ -16,9 +16,9 @@ export const userscript: MonkeyUserScript = {
   ],
   icon: "https://www.google.com/s2/favicons?sz=64&domain=linux.do",
   downloadURL:
-    "https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js",
+    "https://github.com/YsLtr/discourse-sidebar-feed-panel/releases/latest/download/discourse-sidebar-feed-panel.user.js",
   updateURL:
-    "https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js",
+    "https://github.com/YsLtr/discourse-sidebar-feed-panel/releases/latest/download/discourse-sidebar-feed-panel.user.js",
   grant: [
     "GM_addStyle",
     "GM_setValue",

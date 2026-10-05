@@ -1,0 +1,87 @@
+name: Release userscript
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-userscript
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: windows-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read pushed version and check release
+        id: version
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { version } = JSON.parse(require('node:fs').readFileSync('package.json', 'utf8'));
+            if (typeof version !== 'string' || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version)) {
+              throw new Error('package.json version must be a stable MAJOR.MINOR.PATCH version');
+            }
+            const tag = `v${version}`;
+            core.setOutput('tag', tag);
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({ ...context.repo, tag })).data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            if (release) {
+              if (release.draft || release.prerelease || !release.assets.some(asset => asset.name === 'discourse-sidebar-feed-panel.user.js' && asset.state === 'uploaded')) {
+                throw new Error(`${tag} exists but is not a complete stable release; inspect it before retrying`);
+              }
+              core.info(`${tag} is already published; skipping publication`);
+              core.setOutput('publish', 'false');
+              return;
+            }
+            try {
+              await github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` });
+              throw new Error(`${tag} already exists without a release; inspect the tag before retrying`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            core.setOutput('publish', 'true');
+  release:
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: python -m pip install -r requirements-dev.txt
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run check:dev
+      - run: npm run build
+      - run: npm run check:artifact
+      - run: npm run check:scroll -- --label release
+      - run: npm run check:browser
+      - name: Publish release with installable userscript
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          gh release create "$env:RELEASE_TAG" "dist/discourse-sidebar-feed-panel.user.js" --target "$env:GITHUB_SHA" --title "$env:RELEASE_TAG" --generate-notes --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

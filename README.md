@@ -4,7 +4,7 @@
 
 把 Discourse 原生侧边栏改造成信息流面板的用户脚本。安装后可在支持的 Discourse 论坛里用更紧凑的侧边栏查看话题、分类、新活动和已读状态。
 
-当前版本：`2.3.0`
+当前版本：`3.0.0`
 
 ## 功能
 
@@ -43,7 +43,7 @@
 
 然后打开任一直装链接：
 
-- [从 GitHub 安装](https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js)
+- [从 GitHub 安装](https://github.com/YsLtr/discourse-sidebar-feed-panel/releases/latest/download/discourse-sidebar-feed-panel.user.js)
 - [从 Greasy Fork 安装](https://update.greasyfork.org/scripts/579280/Discourse%20Sidebar%20Feed%20Panel.user.js)
 - [从脚本猫安装](https://scriptcat.org/scripts/code/6360/Discourse%20Sidebar%20Feed%20Panel.user.js)
 
@@ -182,11 +182,15 @@ https://community.openai.com/*
 
 ## 更新
 
-如果通过 GitHub Raw、Greasy Fork 或脚本猫安装，脚本管理器通常会自动检查更新。也可以在脚本管理器的管理面板里手动检查更新。
+GitHub 安装与脚本内置更新地址现统一指向最新正式 Release 的 `.user.js` 附件。脚本管理器通常会自动检查更新，也可以手动检查。Greasy Fork 和脚本猫的发布内容由维护者手动同步，更新来源以管理器设置为准。
+
+旧 GitHub Raw 路径保留完整的 3.0.0 迁移版，其中的 `@updateURL` 和 `@downloadURL` 已指向 Release。旧安装可先通过 Raw 检测到 3.0.0，再从 Release 下载更新；首次推送后，需等待自动发布完成，Release 下载链接才会可用；在此期间更新失败可稍后重试。如果管理器固定了自定义更新地址，请改为上面的 GitHub 安装链接，或打开链接覆盖更新现有脚本。
 
 ## 开发
 
-源码位于 `src/`，使用 Vite 和 vite-plugin-monkey 构建。当前为未发布的迁移过程态，根目录不保留 `.user.js`；`dist/` 仅用于本地构建验证，不纳入 Git。后续将调整为 Release 发布，本轮未修改发布 URL 或部署流程。
+源码位于 `src/`，使用 Vite 和 vite-plugin-monkey 构建。`dist/` 不纳入 Git；根目录 `.user.js` 是保留给旧 Raw 安装的 3.0.0 迁移快照，不直接编辑。
+
+推送到 `main` 会触发 Release 工作流，自动读取这次推送最新提交中的 `package.json` 版本号。若该版本尚未发布，全部检查通过后自动构建、创建对应标签（例如 `v3.0.0`）并发布 `.user.js` 附件，将该 Release 设为 latest，无需手动推送标签。已发布的同版本会跳过发布，普通提交仍由检查工作流验证。后续版本只发布 Release，保留根目录 3.0.0 快照。发布步骤见[开发与验证说明](docs/development.md#release-distribution)。
 
 ```sh
 npm ci

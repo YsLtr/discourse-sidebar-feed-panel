@@ -4,7 +4,7 @@
 
 A userscript that turns the native Discourse sidebar into a compact topic feed panel. After installation, supported Discourse forums get a sidebar feed for topics, categories, incoming activity, and read state.
 
-Current version: `2.3.0`
+Current version: `3.0.0`
 
 ## Features
 
@@ -43,7 +43,7 @@ Install one userscript manager first:
 
 Then open one of these install links:
 
-- [Install from GitHub](https://raw.githubusercontent.com/YsLtr/discourse-sidebar-feed-panel/main/discourse-sidebar-feed-panel.user.js)
+- [Install from GitHub](https://github.com/YsLtr/discourse-sidebar-feed-panel/releases/latest/download/discourse-sidebar-feed-panel.user.js)
 - [Install from Greasy Fork](https://update.greasyfork.org/scripts/579280/Discourse%20Sidebar%20Feed%20Panel.user.js)
 - [Install from ScriptCat](https://scriptcat.org/scripts/code/6360/Discourse%20Sidebar%20Feed%20Panel.user.js)
 
@@ -182,11 +182,15 @@ https://community.openai.com/*
 
 ## Updates
 
-If installed from GitHub Raw, Greasy Fork, or ScriptCat, your userscript manager will usually check for updates automatically. You can also check updates manually from the userscript manager dashboard.
+GitHub installation and the built-in update URLs now point to the `.user.js` asset in the latest stable Release. Your userscript manager usually checks automatically; manual checks are also available. Greasy Fork and ScriptCat are synchronized manually by the maintainer; manager settings determine the update source.
+
+The old GitHub Raw path retains a complete 3.0.0 migration script whose `@updateURL` and `@downloadURL` point to Releases. Existing installations can discover 3.0.0 through Raw and download the update from Releases. On the first push, the Release download URL becomes available only after automatic publication finishes; retry later if an update fails during that interval. If your manager pins a custom update URL, change it to the GitHub installation link above or open that link to update the existing script.
 
 ## Development
 
-Source lives in `src/` and is built with Vite and vite-plugin-monkey. This is an unpublished migration state: no root `.user.js` is retained, and ignored `dist/` output is only for local validation. Release distribution will be configured later; publishing URLs and deployment are unchanged in this migration.
+Source lives in `src/` and is built with Vite and vite-plugin-monkey. `dist/` is ignored. The root `.user.js` is a 3.0.0 migration snapshot for old Raw installations; do not edit it directly.
+
+Pushing to `main` triggers the Release workflow, which reads the version from `package.json` in the latest commit of that push. For an unpublished version, it runs all checks, builds the script, automatically creates the matching tag (for example, `v3.0.0`), and publishes the `.user.js` asset as the latest Release. No manual tag push is needed. Already published versions are skipped; the check workflow still validates ordinary commits. Future versions ship through Releases while the root 3.0.0 snapshot stays in place. See [release instructions](docs/development.md#release-distribution).
 
 ```sh
 npm ci

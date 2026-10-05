@@ -29,9 +29,30 @@ The migration preserves the baseline behavior for three previously inconsistent 
 
 Read-filter changes continue to render locally without resetting resident depth. They now retire older request generations as well; if the first page is still loading, its replacement load uses the new filter snapshot. This prevents A→B→A filter changes from accepting a pre-switch response. The browser fixture covers this together with category-switch races.
 
-`npm run build` writes a self-contained, unminified userscript under ignored `dist/`. This intermediate migration commits source only: the root userscript was intentionally deleted. Build output may remain locally after verification; do not routinely clean `dist/` or commit its contents. Never use the repository root as Vite's output directory.
+`npm run build` writes a self-contained, unminified userscript under ignored `dist/`. Keep build output out of Git and never use the repository root as Vite's output directory. The root userscript is a frozen 3.0.0 migration snapshot for existing Raw installations.
 
-After changing source or a version, build and check the temporary artifact. CI checks the two README versions and metadata against the 2.2.3 baseline (allowing the package version to change). It no longer expects or restores a root artifact. Release distribution and replacement of the historical GitHub Raw update URLs are deferred; this branch is not ready for publication until that workflow is configured.
+CI checks README versions and baseline metadata, allowing only the package version and the two explicit Release URLs to differ from 2.2.3. For version 3.0.0 it also checks that the root migration snapshot matches the build (normalizing line endings). Future releases retain the 3.0.0 snapshot and its Release update URLs.
+
+## Release distribution
+
+Push to `main` to release. The workflow reads `package.json` from the latest commit of that push (the event SHA), not from intermediate commits or a later branch head. Use increasing stable `MAJOR.MINOR.PATCH` versions; prereleases are rejected because users follow `releases/latest`. The workflow creates `v<version>` automatically at that exact commit. No manual tag creation or tag push is needed.
+
+1. Update the package version and lockfile with `npm version <version> --no-git-tag-version`, and update both README versions.
+2. Run the checks below. For the initial 3.0.0 only, copy `dist/discourse-sidebar-feed-panel.user.js` to the repository root after building, before artifact checks. Leave that migration snapshot unchanged in later versions.
+3. Commit and push to `main` (`git push origin main`). Ensure the repository permits Actions and workflow write access.
+4. The workflow checks whether `v<version>` already has a complete stable Release with the userscript asset. If so, publication is skipped. Otherwise it installs locked dependencies, runs typecheck, unit tests, development endpoint, build, artifact, scroll and production-browser checks, then creates the tag and Release with generated notes. A failed check prevents publication. The separate check workflow still validates ordinary commits with unchanged versions.
+5. Wait for the Release and verify its latest asset URL, then manually synchronize external distribution sites. On the initial migration, pushing `main` exposes the Raw bridge before the first Release is ready; users checking updates during that interval may need to retry after publication completes.
+6. Releases are serialized and running publication is not cancelled by a new push. A same-version published Release is never overwritten. Incomplete releases or orphaned tags cause an explicit failure for inspection; API errors other than 404 also fail instead of being treated as an unpublished version. Rerun a failed check from Actions after resolving the cause, or push a corrected commit. If publication partially created a tag/release, inspect it before retrying. Use a new version to change an already published asset.
+
+Stable installation, download and update URL:
+
+https://github.com/YsLtr/discourse-sidebar-feed-panel/releases/latest/download/discourse-sidebar-feed-panel.user.js
+
+Version-specific 3.0.0 asset:
+
+https://github.com/YsLtr/discourse-sidebar-feed-panel/releases/download/v3.0.0/discourse-sidebar-feed-panel.user.js
+
+The old Raw URL serves the full 3.0.0 bundle with the original name/namespace and new update/download URLs. Old managers can compare its version and fetch the Release bundle, then follow Releases on subsequent checks. Some managers retain user overrides or installation-source settings; verify with an actual manager or update the existing script manually from the latest URL. Local metadata checks do not establish manager-specific upgrade behavior.
 
 ## Development
 
@@ -76,4 +97,4 @@ This is an unresolved limitation of the broader fixture, not evidence that the c
 
 Version 2.3.0 after both audits: strict typecheck (including noUnusedLocals/noUnusedParameters), 44 unit tests, production build, 31 built-script browser checks, artifact metadata/standalone-output/README-version checks and whitespace checks passed. Development endpoint verification and 12 default scroll checks passed earlier; the second audit did not change scroll logic or CSS. The first-audit scroll recording is `perf/scroll-isolation/migration-audit.*`: zero renderer-main wheel acknowledgements and 97 busy-window latency samples (median 14.636 ms, maximum 29.325 ms). This is a fixture result, not a measured real-site latency improvement.
 
-The root installation file is intentionally absent. The migration, audits and AGENTS.md handoff are captured together in the requested local commit; no push, publication, agent-managed real-manager installation or remote CI run was performed. The user reported testing without issues, with scope unspecified. Source migration and local build/check commands are implemented; the next session will change Release distribution, metadata URLs and installation links together. Manager upgrades, real-site wake and physical touch acceptance remain follow-up work. See the [completeness audit](migration-completeness-audit-2026-10-05.md) for evidence and fixes found after the initial migration.
+At the time of the migration audit, the root installation file was intentionally absent. The migration, audits and AGENTS.md handoff are captured together in the requested local commit; no push, publication, agent-managed real-manager installation or remote CI run was performed. The user reported testing without issues, with scope unspecified. Source migration and local build/check commands are implemented; Release distribution, metadata URLs and installation links were subsequently updated for 3.0.0 as described above. Manager upgrades, real-site wake and physical touch acceptance remain follow-up work. See the [completeness audit](migration-completeness-audit-2026-10-05.md) for evidence and fixes found after the initial migration.
