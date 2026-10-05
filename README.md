@@ -4,7 +4,7 @@
 
 把 Discourse 原生侧边栏改造成信息流面板的用户脚本。安装后可在支持的 Discourse 论坛里用更紧凑的侧边栏查看话题、分类、新活动和已读状态。
 
-当前版本：`2.2.3`
+当前版本：`2.3.0`
 
 ## 功能
 
@@ -183,6 +183,31 @@ https://community.openai.com/*
 ## 更新
 
 如果通过 GitHub Raw、Greasy Fork 或脚本猫安装，脚本管理器通常会自动检查更新。也可以在脚本管理器的管理面板里手动检查更新。
+
+## 开发
+
+源码位于 `src/`，使用 Vite 和 vite-plugin-monkey 构建。当前为未发布的迁移过程态，根目录不保留 `.user.js`；`dist/` 仅用于本地构建验证，不纳入 Git。后续将调整为 Release 发布，本轮未修改发布 URL 或部署流程。
+
+```sh
+npm ci
+npm run dev
+```
+
+开发脚本名称带 `dev:` 前缀；调试站点只启用一个版本。当前使用整页刷新开发，开发脚本的存储可能与正式脚本不同。
+
+```sh
+npm run typecheck
+npm test
+npm run build
+python -m pip install -r requirements-dev.txt
+npm run check:scroll
+npm run check:browser
+npm run check:artifact
+```
+
+需要 Node.js `^22.20.0 || ^24.12.0 || >=26.0.0`，建议使用 Node 22 LTS。浏览器检查还需 Python 和 Chrome，可通过 `CHROME_BIN` 或 `--chrome` 指定路径。`check:browser` 使用模拟的 GM/Discourse 服务验证实际构建包，真实脚本管理器、长驻唤醒和移动端仍需单独验收。
+
+详见[开发与验证说明](docs/development.md)、[迁移方案及进度](docs/vite-plugin-monkey-refactor-plan.md)和[迁移完整性审计](docs/migration-completeness-audit-2026-10-05.md)。
 
 ## 许可证
 

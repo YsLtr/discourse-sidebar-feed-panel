@@ -4,7 +4,7 @@
 
 A userscript that turns the native Discourse sidebar into a compact topic feed panel. After installation, supported Discourse forums get a sidebar feed for topics, categories, incoming activity, and read state.
 
-Current version: `2.2.3`
+Current version: `2.3.0`
 
 ## Features
 
@@ -183,6 +183,31 @@ https://community.openai.com/*
 ## Updates
 
 If installed from GitHub Raw, Greasy Fork, or ScriptCat, your userscript manager will usually check for updates automatically. You can also check updates manually from the userscript manager dashboard.
+
+## Development
+
+Source lives in `src/` and is built with Vite and vite-plugin-monkey. This is an unpublished migration state: no root `.user.js` is retained, and ignored `dist/` output is only for local validation. Release distribution will be configured later; publishing URLs and deployment are unchanged in this migration.
+
+```sh
+npm ci
+npm run dev
+```
+
+The development script has a `dev:` name prefix. Enable only one version on a test site and use full-page reloads. Development-script storage may differ from production storage.
+
+```sh
+npm run typecheck
+npm test
+npm run build
+python -m pip install -r requirements-dev.txt
+npm run check:scroll
+npm run check:browser
+npm run check:artifact
+```
+
+Requires Node.js `^22.20.0 || ^24.12.0 || >=26.0.0`; Node 22 LTS is recommended. Browser checks also require Python and Chrome; use `CHROME_BIN` or `--chrome` to choose the browser. The built-userscript smoke check uses mock GM/Discourse services. Real userscript managers, sleep/wake sessions, and mobile devices need separate validation.
+
+See [development and validation](docs/development.md), the [migration plan and progress](docs/vite-plugin-monkey-refactor-plan.md), and the [migration completeness audit](docs/migration-completeness-audit-2026-10-05.md).
 
 ## License
 

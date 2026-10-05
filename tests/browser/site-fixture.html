@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="csrf-token" content="fixture-csrf">
+<title>Discourse Feed build smoke test</title>
+<style>
+:root{--primary:#222;--secondary:#fff;--tertiary:#2870b0;--primary-low:#ddd;--primary-medium:#666;--primary-low-mid:#aaa;--d-selected:#ddd}
+body{margin:0;font:14px sans-serif}.home-logo-wrapper-outlet{height:60px}.title{display:flex}
+#d-sidebar{position:fixed;top:60px;left:0;height:700px;width:300px;background:white}
+</style>
+<div class="home-logo-wrapper-outlet"><div class="title">Fixture forum</div></div>
+<aside id="d-sidebar" class="sidebar-container"><div class="sidebar-sections">Native sidebar</div></aside>
+<script>
+const scoped = key => `sfp_site:${encodeURIComponent(location.origin)}:${key}`;
+const subscriptions = new Map();
+const store = new Map([
+  [scoped('sfp_feed_mode_enabled'), true],
+  [scoped('sfp_current_order'), 'default'],
+  [scoped('sfp_tag_style_cache_v1'), {version:1,entries:[['alpha',{cssText:'--color1: #123456',icon:'',hasIcon:false}]]}],
+]);
+window.fixture = {
+  store, subscriptions, menus: [], writes: [], requests: [], pause: false, pending: [],
+  topic(id, category = 2) {
+    return {id,slug:`topic-${id}`,title:`Topic ${id}`,category_id:category,
+      posts_count:4,highest_post_number:4,views:10,like_count:2,unseen:true,
+      bumped_at:new Date(Date.UTC(2026,9,5,0,0,id)).toISOString(),
+      posters:[{user_id:1}],tags:['alpha']};
+  },
+  publish(channel, data) { for (const callback of subscriptions.get(channel) || []) callback(data); },
+  release() { this.pause = false; for (const finish of this.pending.splice(0)) finish(); },
+};
+// Track only application effects; CDP's polling happens outside this page.
+fixture.effects = { timeouts: new Set(), intervals: new Set(), frames: new Set(), listeners: [] };
+fixture.originalPush = history.pushState;
+fixture.originalReplace = history.replaceState;
+for (const [create, cancel, key] of [['setTimeout','clearTimeout','timeouts'],['setInterval','clearInterval','intervals'],['requestAnimationFrame','cancelAnimationFrame','frames']]) {
+  const originalCreate = window[create].bind(window), originalCancel = window[cancel].bind(window);
+  window[create] = (callback, ...args) => {
+    const id = originalCreate((...values) => {
+      if (key !== 'intervals') fixture.effects[key].delete(id);
+      callback(...values);
+    }, ...args);
+    fixture.effects[key].add(id);
+    return id;
+  };
+  window[cancel] = id => { fixture.effects[key].delete(id); return originalCancel(id); };
+}
+for (const target of [window, document]) {
+  const add = target.addEventListener.bind(target), remove = target.removeEventListener.bind(target);
+  target.addEventListener = (type, callback, options) => {
+    const capture = typeof options === 'boolean' ? options : !!options?.capture;
+    if (!fixture.effects.listeners.some(e => e.target===target && e.type===type && e.callback===callback && e.capture===capture)) fixture.effects.listeners.push({target,type,callback,capture});
+    add(type, callback, options);
+  };
+  target.removeEventListener = (type, callback, options) => {
+    const capture = typeof options === 'boolean' ? options : !!options?.capture;
+    fixture.effects.listeners = fixture.effects.listeners.filter(e => e.target!==target || e.type!==type || e.callback!==callback || e.capture!==capture);
+    remove(type, callback, options);
+  };
+}
+fixture.head = Array.from({length:30}, (_,i) => fixture.topic(300-i));
+window.GM_getValue = (key, fallback) => store.has(key) ? structuredClone(store.get(key)) : fallback;
+window.GM_setValue = (key, value) => { fixture.writes.push({key,value});store.set(key, structuredClone(value)); };
+window.GM_deleteValue = key => store.delete(key);
+window.GM_addStyle = css => { const style=document.createElement('style');style.textContent=css;document.head.appendChild(style);return style; };
+window.GM_registerMenuCommand = (label, callback) => { fixture.menus.push({label,callback});return fixture.menus.length; };
+window.unsafeWindow = window;
+window.Discourse = {SiteSettings:{default_locale:'zh_CN'},__container__:{lookup:() => ({
+  lastId:() => 0,
+  subscribe(channel, callback) { if(!subscriptions.has(channel)) subscriptions.set(channel,new Set());subscriptions.get(channel).add(callback); },
+  unsubscribe(channel, callback) { subscriptions.get(channel)?.delete(callback); },
+})}};
+window.require = () => ({default:{routeTo:path => history.pushState({},'',path)}});
+window.fetch = async (path, options) => {
+  const url = new URL(path,location.origin);
+  fixture.requests.push({path:url.pathname+url.search,csrf:options?.headers?.['X-CSRF-Token']});
+  if(fixture.failNext && url.pathname.includes('latest.json')) { fixture.failNext=false;return new Response('temporary failure',{status:503}); }
+  let data;
+  if(url.pathname==='/site.json') data={
+    categories:[{id:1,name:'Parent',slug:'parent',topic_count:10},{id:2,name:'Child',slug:'child',parent_category_id:1}],
+    navigation_menu_categories:[1],filters:['latest','new','top','unread','read'],periods:['all','weekly'],top_tags:['alpha'],
+  };
+  else if(url.pathname==='/categories_and_latest.json') data={category_list:{categories:[]}};
+  else {
+    const ids=url.searchParams.get('topic_ids');
+    const page=Number(url.searchParams.get('page')||0);
+    const topics=ids ? ids.split(',').map(id=>fixture.topic(Number(id))) : page ? (fixture.pageTopics?.(page) || Array.from({length:30},(_,i)=>fixture.topic(200-i))) : fixture.head;
+    data={topic_list:{topics:structuredClone(topics),more_topics_url:'/latest.json?page=8'},users:[{id:1,username:'alice',name:'Alice',avatar_template:''}]};
+  }
+  if(fixture.pause && url.pathname.includes('latest.json')) await new Promise(resolve => fixture.pending.push(resolve));
+  return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
+};
+</script>
+</html>

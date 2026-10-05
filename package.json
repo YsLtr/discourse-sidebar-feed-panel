@@ -1,0 +1,29 @@
+{
+  "name": "discourse-sidebar-feed-panel",
+  "version": "2.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Discourse native sidebar topic feed userscript",
+  "license": "MIT",
+  "engines": {
+    "node": "^22.20.0 || ^24.12.0 || >=26.0.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:scroll": "node tools/check-scroll.mjs",
+    "check:artifact": "node tools/check-artifact.mjs",
+    "check:browser": "node tools/check-browser.mjs",
+    "check:dev": "node tools/check-dev.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.15",
+    "postcss": "8.5.28",
+    "typescript": "5.9.3",
+    "vite": "8.3.2",
+    "vite-plugin-monkey": "8.1.1",
+    "vitest": "5.0.3"
+  }
+}

@@ -1,6 +1,7 @@
 """Chrome regression check for the real Feed scroll setup and CSS.
 
-Requires Python websocket-client and installed Chrome. No project npm dependencies.
+Requires Python websocket-client and installed Chrome.
+For modular source run npm run check:scroll; --source supports legacy baselines.
 The fixture stubs loading/state updates; it exercises native wheel/touch scrolling
 and records input-to-frame latency while the renderer main thread is deliberately busy.
 Usage: python tools/check-scroll-isolation.py --label before
@@ -17,86 +18,56 @@ import tempfile
 import time
 import urllib.request
 
-import websocket
+from chrome_session import CDP, default_chrome
 
 ROOT = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser()
 parser.add_argument('--label', default='current')
-parser.add_argument('--source', type=Path, default=ROOT / 'discourse-sidebar-feed-panel.user.js')
-parser.add_argument('--chrome', default='C:/Program Files/Google/Chrome/Application/chrome.exe')
+inputs = parser.add_mutually_exclusive_group()
+inputs.add_argument('--source', type=Path, help='Legacy single-file baseline (2.2.3 or earlier)')
+inputs.add_argument('--fixture', type=Path, help='Built fixture importing the real scroll module')
+parser.add_argument('--chrome', default=default_chrome())
 args = parser.parse_args()
-source = args.source.read_text(encoding='utf-8')
 artifact = ROOT / 'perf' / 'scroll-isolation'
 artifact.mkdir(parents=True, exist_ok=True)
 
-def function(name):
-    match = re.search(r'^  function ' + re.escape(name) + r'\(', source, re.M)
-    if not match:
-        return ''
-    following = re.search(r'^  (?:async )?function ', source[match.end():], re.M)
-    assert following, name
-    return source[match.start():match.end() + following.start()]
+if args.source:
+    source = args.source.read_text(encoding='utf-8')
+    def function(name):
+        match = re.search(r'^  function ' + re.escape(name) + r'\(', source, re.M)
+        if not match:
+            return ''
+        following = re.search(r'^  (?:async )?function ', source[match.end():], re.M)
+        assert following, name
+        return source[match.start():match.end() + following.start()]
 
-css = re.search(r'\.sfp-feed-scroll \{[^}]+\}', source).group(0)
-fixture = artifact / 'fixture.html'
-fixture.write_text('''<!doctype html><meta charset="utf-8"><title>Feed scroll isolation check</title>
-<style>body{margin:0;height:6000px;background:#eee;font:16px sans-serif}
-aside{position:fixed;left:30px;top:30px;width:340px;height:320px;display:flex;flex-direction:column;border:2px solid #333;background:white}
-.row{height:60px;border-bottom:1px solid #ccc;padding-left:15px;box-sizing:border-box}
-.row:nth-child(even){background:#bde5ff}''' + css + '''</style>
-<p style="margin-left:420px">Underlying page scroll must stay independent.</p>
-<aside><div class="sfp-feed-scroll"><div id="items"></div></div></aside>
-<script>
-let feedScrollEl=document.querySelector('.sfp-feed-scroll');
-let feedScrollAbortController=null,hasMorePages=true,isLoadingMore=false;
-window.loadCalls=0; window.stateCalls=0;
-function loadMoreTopics(){window.loadCalls++}
-function _scheduleHeadActionStateSync(){window.stateCalls++}
-''' + function('debounce') + function('isAtScrollBoundary') + function('_setupScrollLoadMore') + '''
-window.resetFeed=(short=false)=>{
- document.querySelector('#items').innerHTML=Array.from({length:short?1:80},(_,i)=>`<div class="row">Topic ${i+1}</div>`).join('');
- feedScrollEl.scrollTop=0;
-};
-resetFeed();_setupScrollLoadMore();
-</script>''', encoding='utf-8')
+    css = re.search(r'\.sfp-feed-scroll \{[^}]+\}', source).group(0)
+    fixture = artifact / 'fixture.html'
+    fixture.write_text('''<!doctype html><meta charset="utf-8"><title>Feed scroll isolation check</title>
+    <style>body{margin:0;height:6000px;background:#eee;font:16px sans-serif}
+    aside{position:fixed;left:30px;top:30px;width:340px;height:320px;display:flex;flex-direction:column;border:2px solid #333;background:white}
+    .row{height:60px;border-bottom:1px solid #ccc;padding-left:15px;box-sizing:border-box}
+    .row:nth-child(even){background:#bde5ff}''' + css + '''</style>
+    <p style="margin-left:420px">Underlying page scroll must stay independent.</p>
+    <aside><div class="sfp-feed-scroll"><div id="items"></div></div></aside>
+    <script>
+    let feedScrollEl=document.querySelector('.sfp-feed-scroll');
+    let feedScrollAbortController=null,hasMorePages=true,isLoadingMore=false;
+    window.loadCalls=0; window.stateCalls=0;
+    function loadMoreTopics(){window.loadCalls++}
+    function _scheduleHeadActionStateSync(){window.stateCalls++}
+    ''' + function('debounce') + function('isAtScrollBoundary') + function('_setupScrollLoadMore') + '''
+    window.resetFeed=(short=false)=>{
+     document.querySelector('#items').innerHTML=Array.from({length:short?1:80},(_,i)=>`<div class="row">Topic ${i+1}</div>`).join('');
+     feedScrollEl.scrollTop=0;
+    };
+    resetFeed();_setupScrollLoadMore();
+    </script>''', encoding='utf-8')
+else:
+    fixture = (args.fixture or artifact / 'module-fixture.html').resolve()
+    if not fixture.is_file():
+        parser.error('Run npm run check:scroll to build the module fixture, or specify --source for a legacy baseline.')
 
-class CDP:
-    def __init__(self, url):
-        self.ws=websocket.create_connection(url, timeout=12, suppress_origin=True)
-        self.seq=0
-        self.pending={}
-        self.events=[]
-    def send(self, method, params=None):
-        self.seq+=1
-        self.ws.send(json.dumps({'id':self.seq,'method':method,'params':params or {}}))
-        return self.seq
-    def read(self):
-        item=json.loads(self.ws.recv())
-        if 'id' in item:
-            self.pending[item['id']]=item
-        else:
-            self.events.append(item)
-        return item
-    def result(self, ident):
-        while ident not in self.pending:
-            self.read()
-        reply=self.pending.pop(ident)
-        if 'error' in reply:
-            raise RuntimeError(reply['error'])
-        return reply.get('result',{})
-    def call(self, method, params=None):
-        return self.result(self.send(method,params))
-    def evaluate(self, expression):
-        reply=self.call('Runtime.evaluate',{'expression':expression,'returnByValue':True,'awaitPromise':True})
-        if 'exceptionDetails' in reply:
-            raise RuntimeError(reply['exceptionDetails'])
-        return reply.get('result',{}).get('value')
-    def event(self, method):
-        while True:
-            for i,e in enumerate(self.events):
-                if e.get('method')==method:
-                    return self.events.pop(i)['params']
-            self.read()
 
 profile=Path(tempfile.mkdtemp(prefix='sfp-scroll-check-'))
 proc=None

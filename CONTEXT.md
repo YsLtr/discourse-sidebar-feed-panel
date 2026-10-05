@@ -65,11 +65,15 @@ The ordered subset of the **Resident Topic Window** that matches the current fee
 _Avoid_: Resident Topic Window, Rendered Topic Window, filtered list
 
 **Head-Screen Reading State**:
-The Feed Panel state where the user has not scrolled beyond the first visible screen of Topic Items.
+The Feed Panel state where the user has not scrolled beyond the first visible screen of Topic Items since the last return to the feed head.
 _Avoid_: First page, page 1
 
+**Feed Head**:
+The reading position at the very beginning of the Feed Panel's topic sequence.
+_Avoid_: First screen when the precise start position matters
+
 **Away-From-Head Reading State**:
-The Feed Panel state where the user has scrolled beyond the first visible screen and should not have new Topic Items inserted above the current reading position.
+The Feed Panel state where the user has scrolled beyond the first visible screen and has not yet returned to the Feed Head.
 _Avoid_: Outside first page, deep page, reading below page 1
 
 **Return-To-Head Action**:
@@ -92,9 +96,9 @@ _Avoid_: User-configured cache size
 A topic id received from Discourse message-bus that may be eligible to enter the current **Feed Panel** after filtering and detail fetch.
 _Avoid_: New topic when eligibility has not been confirmed
 
-**Incoming Candidate Limit**:
-The maximum number of pending **Incoming Candidates** retained for future insertion into the **Feed Panel**.
-_Avoid_: Resident topic limit
+**Incoming Load Limit**:
+The maximum number of the most recent **Incoming Candidates** whose full details are loaded in one application of incoming activity.
+_Avoid_: Candidate retention limit, resident topic limit, reminder count
 
 **Incoming Reminder Count**:
 The count of Incoming Candidates that match the current latest/category scope closely enough to show a user-facing reminder.
@@ -117,7 +121,7 @@ A memory control step after refresh-style merges that releases Resident Topics b
 _Avoid_: Scroll limit, pagination limit
 
 **Automatic Refresh Gate**:
-A runtime guard that prevents automatic refresh paths from applying new topics when the page has been idle too long or the **Resident Topic Window** is far above the **Resident Topic Limit**.
+A guard that prevents automatic refresh from applying topics while the page is hidden or idle, or while the reader is away from the **Feed Head**.
 _Avoid_: Manual refresh block
 
 **Loaded Feed Depth**:
@@ -153,11 +157,12 @@ _Avoid_: Pagination cursor, authoritative next page URL
 - A **Rendered Topic Window** is selected from the current **Topic Projection**.
 - The **Head-Screen Reading State** covers only the first visible screen, not the first API page.
 - The **Away-From-Head Reading State** begins when the user scrolls beyond the first visible screen.
-- The boundary between **Head-Screen Reading State** and **Away-From-Head Reading State** is one Feed Panel viewport height.
+- Entering the **Away-From-Head Reading State** requires scrolling beyond one Feed Panel viewport height; leaving it requires returning to the **Feed Head**.
+- Being in the **Head-Screen Reading State** alone does not qualify the reader for automatic refresh; that requires the **Feed Head**.
 - In the **Away-From-Head Reading State**, incoming activity should accumulate as a reminder instead of inserting new **Topic Items** above the user's current reading position.
 - A **Return-To-Head Action** does not apply accumulated incoming activity or trigger a refresh.
 - A **Head Action Button** performs manual refresh only in the **Head-Screen Reading State**.
-- A **Head Action Button** performs only a **Return-To-Head Action** in the **Away-From-Head Reading State**.
+- Without an **Incoming Count Display**, an idle **Head Action Button** performs only a **Return-To-Head Action** in the **Away-From-Head Reading State**.
 - The **Head Action Button** is the only return-to-head affordance in the **Feed Panel**.
 - The **Head Action Button** state is the single source of truth for head versus away-from-head behavior in the UI.
 - Without an **Incoming Count Display**, the **Head Action Button** keeps its original action for the current reading state.
@@ -178,7 +183,8 @@ _Avoid_: Pagination cursor, authoritative next page URL
 - The **Resident Topic Limit** grows with loaded feed depth as the user loads older pages.
 - The **Resident Topic Limit** is calculated as API page size multiplied by loaded page count.
 - Loading older topics is the only action that increases **Loaded Feed Depth**.
-- Changing the feed query resets **Loaded Feed Depth**, incoming activity state, and the **Head Action Button** state for the new query.
+- Changing category, order or period resets **Loaded Feed Depth**, incoming activity state, and the **Head Action Button** state for the new query.
+- Changing only the local read filter preserves **Resident Topics** and **Loaded Feed Depth**, while re-evaluating the **Topic Projection** and incoming reminder eligibility.
 - A **Refresh Trim** never disables user-initiated or scroll-triggered loading of older topics.
 - A **Refresh Trim** runs after refresh-style merges, not after loading older pages.
 - A **Refresh Trim** releases both retained topic data and the corresponding loaded-topic markers, so trimmed topics can be fetched again later.
@@ -187,10 +193,12 @@ _Avoid_: Pagination cursor, authoritative next page URL
 - A **Refresh Trim** changes the oldest retained **Resident Topic**, so pagination state must continue from the local **Loaded Feed Depth**.
 - The **Automatic Refresh Gate** applies to automatic silent refresh and automatic ordinary refresh, not to user-clicked refresh actions.
 - The **Automatic Refresh Gate** treats the page as idle after 10 minutes without page-level user activity.
-- The **Automatic Refresh Gate** always skips automatic refresh ticks when the **Resident Topic Window** exceeds three times the **Resident Topic Limit**.
+- The **Automatic Refresh Gate** has no additional capacity threshold based on the **Resident Topic Limit**.
 - The **Automatic Refresh Gate** skips individual automatic refresh ticks without changing saved user settings.
 - An **Incoming Candidate** may become a **Resident Topic** after the userscript fetches full topic details and confirms it matches the current feed query.
-- The **Incoming Candidate Limit** follows the page-size-derived **Resident Topic Limit**.
+- The **Incoming Load Limit** is one topic page, independent of the **Loaded Feed Depth**.
+- Pending **Incoming Candidates** accumulate for the **Incoming Reminder Count**; the **Incoming Load Limit** does not cap this count.
+- Applying incoming activity consumes the matching candidate batch, while fetching details only for its most recent candidates within the **Incoming Load Limit**.
 - **Incoming Candidates** are intended to be inserted as a continuous set of newer topics, pushing older **Resident Topics** down before trimming is considered.
 - A compacted **Incoming Candidate** id may be remembered to avoid duplicate pending counts, but a later message-bus event for that id can make it a fresh **Incoming Candidate** again.
 - An **Incoming Reminder Count** is based on the current latest/category scope and does not require fetching full topic details while the user remains away from the head.
