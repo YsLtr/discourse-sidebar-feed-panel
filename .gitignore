@@ -9,3 +9,7 @@ discourse-content-preserver.user.js
 *.bak
 .DS_Store
 Thumbs.db
+
+# Chrome DevTools Performance 导出的大 trace(tools/analyze-trace.cjs 的输入),可达数百 MB
+perf/
+*.trace.json
