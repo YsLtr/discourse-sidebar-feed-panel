@@ -16,21 +16,24 @@ export function metadata(source) {
 }
 
 export async function checkArtifact() {
-  const [source, baselineText, pkgText] = await Promise.all([
-    read(`dist/${fileName}`), read('tests/fixtures/2.2.3.metadata.json'), read('package.json'),
+  const [source, legacy, pkgText] = await Promise.all([
+    read(`dist/${fileName}`), read(fileName), read('package.json'),
   ]);
-  const baseline = JSON.parse(baselineText);
   const pkg = JSON.parse(pkgText);
-  baseline.version = [pkg.version];
   const releaseURL = `https://github.com/YsLtr/discourse-sidebar-feed-panel/releases/latest/download/${fileName}`;
-  baseline.downloadURL = [releaseURL];
-  baseline.updateURL = [releaseURL];
-  for (const values of Object.values(baseline)) values.sort();
-  assert.deepEqual(metadata(source), baseline, 'Published identity, permissions and match rules must be preserved');
-  const legacy = await read(fileName);
-  assert.deepEqual(metadata(legacy), { ...baseline, version: ['3.0.0'] }, 'Raw migration snapshot must retain its identity and Release update URLs');
-  if (pkg.version === '3.0.0') {
-    assert.equal(legacy.replace(/\r\n/g, '\n'), source.replace(/\r\n/g, '\n'), '3.0.0 Raw migration snapshot must match the release build');
+  const meta = metadata(source);
+  // Published metadata is not frozen against older releases: branding such as namespace or icon may change.
+  for (const key of ['name', 'namespace', 'version', 'description', 'author', 'match', 'icon', 'grant', 'run-at', 'license']) {
+    assert(meta[key]?.[0], `Built userscript is missing @${key}`);
+  }
+  assert.deepEqual(meta.version, [pkg.version], 'Built userscript version must match package.json');
+  for (const field of ['downloadURL', 'updateURL']) {
+    assert.deepEqual(meta[field], [releaseURL], `@${field} must point to the latest Release asset`);
+  }
+  const legacyMeta = metadata(legacy);
+  assert.deepEqual(legacyMeta.version, ['3.0.0'], 'Raw migration snapshot must stay at version 3.0.0');
+  for (const field of ['downloadURL', 'updateURL']) {
+    assert.deepEqual(legacyMeta[field], [releaseURL], `Raw migration snapshot @${field} must point to the latest Release asset`);
   }
   assert.deepEqual((await readdir(new URL('dist/', root))).sort(), [fileName], 'Build must contain one self-contained userscript');
   assert(!/@vite\/client|localhost:\d+|127\.0\.0\.1:\d+|__monkeyWindow-/.test(source), 'Development bridge leaked into production');

@@ -31,7 +31,7 @@ Read-filter changes continue to render locally without resetting resident depth.
 
 `npm run build` writes a self-contained, unminified userscript under ignored `dist/`. Keep build output out of Git and never use the repository root as Vite's output directory. The root userscript is a frozen 3.0.0 migration snapshot for existing Raw installations.
 
-CI checks README versions and baseline metadata, allowing only the package version and the two explicit Release URLs to differ from 2.2.3. For version 3.0.0 it also checks that the root migration snapshot matches the build (normalizing line endings). Future releases retain the 3.0.0 snapshot and its Release update URLs.
+CI checks that the built userscript carries the full metadata set (name, namespace, version, description, author, match, icon, permissions, run-at and license), that its version matches `package.json`, and that both update URLs point to the latest Release asset. Published metadata is not frozen against older releases, so branding changes such as the namespace or icon need no check update. The root migration snapshot must stay at version 3.0.0 with the Release update URLs.
 
 ## Release distribution
 
@@ -58,7 +58,7 @@ The old Raw URL serves the full 3.0.0 bundle with the original name/namespace an
 
 Run `npm run dev`, then install the development script using the local installation URL exposed by vite-plugin-monkey. It has a `dev:` name prefix. Enable only one script version on a test site. The development script may have a separate GM storage namespace; validate upgrades using the production script identity too.
 
-The dev name uses a callback: in plugin 8.1.1 a string `prefix` replaces the full name. Serve mode omits production download/update URLs. The plugin's development bridge requests its own broader GM grants; the production artifact is checked to retain exactly the original six grants. `npm run check:dev` validates the local install endpoint, metadata, TypeScript entry and GM alias without installing anything in a browser.
+The dev name uses a callback: in plugin 8.1.1 a string `prefix` replaces the full name. Serve mode omits production download/update URLs. The plugin's development bridge requests its own broader GM grants; the production artifact is checked to declare the full metadata set, including a non-empty permission list. `npm run check:dev` validates the local install endpoint, metadata, TypeScript entry and GM alias without installing anything in a browser.
 
 Use full-page reloads for development; no custom HMR accept handler is installed. The controller now exposes `start`, `activate`, `deactivate` and `dispose`. `SFPFeedPanel.clearCaches()` remains available, and `SFPFeedPanel.dispose()` / `SFPFeedPanel.start()` support explicit disposal and restart for diagnostics. These operations are idempotent. The GM menu is registered once per bootstrap and delegates to the current instance, retaining the original six grants. If the optional page API cannot be published, the feed and GM menu still start; the browser check covers readonly properties and throwing bridge setters.
 

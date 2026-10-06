@@ -4,7 +4,7 @@
 
 A userscript that turns the native Discourse sidebar into a compact topic feed panel. After installation, supported Discourse forums get a sidebar feed for topics, categories, incoming activity, and read state.
 
-Current version: `3.0.0`
+Current version: `3.0.1`
 
 ## Features
 
