@@ -37,7 +37,7 @@ CI checks that the built userscript carries the full metadata set (name, namespa
 
 Push to `main` to release. The workflow reads `package.json` from the latest commit of that push (the event SHA), not from intermediate commits or a later branch head. Use increasing stable `MAJOR.MINOR.PATCH` versions; prereleases are rejected because users follow `releases/latest`. The workflow creates `v<version>` automatically at that exact commit. No manual tag creation or tag push is needed.
 
-1. Update the package version and lockfile with `npm version <version> --no-git-tag-version`, and update both README versions.
+1. Update the package version and lockfile with `npm version <version> --no-git-tag-version`.
 2. Run the checks below. For the initial 3.0.0 only, copy `dist/discourse-sidebar-feed-panel.user.js` to the repository root after building, before artifact checks. Leave that migration snapshot unchanged in later versions.
 3. Commit and push to `main` (`git push origin main`). Ensure the repository permits Actions and workflow write access.
 4. The workflow checks whether `v<version>` already has a complete stable Release with the userscript asset. If so, publication is skipped. Otherwise it installs locked dependencies, runs typecheck, unit tests, development endpoint, build, artifact, scroll and production-browser checks, then creates the tag and Release with generated notes. A failed check prevents publication. The separate check workflow still validates ordinary commits with unchanged versions.

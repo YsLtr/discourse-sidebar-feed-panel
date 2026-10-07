@@ -47,7 +47,7 @@ export async function checkArtifact() {
   checkNode(ast);
   for (const name of ['README.md', 'README.en.md']) {
     const doc = await read(name);
-    assert(doc.includes(`\`${pkg.version}\``), `${name} version is stale`);
+    // The READMEs intentionally carry no version claim; only the Release link is checked.
     assert(doc.includes(`](${releaseURL})`), `${name} must link to the latest Release asset`);
   }
   return source;
