@@ -11,17 +11,17 @@ The project uses Vite 8.3.2 and vite-plugin-monkey 8.1.1, with exact dependency 
 | `build/userscript.ts` | Published name, namespace, match rules, permissions and update URLs; version comes from package.json |
 | `src/platform/gm.ts` | Explicit imports from vite-plugin-monkey's `$` client alias |
 | `src/preferences.ts`, `storage-keys.ts` | Preference state and persistence, origin-scoped synchronous storage and LinuxDO legacy-key migration |
-| `src/platform/discourse.ts`, `lifetime.ts` | Page environment, CSRF, navigation, cancellable readiness and owned listeners/timers/RAFs |
+| `src/platform/discourse.ts`, `lifetime.ts` | Page environment, CSRF, page locale and its observation, navigation, cancellable readiness and owned listeners/timers/RAFs |
 | `src/platform/route-watcher.ts` | Idempotent route/host observation and reversible history wrappers |
-| `src/site/` | Category/navigation data, capabilities, versioned caches, tag styles and appearance rules |
+| `src/site/` | Category/navigation data, capabilities, per-locale caches, tag styles and appearance rules |
 | `src/feed/query.ts`, `read-state.ts` | Shared URL/query and reading-progress rules |
 | `src/feed/resident.ts`, `unavailable.ts` | Topic/user retention, pagination depth, local-read merging, vanished-topic detection and expiry |
 | `src/feed/incoming.ts`, `auto-load.ts` | Candidate count versus load batch; query-scoped pagination rate limits |
 | `src/feed/reading.ts`, `refresh.ts` | Latched reading state, page activity and restartable refresh clocks |
-| `src/feed/api.ts`, `controller.ts` | API boundary, query snapshots, operation tokens, cancellation, subscriptions and application flows |
+| `src/feed/api.ts`, `controller.ts` | API boundary, query snapshots, operation tokens, cancellation, subscriptions, application flows and the in-place reload for a page-locale change |
 | `src/ui/host.ts`, `controls.ts`, `topic-item.ts`, `topic-list.ts` | Native host and width, controls, topic rendering, pagination UI, anchors and interrupted smooth scrolling |
 | `src/ui/scroll.ts` | Passive scroll observation and cancellation of pending work on rebind/disposal |
-| `src/i18n.ts`, `src/ui/html.ts`, `icons.ts` | Existing text and presentation helpers |
+| `src/i18n.ts`, `src/ui/html.ts`, `icons.ts` | Existing text and presentation helpers, HTML entity decoding and the Topic Display Title rule |
 
 All application source is TypeScript and passes strict type checking. There is no unchecked JavaScript controller or shared mutable global-state module. Domain data owners have no DOM/GM/network effects. UI receives read-only preferences, view data and action callbacks; preference writes remain in the preference owner.
 
@@ -32,6 +32,16 @@ Read-filter changes continue to render locally without resetting resident depth.
 `npm run build` writes a self-contained, unminified userscript under ignored `dist/`. Keep build output out of Git and never use the repository root as Vite's output directory. The root userscript is a frozen 3.0.0 migration snapshot for existing Raw installations.
 
 CI checks that the built userscript carries the full metadata set (name, namespace, version, description, author, match, icon, permissions, run-at and license), that its version matches `package.json`, and that both update URLs point to the latest Release asset. Published metadata is not frozen against older releases, so branding changes such as the namespace or icon need no check update. The root migration snapshot must stay at version 3.0.0 with the Release update URLs.
+
+## Language compatibility
+
+The panel follows the locale the forum resolved for the current request instead of each topic's source language. `fancy_title` is the localized, HTML-escaped title carried by list responses; `title` is always source-language text, and `unicode_title` exists only for titles that contain emoji shortcodes. A Topic Item renders the first non-empty value of: `fancy_title` with no `:shortcode:` remnant, `unicode_title`, `fancy_title`, `title`. The chosen text is entity-decoded and then escaped, and the title line carries `dir="auto"` like the native list.
+
+The userscript never sends `?tl=`: it is ignored for signed-in users and would make anonymous and signed-in views disagree. The page locale is the request locale, so list responses already carry the right `fancy_title`.
+
+Persistent caches that hold localized content keep one version per page locale and use the entry for the current locale; returning to a locale that was used before costs no request. The two such caches are `sfp_category_data_cache_v1` (category names and descriptions) and `sfp_tag_style_cache_v1` (tag names scraped from `/tags`). Only the current and the previously used locale are kept. The locale token comes from `getPageLocale()` in `src/platform/discourse.ts` (`<html lang>` lowercased with `_` replaced by `-`), and a cache written before this change is dropped once because its locale is unknown. The same module watches `lang`/`xml:lang` on `document.documentElement`: a locale change that arrives without a page reload rebuilds the panel in place, resets in-memory state and reloads topics, without deleting the persistent caches. Discourse's own language switcher reloads the page, so this path is the fallback. `getUiLocale` keeps supporting `zh-CN` and `en` with the English fallback, and no UI string is added.
+
+The parity fixture freezes `src/constants.ts`, `src/storage-keys.ts`, the stylesheet signature and the whole `I18N` table, so language handling may not add a storage key, change a cache version constant or add UI copy. Full behavior, evidence and boundaries: [language compatibility](language-compatibility.md).
 
 ## Release distribution
 
@@ -79,10 +89,10 @@ npm run check:artifact
 
 Both browser commands launch a temporary headless Chrome profile and clean up only that profile. They do not install or update a script in the user's browser. Set `CHROME_BIN` or append `-- --chrome /path/to/chrome` to select Chrome; `PYTHON` can select the Python executable.
 
-- Unit tests cover storage migration/isolation, query URLs and category paths, read state, retention/expiry, incoming batches, auto-load/reading gates, countdown and lifetime disposal, site capabilities/navigation/cache reset races, route cleanup, and scroll debounce cancellation. Migration parity tests execute 33 unchanged functions extracted from commit `47794f3`, and compare the complete stylesheet structure, bilingual text and constants. The fixture is reproducible with `node tools/capture-migration-baseline.mjs`; normal test runs do not require Git history.
+- Unit tests cover storage migration/isolation, query URLs and category paths, read state, retention/expiry, incoming batches, auto-load/reading gates, countdown and lifetime disposal, site capabilities/navigation/cache reset races, route cleanup, and scroll debounce cancellation. Migration parity tests execute 33 unchanged functions extracted from commit `47794f3`, and compare the complete stylesheet structure, bilingual text and constants. The fixture is reproducible with `node tools/capture-migration-baseline.mjs`; normal test runs do not require Git history. The suite also covers the Topic Display Title rule and the per-locale cache tables (locale hit, missing locale, pruning, dropping the pre-change cache).
 - `check:scroll` bundles the real `ui/scroll.ts` implementation into an inline fixture. Loading/state callbacks are stubbed. By default the fixture imports just the `.sfp-feed-scroll` rule from the real CSS, matching the previous checker's scope. The existing 12 wheel/touch/rebind/first-wheel/busy-main-thread assertions remain in place.
 - Historical single-file baselines remain supported: `python tools/check-scroll-isolation.py --source path/to/2.2.3.user.js --label baseline`. Running Python without a source requires a previously built module fixture; the npm command builds it first.
-- `check:browser` evaluates the actual dist userscript, including all CSS, on a local mock Discourse page. Checks cover mount, default-order migration, navigation/read-dot layout, read-state merge, local-page pagination, incoming application, independent lifecycle subscriptions, host replacement, request coalescing, A→B→A and local-filter races, width persistence on mouseup, complete disposal, idempotent restart, interrupted smooth scrolling and tag-iframe cleanup. It also checks zero-second message batching, the three-empty-page stop, the three-requests-per-window limit, manual bypass and retry of the failed page. The mock deliberately ignores fetch cancellation to exercise token checks.
+- `check:browser` evaluates the actual dist userscript, including all CSS, on a local mock Discourse page. Checks cover mount, default-order migration, navigation/read-dot layout, read-state merge, local-page pagination, incoming application, independent lifecycle subscriptions, host replacement, request coalescing, A→B→A and local-filter races, width persistence on mouseup, complete disposal, idempotent restart, interrupted smooth scrolling and tag-iframe cleanup. It also checks zero-second message batching, the three-empty-page stop, the three-requests-per-window limit, manual bypass and retry of the failed page. The mock deliberately ignores fetch cancellation to exercise token checks. It also covers localized `fancy_title` rendering with entity decoding, `dir="auto"` on the title line, the per-locale cache table, and the in-place rebuild when `document.documentElement.lang` changes without a page reload.
 - These fixtures do not verify script-manager sandbox behavior, actual forum APIs, sleep/wake sessions, or physical touch devices. Those remain release checks.
 
 ### Full-CSS scroll diagnostic

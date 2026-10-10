@@ -25,6 +25,7 @@ This plan tracks the agreed design for changing the Feed Panel from a LinuxDO-sp
 - Sort, period, and filter controls are derived from site capabilities advertised by Discourse site data. Unsupported controls are hidden rather than emulated.
 - The existing ranked-period behavior is preserved where supported: `period=all` ranked orders use latest-style ordering, while non-`all` ranked periods use top-style period requests.
 - UI copy and relative-time formatting use the forum page language first, then Discourse/browser language if needed. Phase one supports `zh-CN` and `en`, with English fallback for unknown languages.
+- Topic titles follow the locale the forum resolved for the request: list responses carry the localized `fancy_title`, which the Feed Panel prefers over the source-language `title`. The userscript never sends `?tl=`. See [language compatibility](language-compatibility.md).
 - README must document the first-phase support model: built-in support for LinuxDO and NodeLoc, manual userscript-manager match additions for other forums, native-sidebar-only behavior, and user responsibility for incorrect manual matches.
 
 ## Deferred Phase-Two Work
