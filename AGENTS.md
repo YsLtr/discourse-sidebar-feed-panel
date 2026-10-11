@@ -1,43 +1,42 @@
 # Discourse Sidebar Feed Panel - Active Handoff
 
-**Updated**: 2026-10-05 20:24:16 中国标准时间 +0800
+The userscript replaces a selected area of a Discourse forum with a compact, locally-filtered topic feed panel, hosted from the userscript metadata of a single built file. `CONTEXT.md`, `docs/adr/` and `docs/` hold the durable contracts; this file records only the current session.
+
 **Project root**: `C:\Users\28676\builds\discourse\userscript`
 **Branch / remote**: `main` / `https://github.com/YsLtr/discourse-sidebar-feed-panel.git`
-**User request**: hand off, commit all release changes together, and push `main`. That push is authorized to trigger the 3.0.0 Release workflow. This file is written before the commit/push; verify remote Actions/Release status rather than treating publication as already confirmed.
+**User request**: implement the web-page language compatibility described by `docs/language-compatibility.md` — render titles in the locale the forum resolved for the request, and keep the locale-dependent persistent caches per locale.
 
-## Current State
+## 本轮完成的工作
 
-- Version **3.0.1** is in package.json, package-lock.json and both READMEs. Previous migration commit: `78ea6be`; baseline single-file source: `47794f3:discourse-sidebar-feed-panel.user.js`.
-- `.github/workflows/release.yml` triggers on pushes to `main`, reads package.json from the latest commit of that push, and checks for an existing stable `v<version>` Release. A complete same-version Release is skipped; incomplete releases, orphaned tags and non-404 API failures stop explicitly. The separate check workflow still validates ordinary commits.
-- New versions run all existing checks, then automatically create the version tag at `GITHUB_SHA` and publish the built userscript as latest. **No manual tag creation/push.** Use increasing stable MAJOR.MINOR.PATCH versions; published assets are not overwritten. Workflow runs are serialized.
-- `build/userscript.ts` points both `@updateURL` and `@downloadURL` to the latest asset. README installation/update instructions and `docs/development.md#release-distribution` describe the new flow.
-- The user explicitly reversed the prior root-artifact deletion policy: retain `discourse-sidebar-feed-panel.user.js` as a full **3.0.0 migration snapshot** at the old Raw path. It has the original identity and new Release URLs. Keep this snapshot at 3.0.0 in later releases; do not edit it directly. `tools/artifact.mjs` requires this snapshot to stay at version 3.0.0 with the Release update/download URLs. Published metadata is **not** frozen against the 2.2.3 baseline: the build must carry the complete metadata set (name/namespace/version/description/author/match/icon/permissions/run-at/license), the package version and the two Release URLs, but namespace and icon may change freely — 3.0.1 uses `https://github.com/YsLtr` and the Discourse avatar icon.
-- `dist/` stays ignored and may remain after local checks. Do not routinely delete it or commit its contents. Source ownership and commands: `docs/development.md`. Migration audit: `docs/migration-completeness-audit-2026-10-05.md`.
+- **计划入档**(`817e446`): the investigation document was renamed to `docs/language-compatibility.md` and rewritten as the contract (terminology, server locale chain, field/endpoint translation table, live evidence, implementation rules, acceptance, known boundaries, repro commands); `docs/development.md` gained a Language compatibility section and `docs/cross-site-discourse-adaptation-plan.md` gained the matching resolved decision.
+- **实现**(`56feafc`, 19 files, +364/-27):
+  - `src/ui/html.ts` added `decodeHtmlEntities` (detached `<textarea>` round-trip) and `selectTopicTitle`; the single title render site `src/ui/topic-item.ts` now emits `escapeHtml(decodeHtmlEntities(selectTopicTitle(topic)))` inside `span.sfp-topic-title-line[dir="auto"]`; `Topic` gained `fancy_title?: string`.
+  - Title priority: `fancy_title` when free of `:[\w\-+]+:`, else `unicode_title`, else `fancy_title`, else `title`. No `?tl=` is sent.
+  - `sfp_category_data_cache_v1` and `sfp_tag_style_cache_v1` values became `{ version, locales: { "<locale>": { savedAt, … } } }`, located by `getPageLocale()` (injected into `createSiteData`/`createTagStyles` from `src/platform/discourse.ts`), keeping the current plus the previous locale (`src/site/locale-cache.ts`, `withLocaleEntry`, `MAX_CACHED_LOCALES = 2`), and dropping a pre-change blob without a `locales` field once.
+  - `observePageLocale()` watches `documentElement` `lang`/`xml:lang` under the bridge Lifetime and reports at most once per page load; `controller.reloadForPageLocale()` resets site/tag in-memory state, force-rebuilds header/tab/filter bars, resets auto-load state and reloads topics in place — no `location.reload()`, caches not deleted.
+  - `CONTEXT.md` gained the terms **Topic Display Title** and **Page Locale**; `todo.md`'s language item is checked off.
+  - Version bumped to **3.1.0** in `package.json`/`package-lock.json`.
+- **验证**: `npm run typecheck`, `npm test` (12 files / 58 tests), `npm run check:dev`, `npm run build` (192.33 kB, gzip 43.88 kB), `npm run check:artifact`, `npm run check:browser` (36 checks), `npm run check:scroll` (12 checks) all passed; migration-parity tests 8/8. A rebuild was byte-identical to the audited `dist/` artifact, so the browser checks ran against this commit's source. New unit files: `tests/unit/topic-title.test.ts`, `tests/unit/page-locale.test.ts`; the browser fixture topic and `tools/check-built-userscript.py` gained the localized-title and locale-change cases.
+- **代理审查**(static variant by a scout sub-agent, offline-test variant by the main agent, adversarial variant by a code-reviewer sub-agent; reports under `.pi/tmp/audit-*.md`): no must-fix finding; the verdict was recorded as clean with accepted low-risk residuals.
+- **文档复位**(`c83ae72`): `docs/language-compatibility.md` §六 acceptance was corrected to the assertions actually implemented (in-place rebuild is proven by the panel copy switching, not by a title text change), the observer unit cases were listed, §五.4 now says the observation compares against the locale recorded when the observer was created, and §七 gained the two new boundaries.
+- `ea002c4`: `vitest.config.ts` comment noting that DOM-dependent behaviour is covered by `check:browser`, not by the jsdom-free unit setup.
 
-Latest installation / download / update URL:
-https://github.com/YsLtr/discourse-sidebar-feed-panel/releases/latest/download/discourse-sidebar-feed-panel.user.js
+## 当前仓库状况
 
-Version-specific asset:
-https://github.com/YsLtr/discourse-sidebar-feed-panel/releases/download/v3.0.0/discourse-sidebar-feed-panel.user.js
+- HEAD is `ea002c4`; the AGENTS.md commit for this handoff is the last change of the session and lands on top of it. Everything else is committed.
+- Nothing has been pushed. Version 3.1.0 exists only locally, so no `v3.1.0` tag or Release exists yet.
+- The only untracked path is `.pi/` (deep-plan scratch: the three audit reports plus `commit-message.txt`).
 
-## Validation and Remaining Work
+## 未决问题
 
-- Local 3.0.0 validation passed: strict typecheck, **44 unit tests**, dev bridge, build, artifact identity/URL/README/snapshot checks, **31 production-bundle browser checks**, **12 native-scroll checks**, and whitespace checks.
-- After changing the workflow to push-to-main, local YAML/job/commit-target validation and **11 mocked cases executing the embedded version-check JavaScript** passed (new/existing versions, malformed versions, incomplete releases, API failures and orphan tags). Artifact validation passed again. These are local checks, not a completed GitHub Actions run.
-- Check the run for the pushed commit (`gh run list`, `gh run view`) and confirm the v3.0.0 asset is available. Initial push exposes the Raw bridge before the Release finishes; users checking during that window may need to retry. If Actions fails, inspect logs and fix the concrete cause; do not overwrite a published asset or blindly delete an orphan tag/release.
-- User will manually synchronize external publication sites using the latest URL. No external-site edits are requested.
-- Real userscript-manager upgrade/sandbox compatibility, actual forum sleep/wake behavior and physical touch acceptance remain unverified. Name/namespace and update-path checks do not prove manager-specific behavior. Optional full-CSS diagnostic previously failed to collect busy-window frame samples in both old/new versions; do not report it as passing.
-- Prior migration comparison evidence and regression fixes are documented in the audit; preserve width persistence, request coalescing, lifetime cleanup, same-turn silent-refresh queues, Set insertion, malformed lifecycle handling and optional page-API fallback.
+- **是否发布 3.1.0 未定**: pushing `main` triggers `.github/workflows/release.yml`, which creates the `v3.1.0` tag and publishes the built userscript as the latest asset; published assets are not overwritten. The user has not authorized that push in this session.
+- `.pi/` stays untracked because `.gitignore` cannot be edited in the documentation-reset phase. Add a `.pi/` ignore entry or delete the directory when the tree must be clean.
+- **审查接受的残余风险**(已记入 `docs/language-compatibility.md` §七): the `:[\w\-+]+:` shortcode test is the same shape the server uses, so titles such as `12:30:45` or `a:b:c` fall back to the source title; entity decoding applies to all three title fields, so a title that literally contains `&lt;`/`&amp;` renders the decoded character; `withLocaleEntry` throws on a `locales: { x: null }` blob, which the call-site `try`/`catch` reduces to one lost write.
+- **未经实测**(does not block this change, but must not be reported as verified): whether a real forum returns the new locale's titles after an in-session language change; userscript-manager upgrade/sandbox compatibility; the `clearCaches` delete-then-refetch path end to end (the browser check only asserts the API is still exposed); visual RTL rendering under `dir="auto"`.
+- The `todo.md` notes that arrived with this change ("稍后再读" items and the new meta brand theme) are the user's own open items, not work started in this session.
 
-Use Node `^22.20.0 || ^24.12.0 || >=26.0.0` (CI Node 22), `npm ci`, and `python -m pip install -r requirements-dev.txt`. Checks: `npm run typecheck`, `npm test`, `npm run check:dev`, `npm run build`, `npm run check:artifact`, `npm run check:browser`, `npm run check:scroll`. Browser checks use temporary Chrome profiles; `CHROME_BIN` / `PYTHON` override executables.
+## 后续任务
 
-## Durable Constraints
+用户本次会话未指定后续任务。
 
-- `CONTEXT.md` and `docs/adr/` govern feed/query/retention behavior. Keep one read dot per Topic Item; use `visibility: hidden` for read topics, never remove it or use `display: none`.
-- Preserve monotonic local read-state merging and unavailable-topic ordering, recovery and expiry. Use only the native Sidebar Host, navigation-sourced categories with All fallback, and descendant-inclusive category queries.
-- Do not add cancelable Feed wheel/touchmove boundary handlers. Keep passive scroll callbacks and CSS `overscroll-behavior-y: contain` / `touch-action: pan-y pinch-zoom`. Category-tab wheel mapping is separate; follow ADR 0003.
-- Pagination follows local depth; `more_topics_url` is only a hasMore signal. Refresh resets depth/trims; ordinary append and local read filters preserve depth.
-- Incoming reminder counts accumulate while detail requests are capped at one page. Preserve the Set insertion path, unknown-payload handling, batching, busy queues and stale-request tokens.
-- Away latches after one viewport until the actual head; automatic refresh requires `scrollTop <= 1` plus visibility/activity gates. The baseline has no three-times-capacity auto-refresh gate.
-- Pure duplicate pages do not count toward the empty-filter stop; the baseline permits pagination during refresh. Do not describe these existing boundaries as stronger protections.
-- Version 2.2.3 fixed input coupling during main-thread stalls, not the separate Discourse message-bus/Glimmer CPU blockage. Authoritative investigation: `docs/scroll-responsiveness-analysis-2026-10-05.md`, `docs/init-trace-analysis-2026-10-05.md`, `docs/adr/0003-native-feed-scroll-isolation.md`. Do not equate different recordings or mistake fixture latency for a real-site improvement.
+Updated: 2026-10-11 18:36 中国标准时间 +0800
