@@ -194,7 +194,7 @@ end
 
 Discourse 自己的语言切换器是硬刷新(`language-switcher.gjs#changeLocale` 末尾 `window.location.reload()`),这条路径上面板随页面重建、按新语言取缓存,无需额外处理。为覆盖**不伴随刷新**的语言变化(主题/插件或脚本改写页面语言),面板自带一个轻量侦测:
 
-- `src/platform/discourse.ts` 提供页面语言观测:用 `MutationObserver` 监听 `document.documentElement` 的 `lang` / `xml:lang` 属性(lifetime 归属,随面板 dispose),回调里把 `getPageLocale()` 与面板建立时的语言比较,不同才处理。
+- `src/platform/discourse.ts` 提供页面语言观测:用 `MutationObserver` 监听 `document.documentElement` 的 `lang` / `xml:lang` 属性(lifetime 归属,随面板 dispose),回调里把 `getPageLocale()` 与观测建立时记录的语言比较,不同才处理并置位内存标记。
 - 处理动作是**面板内就地重建**,不是整页 reload:重置站点数据与标签样式的内存状态、重建头部控件/分类栏/筛选栏(文案按新语言),再走一次既有的重新拉取路径。持久缓存**不删除**——按 §五.3 直接切到新语言那一份。
 - 每次页面加载最多处理一次语言变化(内存标记):站点若把 `lang` 反复改写也不会形成刷新循环。
 - 不轮询、不读 `locale` cookie、不请求语言信息;跨标签页改语言不处理(见 §七)。
@@ -234,8 +234,8 @@ npm run check:scroll
 
 语言兼容新增的断言:
 
-- 单元:Topic Display Title 的表驱动用例(`fancy_title` 优先、含 shortcode 时回落 `unicode_title`、只有 `unicode_title`、只有 `title`、空白与缺失字段);分类数据与标签样式缓存的版本表用例——同语言命中(零请求)、已有另一语言版本时该语言命中、目标语言缺席时未命中、写入第三个语言后按 `savedAt` 剪枝到两个、旧格式(无 `locales` 字段)整体丢弃。
-- 浏览器(`tools/check-built-userscript.py` + `tests/browser/site-fixture.html`):夹具话题带 `fancy_title: "Translated &#8220;Alpha&#8221;"` 时标题文本为 `Translated “Alpha”`,且标题行带 `dir="auto"`;缓存夹具按 `locales` 写入 `zh-cn`(与夹具 `<html lang="zh-CN">` 一致)并覆盖「当前语言无版本则不采用缓存」;改写 `document.documentElement.lang` 后断言面板就地重建(标题文本切到新语言、持久缓存未被删除)。
+- 单元:Topic Display Title 的表驱动用例(`fancy_title` 优先、含 shortcode 时回落 `unicode_title`、只有 `unicode_title`、只有 `title`、空白与缺失字段);分类数据与标签样式缓存的版本表用例——同语言命中(零请求)、已有另一语言版本时该语言命中、目标语言缺席时未命中、写入第三个语言后按 `savedAt` 剪枝到两个、旧格式(无 `locales` 字段)整体丢弃;页面语言观测的用例——语言未变(含 `zh-CN`/`zh_CN` 归一)不回报、属性反复改写只回报一次、dispose 后不再回报,且 `attributeFilter` 恰为 `["lang","xml:lang"]`。
+- 浏览器(`tools/check-built-userscript.py` + `tests/browser/site-fixture.html`):夹具话题带 `fancy_title: "Translated &#8220;Alpha&#8221;"` 时标题行文本为 `Translated “Alpha”`、且带 `dir="auto"`;缓存夹具按 `locales` 写入 `zh-cn`(与夹具 `<html lang="zh-CN">` 一致)并覆盖「当前语言无版本则不采用缓存」(该情形下不发 `/tags` 请求);改写 `document.documentElement.lang` 后断言就地重建——重新拉取当前查询、面板文案切到新语言(`全部` → `All`;夹具话题标题与语言无关,故以面板文案而非标题文本作判据)、且改写前的 `locales['zh-cn']` 版本仍留在持久缓存里未被删除。
 - 迁移对照测试必须继续通过,且不对基线做任何修改。
 
 人工核对(可选,需已登录 agent-browser profile):在 meta.discourse.org 上确认面板标题与同页原生列表一致、切换站点语言后分类标签不残留旧语言。
@@ -243,6 +243,8 @@ npm run check:scroll
 ## 七、已知边界
 
 - 含 emoji `:shortcode:` 的**译文**标题显示原文的 `unicode_title`(规则 2):服务端的 `fancy_title` 不转 shortcode,而 `unicode_title` 不随译文变化。完全对齐原生需要站点 emoji 资源,超出本期。
+- 判定 shortcode 的 `:[\w\-+]+:` 与服务端决定是否下发 `unicode_title` 的正则相同,因此**只要标题含该形状的冒号片段就会回落原文**,包括 `12:30:45`、`a:b:c` 这类非 emoji 标题:这些标题在面板里显示原文,而同页原生列表显示译文。
+- 实体解码(`decodeHtmlEntities`)对三个字段一视同仁,但只有 `fancy_title` 是服务端已转义文本;`title` / `unicode_title` 是未转义原文,若标题**字面**含 `&lt;`、`&amp;` 这类文本,面板会把它还原成 `<`、`&` 显示(概率极低,不针对该情形做字段区分)。
 - `fancy_title` 缺失(旧版 Discourse 或非标准实现)→ 回落 `unicode_title`/`title`,与 3.0.1 相同。
 - `content_localization_enabled=false` 的站点只涉及 UI 文案语言:此时 `fancy_title` 是转义后的原文,解码后与 `title` 同文本(标点会做 typographic 处理)。
 - 升级前写入的持久缓存没有语言字段,语言不可知,因此**整体丢弃一次**:该语言会重新请求一次分类数据与标签样式。这是唯一不保留旧数据的位置。
