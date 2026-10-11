@@ -68,6 +68,14 @@ try:
           const s=getComputedStyle(document.querySelector('.sfp-feed-scroll'));
           return s.overscrollBehaviorY==='contain' && s.touchAction==='pan-y pinch-zoom';
         })()""")
+        wait_for("""document.querySelector('[data-topic-id="299"] .sfp-tag')?.getAttribute('style')==='--color1: #123456'""")
+        check('localized fancy_title is entity-decoded inside a dir="auto" title line', """(() => {
+          const line=document.querySelector('[data-topic-id="299"] .sfp-topic-title-line');
+          return !!line && line.textContent==='Translated \u201cAlpha\u201d' && line.getAttribute('dir')==='auto' &&
+            document.querySelector('[data-topic-id="300"] .sfp-topic-title-line').textContent==='Topic 300';
+        })()""")
+        check('the tag style cache of the current page locale is adopted without a /tags request', """!!document.querySelector('.sfp-tag[style]') &&
+          !document.querySelector('iframe[src="/tags"]')""")
         cdp.evaluate("""fixture.writes.length=0;
           document.querySelector('.sfp-resizer').dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:300}));
           for(let x=310;x<=450;x+=10) document.dispatchEvent(new MouseEvent('mousemove',{clientX:x}));""")
@@ -152,13 +160,15 @@ try:
             cdp.evaluate("fixture.publish('/latest',{message_type:'latest',topic_id:1200,payload:fixture.topic(1200)});document.querySelector('.sfp-refresh-btn').click();SFPFeedPanel.dispose()")
             wait_for("fixture.effects.timeouts.size===0 && fixture.effects.intervals.size===0 && fixture.effects.frames.size===0")
             check('dispose interrupts smooth return and disables automatic refresh', "fixture.effects.listeners.length===0 && !document.querySelector('.sfp-feed-container')")
-            cdp.evaluate("fixture.store.delete(`sfp_site:${encodeURIComponent(location.origin)}:sfp_tag_style_cache_v1`);SFPFeedPanel.start()")
-            wait_for("!!document.querySelector('iframe[src=\"/tags\"]')")
+            cdp.evaluate("""fixture.store.set(scoped('sfp_tag_style_cache_v1'),{version:1,locales:{'ja':{savedAt:1,entries:[['alpha',{cssText:'--color1: #123456',icon:'',hasIcon:false}]]}}});
+              SFPFeedPanel.start()""")
+            wait_for("!!document.querySelector('iframe[src=\"/tags\"]') && document.querySelectorAll('.sfp-topic-item').length===30")
+            check('a tag style cache without the current page locale is not adopted', "[...document.querySelectorAll('.sfp-tag')].every(t=>!t.getAttribute('style'))")
             cdp.evaluate("SFPFeedPanel.dispose()")
             wait_for("!document.querySelector('iframe[src=\"/tags\"]') && fixture.effects.timeouts.size===0 && fixture.effects.frames.size===0")
             check('dispose removes a loading tag iframe and its polling timer', "fixture.effects.listeners.length===0 && fixture.effects.intervals.size===0")
 
-            cdp.evaluate("""fixture.store.set(scoped('sfp_tag_style_cache_v1'),{version:1,entries:[['alpha',{cssText:'--color1: #123456',icon:'',hasIcon:false}]]});
+            cdp.evaluate("""fixture.store.set(scoped('sfp_tag_style_cache_v1'),{version:1,locales:{'zh-cn':{savedAt:1,entries:[['alpha',{cssText:'--color1: #123456',icon:'',hasIcon:false}]]}}});
               fixture.store.set(scoped('sfp_auto_silent_refresh'),true);
               fixture.store.set(scoped('sfp_auto_silent_refresh_interval'),0);
               SFPFeedPanel.start();""")
@@ -173,6 +183,16 @@ try:
               document.querySelector('[data-filter="all"]').click();""")
             wait_for("!!document.querySelector('[data-topic-id=\"4000\"]')")
             check('filter changes in the same message turn cannot strand a queued silent refresh', "fixture.requests.length===1 && fixture.requests[0].path.includes('topic_ids=4000')")
+            cdp.evaluate("fixture.requests.length=0;document.documentElement.lang='en'")
+            wait_for("document.querySelector('.sfp-tab-bar [data-tab=\"all\"]')?.textContent.includes('All') && document.querySelectorAll('.sfp-topic-item').length===30")
+            check('a page locale change without a reload rebuilds the panel in place', """(() => {
+              const cache=fixture.store.get(scoped('sfp_tag_style_cache_v1'));
+              return fixture.requests.some(r=>r.path==='/latest.json?order=activity&page=0') &&
+                cache.locales['zh-cn'].entries.length===1;
+            })()""")
+            cdp.evaluate("document.documentElement.lang='zh-CN'")
+            cdp.evaluate("new Promise(resolve=>setTimeout(resolve,400))")
+            check('each page load reports one locale change only', "document.querySelector('.sfp-tab-bar [data-tab=\"all\"]').textContent.includes('All')")
 
             cdp.evaluate("""SFPFeedPanel.dispose();
               fixture.store.set(scoped('sfp_auto_silent_refresh'),false);

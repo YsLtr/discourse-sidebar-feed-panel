@@ -4,15 +4,18 @@ import { Lifetime } from "../platform/lifetime";
 import type { ValueStore } from "../preferences";
 import { TAG_STYLE_CACHE_KEY } from "../storage-keys";
 import { _safeIconName } from "./appearance";
+import { withLocaleEntry } from "./locale-cache";
 import type { createSiteData } from "./site-data";
 import type { SitePayload, TagStyle, TagStyleCache } from "./types";
 
 export function createTagStyles({
   storage,
   site,
+  getPageLocale,
 }: {
   storage: ValueStore;
   site: ReturnType<typeof createSiteData>;
+  getPageLocale: () => string;
 }) {
   let scope = new Lifetime();
   const _getSiteValue = storage.get;
@@ -123,15 +126,17 @@ export function createTagStyles({
         TAG_STYLE_CACHE_KEY,
         null,
       );
+      // 语言版本表缺当前语言那一份(含升级前没有 locales 的旧格式)→ 未命中。
+      const entry = cache?.locales?.[getPageLocale()];
       if (
         !cache ||
         cache.version !== TAG_STYLE_CACHE_VERSION ||
-        !Array.isArray(cache.entries)
+        !Array.isArray(entry?.entries)
       ) {
         return false;
       }
 
-      cache.entries.forEach(([key, style]) => {
+      entry.entries.forEach(([key, style]) => {
         if (!key || !style || typeof style !== "object") return;
         const icon = _safeIconName(style.icon || "");
         const cssText = _sanitizeTagStyle(style.cssText || "");
@@ -154,10 +159,22 @@ export function createTagStyles({
     if (tagStyleByKey.size === 0) return;
 
     try {
+      const cached = _getSiteValue<TagStyleCache | null>(
+        TAG_STYLE_CACHE_KEY,
+        null,
+      );
       _setSiteValue(TAG_STYLE_CACHE_KEY, {
         version: TAG_STYLE_CACHE_VERSION,
-        savedAt: Date.now(),
-        entries: Array.from(tagStyleByKey.entries()),
+        locales: withLocaleEntry(
+          cached?.version === TAG_STYLE_CACHE_VERSION
+            ? cached.locales
+            : undefined,
+          getPageLocale(),
+          {
+            savedAt: Date.now(),
+            entries: Array.from(tagStyleByKey.entries()),
+          },
+        ),
       });
     } catch (e) {
       console.warn("[SFP] save tag style cache failed:", e);

@@ -16,7 +16,7 @@ const subscriptions = new Map();
 const store = new Map([
   [scoped('sfp_feed_mode_enabled'), true],
   [scoped('sfp_current_order'), 'default'],
-  [scoped('sfp_tag_style_cache_v1'), {version:1,entries:[['alpha',{cssText:'--color1: #123456',icon:'',hasIcon:false}]]}],
+  [scoped('sfp_tag_style_cache_v1'), {version:1,locales:{'zh-cn':{savedAt:1,entries:[['alpha',{cssText:'--color1: #123456',icon:'',hasIcon:false}]]}}}],
 ]);
 window.fixture = {
   store, subscriptions, menus: [], writes: [], requests: [], pause: false, pending: [],
@@ -59,6 +59,7 @@ for (const target of [window, document]) {
   };
 }
 fixture.head = Array.from({length:30}, (_,i) => fixture.topic(300-i));
+fixture.head[1].fancy_title = 'Translated &#8220;Alpha&#8221;';
 window.GM_getValue = (key, fallback) => store.has(key) ? structuredClone(store.get(key)) : fallback;
 window.GM_setValue = (key, value) => { fixture.writes.push({key,value});store.set(key, structuredClone(value)); };
 window.GM_deleteValue = key => store.delete(key);

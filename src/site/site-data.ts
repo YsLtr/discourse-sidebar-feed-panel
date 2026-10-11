@@ -8,6 +8,7 @@ import {
   _safeCategoryStyleType,
   _safeIconName,
 } from "./appearance";
+import { withLocaleEntry } from "./locale-cache";
 import type {
   CategoryCache,
   CategoryListPayload,
@@ -42,10 +43,12 @@ export const FILTER_OPTION_DEFS = [
 export function createSiteData({
   storage,
   getCsrfToken,
+  getPageLocale,
   onChange,
 }: {
   storage: ValueStore;
   getCsrfToken: () => string;
+  getPageLocale: () => string;
   onChange: () => void;
 }) {
   let scope = new Lifetime();
@@ -414,14 +417,16 @@ export function createSiteData({
         CATEGORY_DATA_CACHE_KEY,
         null,
       );
+      // 语言版本表缺当前语言那一份(含升级前没有 locales 的旧格式)→ 未命中。
+      const entry = cache?.locales?.[getPageLocale()];
       if (
         !cache ||
         cache.version !== CATEGORY_DATA_CACHE_VERSION ||
-        !cache.source
+        !entry?.source
       )
         return null;
 
-      const source = cache.source;
+      const source = entry.source;
       if (
         !source.site ||
         !Array.isArray(source.site.categories) ||
@@ -438,10 +443,19 @@ export function createSiteData({
 
   function _saveCategoryDataCache(source: CategorySource) {
     try {
+      const cached = _getSiteValue<CategoryCache | null>(
+        CATEGORY_DATA_CACHE_KEY,
+        null,
+      );
       _setSiteValue(CATEGORY_DATA_CACHE_KEY, {
         version: CATEGORY_DATA_CACHE_VERSION,
-        savedAt: Date.now(),
-        source,
+        locales: withLocaleEntry(
+          cached?.version === CATEGORY_DATA_CACHE_VERSION
+            ? cached.locales
+            : undefined,
+          getPageLocale(),
+          { savedAt: Date.now(), source },
+        ),
       });
     } catch (e) {
       console.warn("[SFP] save category data cache failed:", e);

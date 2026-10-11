@@ -12,6 +12,7 @@ function setup(
   sitePayload: object,
   navigation: object[] = [],
   cached?: object,
+  locale = { value: "zh-cn" },
 ) {
   vi.stubGlobal("location", { origin: "https://forum.example" });
   vi.stubGlobal("document", { querySelectorAll: () => [] });
@@ -40,10 +41,16 @@ function setup(
   };
   const onChange = vi.fn();
   return {
-    site: createSiteData({ storage, getCsrfToken: () => "csrf", onChange }),
+    site: createSiteData({
+      storage,
+      getCsrfToken: () => "csrf",
+      getPageLocale: () => locale.value,
+      onChange,
+    }),
     fetcher,
     saved,
     onChange,
+    locale,
   };
 }
 
@@ -59,7 +66,10 @@ describe("site data service", () => {
   });
   it("rejects an old cache version and falls back to categories when site.json fails", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { site, fetcher } = setup({}, [], { version: 0, source: { site: { categories: records }, navigationCategories: [records[2]] } });
+    const { site, fetcher } = setup({}, [], {
+      version: 0,
+      locales: { "zh-cn": { savedAt: 1, source: { site: { categories: records }, navigationCategories: [records[2]] } } },
+    });
     fetcher.mockImplementation(async url => url === "/site.json" ? new Response("unavailable", { status: 503 }) : new Response(JSON.stringify({ category_list: { categories: [records[0]] } })));
     await site.loadCategoryMetadata();
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -127,9 +137,14 @@ describe("site data service", () => {
   it("reuses the versioned category cache and supports legacy slug tabs", async () => {
     const { site, fetcher, onChange } = setup({}, [], {
       version: 1,
-      source: {
-        site: { categories: records },
-        navigationCategories: [records[0]],
+      locales: {
+        "zh-cn": {
+          savedAt: 1,
+          source: {
+            site: { categories: records },
+            navigationCategories: [records[0]],
+          },
+        },
       },
     });
     await site.loadCategoryMetadata();
@@ -139,5 +154,47 @@ describe("site data service", () => {
     site.reset();
     expect(site.loaded).toBe(false);
     expect(site.tabCategories).toEqual([]);
+  });
+  it("drops a cache written before locale versioning", async () => {
+    const { site, fetcher } = setup({ categories: records }, [], {
+      version: 1,
+      source: { site: { categories: records }, navigationCategories: [records[0]] },
+    });
+    await site.loadCategoryMetadata();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it("ignores another locale's entry and reuses the entry for the current locale", async () => {
+    const locale = { value: "ja" };
+    const { site, fetcher } = setup({ categories: records }, [], {
+      version: 1,
+      locales: {
+        "zh-cn": {
+          savedAt: 1,
+          source: { site: { categories: records }, navigationCategories: [records[0]] },
+        },
+      },
+    }, locale);
+    await site.loadCategoryMetadata();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(site.tabCategories).toEqual([]);
+
+    site.reset();
+    fetcher.mockClear();
+    locale.value = "zh-cn";
+    await site.loadCategoryMetadata();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(site.tabCategories.map((cat) => cat.id)).toEqual([1]);
+  });
+  it("keeps the current and previous locale and prunes older ones", async () => {
+    let now = 1000;
+    vi.spyOn(Date, "now").mockImplementation(() => (now += 1000));
+    const { site, saved, locale } = setup({ categories: records, navigation_menu_categories: [1] });
+    const locales = () => Object.keys((saved.get(CATEGORY_DATA_CACHE_KEY) as { locales: object }).locales).sort();
+    for (const value of ["zh-cn", "ja", "de"]) {
+      locale.value = value;
+      site.reset();
+      await site.loadCategoryMetadata();
+    }
+    expect(locales()).toEqual(["de", "ja"]);
   });
 });

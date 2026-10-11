@@ -53,9 +53,14 @@ export interface CategorySource {
   site: SitePayload;
   navigationCategories: CategoryRecord[];
 }
+export interface CategoryCacheEntry {
+  savedAt: number;
+  source: CategorySource;
+}
+// 随页面语言变化的内容按语言分版本保留;旧格式(直接带 source)因语言不可知被丢弃一次。
 export interface CategoryCache {
   version: number;
-  source: CategorySource;
+  locales: Record<string, CategoryCacheEntry>;
 }
 export interface CategoryTab {
   id: number;
@@ -71,7 +76,11 @@ export interface TagStyle {
   cssText: string;
   hasIcon: boolean;
 }
+export interface TagStyleCacheEntry {
+  savedAt: number;
+  entries: Array<[string, TagStyle]>;
+}
 export interface TagStyleCache {
   version: number;
-  entries: Array<[string, TagStyle]>;
+  locales: Record<string, TagStyleCacheEntry>;
 }

@@ -13,6 +13,34 @@ export function createDiscourseBridge(pageWindow: Window) {
     return cachedCsrfToken;
   }
 
+  function getPageLocale() {
+    const root = document.documentElement;
+    const raw =
+      root?.getAttribute("lang") || root?.getAttribute("xml:lang") || "";
+    return raw.trim().toLowerCase().replace(/_/g, "-");
+  }
+
+  /**
+   * 站点自己的语言切换器会 reload 页面;这里覆盖不伴随刷新的语言变化(主题/插件改写 `<html lang>`)。
+   * 每次页面加载最多回报一次,避免反复改写属性形成重建循环。
+   */
+  function observePageLocale(onChange: () => void) {
+    const root = document.documentElement;
+    if (!root) return;
+    const initial = getPageLocale();
+    let reported = false;
+    const observer = new MutationObserver(() => {
+      if (reported || getPageLocale() === initial) return;
+      reported = true;
+      onChange();
+    });
+    observer.observe(root, {
+      attributes: true,
+      attributeFilter: ["lang", "xml:lang"],
+    });
+    scope.defer(() => observer.disconnect());
+  }
+
   function toAbsoluteSiteUrl(path: string) {
     if (!path) return "";
     return new URL(path, location.origin).href;
@@ -141,6 +169,8 @@ export function createDiscourseBridge(pageWindow: Window) {
   return {
     dispose: () => scope.dispose(),
     getCsrfToken,
+    getPageLocale,
+    observePageLocale,
     toAbsoluteSiteUrl,
     navigateTo,
     getDiscourse,

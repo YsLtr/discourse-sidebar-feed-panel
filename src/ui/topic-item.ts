@@ -11,7 +11,7 @@ import { _normalizeHexColor, _safeCategoryStyleType } from "../site/appearance";
 import type { createSiteData } from "../site/site-data";
 import type { createTagStyles } from "../site/tag-styles";
 import { closestTarget } from "./dom";
-import { escapeAttr, escapeHtml } from "./html";
+import { decodeHtmlEntities, escapeAttr, escapeHtml, selectTopicTitle } from "./html";
 import { _svgIcon } from "./icons";
 interface TopicRendererDependencies {
   t: ReturnType<typeof createI18n>["t"];
@@ -253,7 +253,7 @@ export function createTopicRenderer({
         ${statusBadgesHtml}
         <span class="sfp-topic-time">${_topicTimeHtml(topic)}</span>
       </div>
-      <div class="sfp-topic-title"><span class="sfp-topic-title-line">${closedHtml}${escapeHtml(topic.unicode_title?.trim() || topic.title)}</span></div>
+      <div class="sfp-topic-title"><span class="sfp-topic-title-line" dir="auto">${closedHtml}${escapeHtml(decodeHtmlEntities(selectTopicTitle(topic)))}</span></div>
       <div class="sfp-topic-category-tags">
         ${categoryHtml}
         ${tagsHtml}

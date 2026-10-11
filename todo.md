@@ -50,5 +50,7 @@
 -[x] 优化隐藏置顶的逻辑
 -[x] 修复https://meta.discourse.org/ 兼容
 -[x] 凭空消失的话题保留并标记话题异常（issue #3）
--[] 稍后再读
--[] 自动翻译兼容
+-[] 稍后再读 实现方式为拖动链接到侧边栏加入稍后再读
+-[] 稍后再读可监听新内容（按discourse实现）
+-[x] 网页语言兼容，如https://meta.discourse.org/（标题取译文 fancy_title，无需新增 API）
+-[] 适配新的 meta brand 主题（移除meta后）

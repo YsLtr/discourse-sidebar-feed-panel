@@ -36,6 +36,14 @@ _Avoid_: All categories, static category config
 A rendered entry in the **Feed Panel** representing one Discourse topic.
 _Avoid_: Post item, card
 
+**Topic Display Title**:
+The text a **Topic Item** shows for its topic: the localized title when the site provides one, otherwise the source-language title, normalized to plain text.
+_Avoid_: Topic title when the raw API field is meant
+
+**Page Locale**:
+The locale the forum resolved for the current page load, inherited from the page rather than chosen in the panel.
+_Avoid_: Site default language, browser language
+
 **Topic Display User**:
 The first poster used by a **Topic Item** for avatar and display-name rendering.
 _Avoid_: Any poster, participant
@@ -148,6 +156,9 @@ _Avoid_: Pagination cursor, authoritative next page URL
 - A **Feed Panel** contains zero or more **Topic Items**.
 - A **Topic Item** is backed by exactly one **Resident Topic**.
 - A **Topic Item** has at most one **Topic Display User**.
+- A **Topic Item** renders its **Topic Display Title** in the page's **Page Locale**.
+- A **Page Locale** change rebuilds the **Feed Panel** in place and re-fetches the current feed query; it never deletes the per-locale caches.
+- The **Feed Panel** inherits the **Page Locale**; it does not offer its own language switcher.
 - A **Resident Topic Window** contains the **Resident Topics** that remain available for rendering and local filtering.
 - A **Rendered Topic Window** contains only the **Resident Topics** currently mounted as **Topic Items**.
 - A **Rendered Topic Window** may be smaller than the **Resident Topic Window** while preserving the user's reading position.
@@ -228,3 +239,4 @@ _Avoid_: Pagination cursor, authoritative next page URL
 - "Refresh button" only describes the **Head Action Button** while the user is in the **Head-Screen Reading State**.
 - "Destroy topics" is ambiguous between removing DOM nodes and releasing retained feed data. Use **Resident Topic Window** when discussing memory limits.
 - "Visible topic protection" describes the previous trimming model; the newer model freezes refresh while away from the head and uses page-size-derived retention instead.
+- "Title" can mean the source-language API field or the text on screen. Use **Topic Display Title** for what a **Topic Item** renders.

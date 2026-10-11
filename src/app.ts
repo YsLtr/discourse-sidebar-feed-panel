@@ -22,12 +22,18 @@ export function startFeedPanel() {
   const site = createSiteData({
     storage,
     getCsrfToken: discourse.getCsrfToken,
+    getPageLocale: discourse.getPageLocale,
     onChange: () => {
       controller?.normalizeSiteState();
     },
   });
-  const tags = createTagStyles({ storage, site });
+  const tags = createTagStyles({
+    storage,
+    site,
+    getPageLocale: discourse.getPageLocale,
+  });
   controller = createFeedController({ storage, discourse, prefs, site, tags });
+  discourse.observePageLocale(() => controller?.reloadForPageLocale());
   const style = gm.addStyle(cssText);
   const application = {
     clearCaches: controller.clearCaches,

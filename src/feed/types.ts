@@ -34,6 +34,7 @@ export interface TopicTag {
 
 export interface Topic extends TopicReadState {
   title?: string;
+  fancy_title?: string;
   unicode_title?: string;
   category_id?: number;
   archetype?: string;

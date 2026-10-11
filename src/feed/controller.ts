@@ -377,6 +377,20 @@ export function createFeedController({
     }
   }
 
+  /**
+   * 页面语言变化(不伴随刷新)后就地重建:内存里的站点与标签样式按新语言重取,
+   * 文案与分类栏按新语言重建,列表重新拉取。持久缓存按语言分版本保留,不删除。
+   */
+  function reloadForPageLocale() {
+    if (disposed) return;
+    site.reset();
+    tags.reset();
+    if (!prefs.feedModeEnabled) return;
+    _syncSiteDerivedControls({ force: true });
+    _resetAutoLoadState();
+    loadTopics();
+  }
+
   function activateFeed() {
     if (disposed || !prefs.feedModeEnabled) return;
     const sidebar = getSidebarElement();
@@ -1655,6 +1669,7 @@ export function createFeedController({
     },
     dispose,
     clearCaches: clearDataCaches,
+    reloadForPageLocale,
     normalizeSiteState: _normalizeCurrentSiteState,
   };
 }
