@@ -64,6 +64,13 @@ try:
             fixture.store.get(key)==='activity' && fixture.menus.length===1 &&
             fixture.requests.every(r=>r.csrf==='fixture-csrf');
         })()""")
+        check('sidebar width drives the grid track under a body-level override', """(() => {
+          const track=parseFloat(getComputedStyle(document.querySelector('#main-outlet-wrapper')).gridTemplateColumns.split(' ')[0]);
+          const written=parseFloat(document.querySelector('#d-sidebar').style.width);
+          const sidebarPx=document.querySelector('#d-sidebar').getBoundingClientRect().width;
+          const bodyVar=getComputedStyle(document.body).getPropertyValue('--d-sidebar-width').trim();
+          return Math.abs(track-written)<1 && Math.abs(track-sidebarPx)<1 && !bodyVar.endsWith('em');
+        })()""")
         check('full CSS preserves native scroll rules', """(() => {
           const s=getComputedStyle(document.querySelector('.sfp-feed-scroll'));
           return s.overscrollBehaviorY==='contain' && s.touchAction==='pan-y pinch-zoom';
@@ -79,9 +86,20 @@ try:
         cdp.evaluate("""fixture.writes.length=0;
           document.querySelector('.sfp-resizer').dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:300}));
           for(let x=310;x<=450;x+=10) document.dispatchEvent(new MouseEvent('mousemove',{clientX:x}));""")
-        check('drag previews width without repeated storage writes', "!fixture.writes.some(w=>w.key.endsWith(':sfp_sidebar_width')) && document.querySelector('#d-sidebar').getBoundingClientRect().width>400")
+        check('drag previews width without repeated storage writes', "!fixture.writes.some(w=>w.key.endsWith(':sfp_sidebar_width')) && document.querySelector('#d-sidebar').getBoundingClientRect().width>400 && parseFloat(getComputedStyle(document.querySelector('#main-outlet-wrapper')).gridTemplateColumns.split(' ')[0])>400")
         cdp.evaluate("document.dispatchEvent(new MouseEvent('mouseup'))")
         check('drag persists once on release and removes its listeners', "fixture.writes.filter(w=>w.key.endsWith(':sfp_sidebar_width')).length===1 && !fixture.effects.listeners.some(e=>['mousemove','mouseup'].includes(e.type)) && !document.body.style.cursor")
+        cdp.evaluate("""window.outlet=document.querySelector('.home-logo-wrapper-outlet');
+          window.outletParent=outlet.parentElement;
+          outlet.remove();""")
+        wait_for("!document.querySelector('.sfp-toggle-btn')")
+        cdp.evaluate("""const fresh=document.createElement('div');
+          fresh.className='home-logo-wrapper-outlet';
+          fresh.innerHTML='<div class="title">Fixture forum</div>';
+          outletParent.prepend(fresh);""")
+        wait_for("document.querySelectorAll('.sfp-toggle-btn').length===1")
+        check('toggle re-anchors when the header is replaced', """!!document.querySelector('.home-logo-wrapper-outlet .title > .sfp-toggle-btn') &&
+          document.querySelectorAll('.sfp-toggle-btn').length===1""")
         cdp.evaluate("""window.firstItem=document.querySelector('.sfp-topic-item');
           window.dotBefore=firstItem.querySelector('.sfp-unread-dot');
           window.timeBefore=firstItem.querySelector('.sfp-topic-time').getBoundingClientRect().x;
@@ -151,6 +169,8 @@ try:
               fixture.effects.listeners.length===0 && history.pushState===fixture.originalPush &&
               history.replaceState===fixture.originalReplace && !document.body.style.cursor &&
               !document.documentElement.style.getPropertyValue('--d-sidebar-width') &&
+              !document.body.style.getPropertyValue('--d-sidebar-width') &&
+              !document.querySelector('#main-outlet-wrapper').style.getPropertyValue('--d-sidebar-width') &&
               ![...document.querySelectorAll('style')].some(s=>s.textContent.includes('.sfp-feed-scroll'))""")
             cdp.evaluate("document.body.append(Object.assign(document.createElement('aside'),{id:'d-sidebar',className:'sidebar-container'}));SFPFeedPanel.start();SFPFeedPanel.start()")
             wait_for("document.querySelectorAll('.sfp-topic-item').length===30")

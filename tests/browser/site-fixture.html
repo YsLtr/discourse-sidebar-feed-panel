@@ -4,12 +4,23 @@
 <meta name="csrf-token" content="fixture-csrf">
 <title>Discourse Feed build smoke test</title>
 <style>
-:root{--primary:#222;--secondary:#fff;--tertiary:#2870b0;--primary-low:#ddd;--primary-medium:#666;--primary-low-mid:#aaa;--d-selected:#ddd}
-body{margin:0;font:14px sans-serif}.home-logo-wrapper-outlet{height:60px}.title{display:flex}
-#d-sidebar{position:fixed;top:60px;left:0;height:700px;width:300px;background:white}
+:root{--primary:#222;--secondary:#fff;--tertiary:#2870b0;--primary-low:#ddd;--primary-medium:#666;--primary-low-mid:#aaa;--d-selected:#ddd;--d-sidebar-width:17em}
+body{margin:0;font:14px sans-serif}
+body.uc-enable-main-outlet-grid-layout-change{--d-sidebar-width:15em}
+.home-logo-wrapper-outlet{height:60px}.title{display:flex}
+#main-outlet-wrapper{display:grid;grid-template-columns:0 minmax(0,1fr);width:1600px}
+body.has-sidebar-page #main-outlet-wrapper{grid-template-columns:var(--d-sidebar-width) minmax(0,1fr)}
+.sidebar-wrapper{display:flex;align-self:start;position:sticky;top:60px}
+.sidebar-wrapper .sidebar-container{display:flex;flex-direction:column;position:relative;width:100%;min-width:0;background:white}
+#d-sidebar{height:700px;background:white}
+#main-outlet{height:400px;min-width:0}
 </style>
+<body class="has-sidebar-page uc-enable-main-outlet-grid-layout-change">
 <div class="home-logo-wrapper-outlet"><div class="title">Fixture forum</div></div>
-<aside id="d-sidebar" class="sidebar-container"><div class="sidebar-sections">Native sidebar</div></aside>
+<div id="main-outlet-wrapper">
+<div class="sidebar-wrapper"><aside id="d-sidebar" class="sidebar-container"><div class="sidebar-sections">Native sidebar</div></aside></div>
+<div id="main-outlet">Main outlet</div>
+</div>
 <script>
 const scoped = key => `sfp_site:${encodeURIComponent(location.origin)}:${key}`;
 const subscriptions = new Map();

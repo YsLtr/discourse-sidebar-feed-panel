@@ -94,6 +94,8 @@ export function createFeedController({
       if (prefs.feedModeEnabled) _syncIncomingHeadAction();
     },
     onMutation: () => {
+      // 页头会被 Ember 整块替换；按钮不在文档里时按插入点候选链补回。
+      if (!host.toggleBtn?.isConnected) createToggle();
       if (!prefs.feedModeEnabled) return;
       const sidebar = getSidebarElement();
       if (!sidebar) {

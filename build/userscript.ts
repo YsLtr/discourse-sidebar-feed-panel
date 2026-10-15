@@ -13,6 +13,7 @@ export const userscript: MonkeyUserScript = {
     "https://www.nodeloc.com/*",
     "https://forum.chrultrabook.com/*",
     "https://community.openai.com/*",
+    "https://meta.discourse.org/*",
   ],
   icon: "https://sea3.discourse-cdn.com/meta/user_avatar/meta.discourse.org/discourse/24/148734_2.png",
   downloadURL:

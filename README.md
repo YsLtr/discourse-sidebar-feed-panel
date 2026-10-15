@@ -34,6 +34,7 @@
 | [NodeLoc](https://www.nodeloc.com/) | `https://www.nodeloc.com/*` |
 | [Chrultrabook Forum](https://forum.chrultrabook.com/) | `https://forum.chrultrabook.com/*` |
 | [OpenAI Community](https://community.openai.com/) | `https://community.openai.com/*` |
+| [Discourse Meta](https://meta.discourse.org/) | `https://meta.discourse.org/*` |
 
 其他 Discourse 论坛可以手动添加匹配规则后尝试使用。
 
@@ -182,6 +183,7 @@ https://linux.do/*
 https://www.nodeloc.com/*
 https://forum.chrultrabook.com/*
 https://community.openai.com/*
+https://meta.discourse.org/*
 ```
 
 ## 更新

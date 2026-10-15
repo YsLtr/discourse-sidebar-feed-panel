@@ -1,6 +1,42 @@
 import { DEFAULT_WIDTH, MAX_WIDTH, MIN_WIDTH } from "../constants";
 import type { createI18n } from "../i18n";
 import type { Lifetime } from "../platform/lifetime";
+
+/**
+ * Native Sidebar Host candidates, most specific first. The chain only grows:
+ * a candidate is dropped only when no supported forum uses it, and it is added
+ * only after being observed on a real forum.
+ */
+export const SIDEBAR_HOST_SELECTORS = [
+  "#d-sidebar",
+  ".sidebar-container",
+  ".sidebar-wrapper .sidebar-container",
+] as const;
+
+/**
+ * Header candidates for the toggle button, most specific first. `#d-header`
+ * must not be added: no supported forum has that id any more.
+ */
+export const TOGGLE_ANCHOR_SELECTORS = [
+  ".home-logo-wrapper-outlet .title",
+  ".home-logo-wrapper-outlet",
+  "header.d-header .contents",
+  ".d-header .contents",
+  ".d-header .panel",
+] as const;
+
+/** First candidate that resolves wins. Taking a lookup keeps this DOM-free. */
+export function firstMatch<T>(
+  candidates: readonly string[],
+  lookup: (selector: string) => T | null | undefined,
+): T | null {
+  for (const selector of candidates) {
+    const found = lookup(selector);
+    if (found) return found;
+  }
+  return null;
+}
+
 interface HostDependencies {
   t: ReturnType<typeof createI18n>["t"];
   getEnabled(): boolean;
@@ -31,13 +67,12 @@ export function createFeedHost({
   const setTimeout = (fn: () => void, ms: number) => getScope().timeout(fn, ms);
   function createToggle() {
     if (toggleBtn?.isConnected) return toggleBtn;
-    toggleBtn?.remove();
 
-    const homeLogo = document.querySelector<HTMLElement>(
-      ".home-logo-wrapper-outlet",
+    const anchor = firstMatch(TOGGLE_ANCHOR_SELECTORS, (selector) =>
+      document.querySelector<HTMLElement>(selector),
     );
-    if (!homeLogo) return null;
-
+    if (!anchor) return null;
+    toggleBtn?.remove();
     toggleBtn = document.createElement("button");
     toggleBtn.className = "sfp-toggle-btn" + (getEnabled() ? " active" : "");
     toggleBtn.title = t("toggleTitle");
@@ -50,13 +85,8 @@ export function createFeedHost({
       toggleBtn?.classList.toggle("active", getEnabled());
     });
 
-    // 放入 .title 内部，logo 右边
-    const titleEl = homeLogo.querySelector<HTMLElement>(".title");
-    if (titleEl) {
-      titleEl.appendChild(toggleBtn);
-    } else {
-      homeLogo.appendChild(toggleBtn);
-    }
+    // 放入页头锚点内部，logo 右边
+    anchor.appendChild(toggleBtn);
     return toggleBtn;
   }
 
@@ -65,10 +95,33 @@ export function createFeedHost({
   }
 
   function getSidebarElement() {
-    return (
-      document.querySelector<HTMLElement>("#d-sidebar") ||
-      document.querySelector<HTMLElement>(".sidebar-container")
+    return firstMatch(SIDEBAR_HOST_SELECTORS, (selector) =>
+      document.querySelector<HTMLElement>(selector),
     );
+  }
+
+  /** The grid element whose first track consumes `--d-sidebar-width`. */
+  function getOutletElement() {
+    return document.querySelector<HTMLElement>("#main-outlet-wrapper");
+  }
+
+  /**
+   * The grid track reads the variable from its own element, while the
+   * upcoming-change rule declares it on `body` and therefore shadows a
+   * root-level value. Writing all three keeps the track following the panel on
+   * either layout; the sidebar's own width above stays the cap.
+   */
+  function setSidebarWidthVariable(width: number) {
+    const value = width + "px";
+    document.documentElement.style.setProperty("--d-sidebar-width", value);
+    document.body.style.setProperty("--d-sidebar-width", value);
+    getOutletElement()?.style.setProperty("--d-sidebar-width", value);
+  }
+
+  function clearSidebarWidthVariable() {
+    document.documentElement.style.removeProperty("--d-sidebar-width");
+    document.body.style.removeProperty("--d-sidebar-width");
+    getOutletElement()?.style.removeProperty("--d-sidebar-width");
   }
 
   function applySidebarWidth(width: number) {
@@ -80,10 +133,7 @@ export function createFeedHost({
     if (sidebar) {
       sidebar.style.setProperty("width", clampedWidth + "px", "important");
     }
-    document.documentElement.style.setProperty(
-      "--d-sidebar-width",
-      clampedWidth + "px",
-    );
+    setSidebarWidthVariable(clampedWidth);
   }
 
   function getSidebarWidthTransitionElements(sidebar: HTMLElement | null) {
@@ -101,10 +151,7 @@ export function createFeedHost({
     const minWidth = enforceMin ? getMinSidebarWidth() : 0;
     const clampedWidth = Math.min(MAX_WIDTH, Math.max(minWidth, width));
     sidebar.style.setProperty("width", clampedWidth + "px", "important");
-    document.documentElement.style.setProperty(
-      "--d-sidebar-width",
-      clampedWidth + "px",
-    );
+    setSidebarWidthVariable(clampedWidth);
   }
 
   function animateSidebarWidth(
@@ -150,7 +197,7 @@ export function createFeedHost({
         el.classList.remove("sfp-width-animating"),
       );
     }
-    document.documentElement.style.removeProperty("--d-sidebar-width");
+    clearSidebarWidthVariable();
   }
 
   function setupResizer() {
@@ -310,6 +357,9 @@ export function createFeedHost({
     },
     get resizerEl() {
       return resizerEl;
+    },
+    get toggleBtn() {
+      return toggleBtn;
     },
   };
 }
