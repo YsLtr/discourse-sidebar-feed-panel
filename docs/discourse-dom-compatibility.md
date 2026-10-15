@@ -9,7 +9,7 @@
 ## 术语
 
 **Native Sidebar Host / 侧边栏宿主**:
-承载面板的 Discourse 原生侧边栏元素。当前实现里是 `<nav id="d-sidebar" class="sidebar-container">`,`#d-sidebar` 与 `.sidebar-container` 命中的是**同一个元素**。
+承载面板的 Discourse 原生侧边栏元素。`CONTEXT.md` 把 **Native Sidebar Host** 定义为一种 **Feed Panel Host**(角色);本文件说的是该角色在当前实现里对应的具体元素:`<nav id="d-sidebar" class="sidebar-container">`,`#d-sidebar` 与 `.sidebar-container` 命中的是**同一个元素**。
 _Avoid_: 把 `.sidebar-wrapper`(宿主的父元素,`display:flex` 的 flex 容器)当作宿主——面板要隐藏的是宿主内的原生 section,宽度动画却需要连 wrapper 一起过渡。
 
 **Sidebar Track / 侧边栏轨道**:
