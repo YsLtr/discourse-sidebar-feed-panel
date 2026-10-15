@@ -4,39 +4,41 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 **Project root**: `C:\Users\28676\builds\discourse\userscript`
 **Branch / remote**: `main` / `https://github.com/YsLtr/discourse-sidebar-feed-panel.git`
-**User request**: implement the web-page language compatibility described by `docs/language-compatibility.md` — render titles in the locale the forum resolved for the request, and keep the locale-dependent persistent caches per locale.
+**User request**: some Discourse forums changed their page UI after an update, which broke the width drag; `https://linux.do/` could not be resized and `https://meta.discourse.org/` did not even show the sidebar toggle. Re-do the compatibility with `agent-browser-cli`, find locators that work on both old and new versions, and never remove an old-version locator (e.g. `https://www.nodeloc.com/`).
 
 ## 本轮完成的工作
 
-- **计划入档**(`817e446`): the investigation document was renamed to `docs/language-compatibility.md` and rewritten as the contract (terminology, server locale chain, field/endpoint translation table, live evidence, implementation rules, acceptance, known boundaries, repro commands); `docs/development.md` gained a Language compatibility section and `docs/cross-site-discourse-adaptation-plan.md` gained the matching resolved decision.
-- **实现**(`56feafc`, 19 files, +364/-27):
-  - `src/ui/html.ts` added `decodeHtmlEntities` (detached `<textarea>` round-trip) and `selectTopicTitle`; the single title render site `src/ui/topic-item.ts` now emits `escapeHtml(decodeHtmlEntities(selectTopicTitle(topic)))` inside `span.sfp-topic-title-line[dir="auto"]`; `Topic` gained `fancy_title?: string`.
-  - Title priority: `fancy_title` when free of `:[\w\-+]+:`, else `unicode_title`, else `fancy_title`, else `title`. No `?tl=` is sent.
-  - `sfp_category_data_cache_v1` and `sfp_tag_style_cache_v1` values became `{ version, locales: { "<locale>": { savedAt, … } } }`, located by `getPageLocale()` (injected into `createSiteData`/`createTagStyles` from `src/platform/discourse.ts`), keeping the current plus the previous locale (`src/site/locale-cache.ts`, `withLocaleEntry`, `MAX_CACHED_LOCALES = 2`), and dropping a pre-change blob without a `locales` field once.
-  - `observePageLocale()` watches `documentElement` `lang`/`xml:lang` under the bridge Lifetime and reports at most once per page load; `controller.reloadForPageLocale()` resets site/tag in-memory state, force-rebuilds header/tab/filter bars, resets auto-load state and reloads topics in place — no `location.reload()`, caches not deleted.
-  - `CONTEXT.md` gained the terms **Topic Display Title** and **Page Locale**; `todo.md`'s language item is checked off.
-  - Version bumped to **3.1.0** in `package.json`/`package-lock.json`.
-- **验证**: `npm run typecheck`, `npm test` (12 files / 58 tests), `npm run check:dev`, `npm run build` (192.33 kB, gzip 43.88 kB), `npm run check:artifact`, `npm run check:browser` (36 checks), `npm run check:scroll` (12 checks) all passed; migration-parity tests 8/8. A rebuild was byte-identical to the audited `dist/` artifact, so the browser checks ran against this commit's source. New unit files: `tests/unit/topic-title.test.ts`, `tests/unit/page-locale.test.ts`; the browser fixture topic and `tools/check-built-userscript.py` gained the localized-title and locale-change cases.
-- **代理审查**(static variant by a scout sub-agent, offline-test variant by the main agent, adversarial variant by a code-reviewer sub-agent; reports under `.pi/tmp/audit-*.md`): no must-fix finding; the verdict was recorded as clean with accepted low-risk residuals.
-- **文档复位**(`c83ae72`): `docs/language-compatibility.md` §六 acceptance was corrected to the assertions actually implemented (in-place rebuild is proven by the panel copy switching, not by a title text change), the observer unit cases were listed, §五.4 now says the observation compares against the locale recorded when the observer was created, and §七 gained the two new boundaries.
-- `ea002c4`: `vitest.config.ts` comment noting that DOM-dependent behaviour is covered by `check:browser`, not by the jsdom-free unit setup.
+- **实测定位**(`agent-browser-cli` 只读探测 5 个站点,原始记录在 `.pi/tmp/dom-probe*.md`、`.pi/tmp/probe/`,已 gitignore):
+  - 真因不是版本号:linux.do / meta / nodeloc 跑的都是 `2026.10.0-latest`,而 chrultrabook(`2025.12.0-latest`)与被判为「失效」的站点表现相反。区别在站点是否命中核心的 `uc-enable-main-outlet-grid-layout-change`(`<body>` 上),它声明 `--d-sidebar-width: 15em`,隔断了写在 `<html>` 上的值。
+  - 侧边栏宽度由 `#main-outlet-wrapper` 的 grid 首列(`var(--d-sidebar-width)`)决定;宿主是 `flex-shrink:1` 的 flex item,给它写 `width !important` 只是上限。可逆实验:写 `<html>` 无效(轨道停 240px)、写 `body` 或 `#main-outlet-wrapper` 有效(450px)。
+  - `#d-header` 在 5 个站点命中数全为 0(现在只有 `header.d-header`);`[data-sidebar]`、`.sidebar-panel`、`.sidebar-toggle` 等也全为 0;`.home-logo-wrapper-outlet` 与其 `.title` 5 站全命中。
+  - meta.discourse.org 的 `sfp-` 痕迹为 0 的唯一原因是它不在内置 `@match` 里;手动加 match 后脚本正常,宽度问题在同一处复现(轨道 240px vs 宿主 inline 373px)——即「页内有没有 `sfp-` 痕迹」不能当定位失败的判据。
+- **计划入档 / 实现**(`b20b704` docs + `cd800f1` code):`src/ui/host.ts` 把 `--d-sidebar-width` 同时写到 `documentElement`、`body`、`#main-outlet-wrapper`;宿主与页头插入点改为「首个命中即止」的候选链(旧候选不删);`controller.onMutation` 在按钮不在文档中时按候选链补回;内置 match 加入 `https://meta.discourse.org/*`;版本 3.1.0 → **3.2.0**。
+- **两轮审查修复**(`11b6636`/`7fcc9c4`/`fe964fc` 代码,`04ec876`/`c5475a0`/`46f2ca1` 文档,`ef8e103` 注释):
+  - F1 宿主消失时面板关闭但宽度变量残留(清理挂在动画路径上,无宿主直接 return)。
+  - F2 还原而不是删除:写之前用 `captureInlineValues` 记下每个目标的原值与优先级,`restoreInlineValues` 放回;面板没写过就不碰(同一规则后来也用到宿主自身的 `width`,即 B1)。
+  - F5 候选表删掉被另一条完全覆盖的条目;文档写明「只在覆盖者排在它前面时才可删」。
+  - F6 容器被替换后重挂会丢宽度:旧实现只按 `widthAnimationTimer` 句柄取消动画,而句柄在帧回调内才赋值,同一轮两次动画时旧清理会在约 260ms 后清掉新宽度。改为自增 `widthAnimationEpoch`,帧回调发现自己过时即返回(插桩日志 `unmount → anim(cleanup=true) → ensure → anim(cleanup=false) → restore t=269` 已消除)。T1 后来把那行「还原时自增 epoch」删掉:rAF 探针证明 dispose 路径上帧被安排在已被 `viewScope.dispose()` 取消的作用域里(无 `ran`),那行无路可依。
+  - 新增断言(浏览器检查 36 → **44**):宽度驱动 grid 轨道、页头替换后按钮补回、宿主消失时清变量且轨道回默认、容器重挂过动画窗口仍保持宽度、dispose 还原已有 inline 值(0.12s/0.42s 两次采样)、feed 未启用时不动宿主 inline 宽度;`tests/unit/host-locators.test.ts` 改名 `tests/unit/host.test.ts`(13 例)并补记忆规则。变异复核(dist 副本 + `--source`):M1/M3/M4 会失败,MR 全绿。
+- **文档复位**(`3ae3a82` docs commit):`docs/discourse-dom-compatibility.md`(新文档,§一~§八)记录了术语、宽度链路、候选链、新旧对照、实现规则、验收、边界与复现;`docs/development.md` 增加 DOM compatibility 段并更新检查覆盖;`docs/cross-site-discourse-adaptation-plan.md` 更新 resolved decisions;本轮的 `Native Sidebar Host` 术语补了与 `CONTEXT.md` 的交叉说明。
+- **最终校验**:typecheck、13 files / **71** 单测、`check:dev`、`build`(193.35 kB / gzip 44.15 kB)、`check:artifact`、`check:scroll`(12)、`check:browser`(**44**)全绿;`.pi/tmp/t14-checks.log`、`f6b-checks.log` 等日志在 scratch。
 
 ## 当前仓库状况
 
-- HEAD is `ea002c4`; the AGENTS.md commit for this handoff is the last change of the session and lands on top of it. Everything else is committed.
-- Nothing has been pushed. Version 3.1.0 exists only locally, so no `v3.1.0` tag or Release exists yet.
-- The only untracked path is `.pi/` (deep-plan scratch: the three audit reports plus `commit-message.txt`).
+- HEAD is `3ae3a82`(文档复位);本交接提交(`AGENTS.md`)叠在其上,工作区只剩本文件。
+- **未 push**:3.2.0 只存在于本地,push `main` 会触发 release workflow 创建 `v3.2.0` 并发布资产(已发布资产不可覆盖),用户本会话未授权。
+- `.pi/` 已被 `.gitignore` 忽略(提交 `9158cb6`),里面是本轮的 deep-plan scratch:探针脚本、插桩日志、变异体、审查报告。
 
 ## 未决问题
 
-- **是否发布 3.1.0 未定**: pushing `main` triggers `.github/workflows/release.yml`, which creates the `v3.1.0` tag and publishes the built userscript as the latest asset; published assets are not overwritten. The user has not authorized that push in this session.
-- `.pi/` stays untracked because `.gitignore` cannot be edited in the documentation-reset phase. Add a `.pi/` ignore entry or delete the directory when the tree must be clean.
-- **审查接受的残余风险**(已记入 `docs/language-compatibility.md` §七): the `:[\w\-+]+:` shortcode test is the same shape the server uses, so titles such as `12:30:45` or `a:b:c` fall back to the source title; entity decoding applies to all three title fields, so a title that literally contains `&lt;`/`&amp;` renders the decoded character; `withLocaleEntry` throws on a `locales: { x: null }` blob, which the call-site `try`/`catch` reduces to one lost write.
-- **未经实测**(does not block this change, but must not be reported as verified): whether a real forum returns the new locale's titles after an in-session language change; userscript-manager upgrade/sandbox compatibility; the `clearCaches` delete-then-refetch path end to end (the browser check only asserts the API is still exposed); visual RTL rendering under `dir="auto"`.
-- The `todo.md` notes that arrived with this change ("稍后再读" items and the new meta brand theme) are the user's own open items, not work started in this session.
+- **是否发布 3.2.0 未定**(同上一轮):push `main` 即发布;`npm version` 已在本地完成。
+- **未经实测,不得当作已验证**:真实站点安装 3.2.0 后的行为;用户脚本管理器隔离世界(`window`/`document` 可达性);窄视口/移动端(写入 inline 变量会覆盖核心 `@media (width<64rem)` 的收窄,面板未适配抽屉式侧边栏);真实站点上「容器被替换」(触发 F6 路径)的实际频率;meta.discourse.org 上按钮与宽度的真机观感。
+- **审查接受的残余风险**(已记入 `docs/discourse-dom-compatibility.md` §七):正确性依赖「`deactivateFeed` 先 dispose viewScope、再 `host.unmount()`」的顺序不变量;无宿主分支不清理动画定时器(仅 260ms 后一次幂等清理);面板运行期间被第三方改写的变量仍会被覆盖且 dispose 时不还原;变量不自愈;`.home-logo-wrapper-outlet` 在 Chat 使用时会被占用(候选链与自愈是缓解);同一宿主节点 detach→reattach 会把面板自己写的值当原值还原。
+- **`CONTEXT.md` 未加入本轮新术语**(本轮流程只允许改 `docs/` 与仓库根 `AGENTS.md`):`Sidebar Track`、`Header Anchor`、`Toggle Button`、`Upcoming-change class` 的定义目前只在 `docs/discourse-dom-compatibility.md` 的 §术语;`Native Sidebar Host` 与 `CONTEXT.md` 的 Feed Panel Host 关系已在该文件里交叉说明。下次动 `CONTEXT.md` 时可考虑把这些术语合并进去。
+- `todo.md` 里「稍后再读」与 meta 品牌主题等条目是用户自己的待办,不是本会话开工的活。
 
 ## 后续任务
 
 用户本次会话未指定后续任务。
 
-Updated: 2026-10-11 18:36 中国标准时间 +0800
+Updated: 2026-10-15 16:35 中国标准时间 +0800
