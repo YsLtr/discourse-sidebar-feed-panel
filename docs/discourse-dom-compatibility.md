@@ -138,7 +138,7 @@ header.d-header                         ← 注意:没有 id,`#d-header` 在实�
 规则:
 
 - **候选链只含实测命中过的选择器**。上表命中数为 0 的选择器(含 `[data-sidebar]`、`.sidebar-panel`、`.sidebar-hamburger-dropdown`、`.sidebar-toggle`)一律不加入候选链——它们既不是旧版式也不是新版式,只是猜测。
-- **候选不删除**:`.home-logo-wrapper-outlet .title` 在 2025.12 与 2026.10 上都命中,且是 nodeloc(站方主题)上的唯一可行插入点。唯一可以删的情形是某个候选被另一条完全覆盖(`header.d-header .contents` 必然同时命中 `.d-header .contents`,故只留后者)。
+- **候选不删除**:`.home-logo-wrapper-outlet .title` 在 2025.12 与 2026.10 上都命中,且是 nodeloc(站方主题)上的唯一可行插入点。唯一可以删的情形是**被另一条完全覆盖、且覆盖它的那条排在它前面**(首个命中即止,所以后面的条目永远轮不到)。`header.d-header .contents` 属于这种:它匹配的是 `.d-header .contents` 的子集,删掉它反而让更宽的条目生效,故只留后者。
 - `#d-header` 不得使用:实测 5 站都不存在这个 id,能用的只有 `header.d-header` 这个 class。
 - **按钮插入点候选链**(首个命中即止,越靠前越贴近 logo):
 
@@ -169,12 +169,13 @@ header.d-header                         ← 注意:没有 id,`#d-header` 在实�
 `src/ui/host.ts` 的宽度设置(`applySidebarWidth` 与动画路径 `setSidebarWidthForAnimation`)同时写三处:
 
 - `document.documentElement`、`document.body`、`#main-outlet-wrapper`(不存在则跳过)各设 `--d-sidebar-width: <n>px`
-- 宿主自身的 `width: <n>px !important` **保留**:它是旧版式的撑宽手段,也是「上限」——轨道更宽时面板不会超过用户拖出的宽度
+- 宿主自身的 `width: <n>px !important` **保留**:它是旧版式的撑宽手段,也是「上限」——轨道更宽时面板不会超过用户拖出的宽度。它同样遵守「先记后还原」:面板没写过就不碰,否则会把站方写在该元素上的 inline 宽度一起删掉。
 
-`restoreSidebarWidth` 必须把这三处**全部**处理掉(不止 `<html>`),并清掉宽度动画 class。它要满足两条:
+`restoreSidebarWidth` 必须把这三处**全部**处理掉(不止 `<html>`),并清掉宽度动画 class。它要满足三条:
 
 1. **必须真的发生**:`unmount()` 走的是 `animateSidebarWidth(..., { cleanupAfter: true })`,而宿主已经消失时那条路径原本直接 return —— 所以无宿主时也必须执行清理,否则面板关掉了、grid 轨道还停在面板宽度。
-2. **还原而不是删除**:写之前记下每个目标原来的 inline 值与优先级,还原时放回去;面板没写过的元素一律不碰。删除一个不是自己写的值(站方/主题写在 `body` 或 `#main-outlet-wrapper` 上的同名变量)会破坏站方布局。
+2. **还原而不是删除**:写之前记下每个目标原来的 inline 值与优先级(宿主自身的 `width` 与三处变量用同一条规则),还原时放回去;面板没写过的元素一律不碰。删除一个不是自己写的值(站方/主题写在 `body`、`#main-outlet-wrapper` 或宿主上的同名属性)会破坏站方布局。
+3. **新动画取代旧动画,连同它尚未执行的清理**:取消旧动画只看定时器句柄是不够的——定时器是在帧回调**内部**才装载的,同一轮里先后发起两次动画时,前一条的清理仍会在约 260ms 后执行,把新写上的宽度清掉。因此每次发起动画与每次还原都要让在飞的帧失效(实现里是一个自增的 epoch),帧回调发现自己过时就直接返回。
 
 写入用**普通 inline 声明,不加 `!important`**:inline 已经压过 `:where(.uc-…)` 这类作者规则(§二 实测),包括核心在窄视口下的收窄(`@media (width<64rem){:where(.uc-…){--d-sidebar-width:13em}}`,特异性 0、非 `!important`)——**加不加 `!important` 它都会被覆盖**,所以「不加 `!important`」并不是为了保住窄视口收窄(见 §七)。真正的取舍是:普通 inline 会**输**给用 `!important` 写死该变量的主题,而不加 `!important` 正是为了不与这种主题对抗。
 
@@ -203,11 +204,12 @@ header.d-header                         ← 注意:没有 id,`#d-header` 在实�
 - **浏览器夹具**(`tests/browser/site-fixture.html` + `tools/check-built-userscript.py`):夹具必须建模真实的宽度链路——`#main-outlet-wrapper` 用 grid,`.sidebar-wrapper` 包住宿主,并在 `<body>` 上挂 `uc-enable-main-outlet-grid-layout-change` 与「`body{--d-sidebar-width:15em}`」,使「只写 `<html>`」在夹具里**同样失效**。断言:
   - 开启面板后 `#main-outlet-wrapper` 的 `grid-template-columns` 首列等于面板宽度(而不是停在 15em 换算出的值);
   - 拖拽后 grid 首列与宿主宽度都变化,且只在 mouseup 时落盘一次(沿用既有断言);
-  - 宿主在面板开启时被移除(面板随之关闭)后,三处 `--d-sidebar-width` 立刻都不存在,grid 首列回到站方默认值——这条覆盖「清理只挂在动画路径上」的缺口;
-  - dispose 后 `<html>`、`<body>`、`#main-outlet-wrapper` 三处的 `--d-sidebar-width` 都不存在;
+  - 宿主在面板开启时被移除(面板随之关闭)后,三处 `--d-sidebar-width` 立刻都不存在,且 grid 首列回到站方默认值——这条覆盖「清理只挂在动画路径上」的缺口;
+  - 面板容器被替换后重新挂载,等过一整段动画窗口(约 0.5s)宽度仍是面板宽度:这条覆盖「旧动画的清理把新宽度清掉」的缺口;
+  - dispose 后 `<html>`、`<body>`、`#main-outlet-wrapper` 三处的 `--d-sidebar-width` 都不存在,且再等 0.4s 不会被在飞的帧写回;
   - 面板开启前 `body` 上已有的 inline `--d-sidebar-width` 在 dispose 后被**还原成原值**(而不是被删掉);
   - 页头被移除后重新插入时,按钮按候选链被补回,且只有一个 `button.sfp-toggle-btn`。
-- **单元测试**(`tests/unit/host.test.ts`):候选链的纯函数解析(`src/ui/host.ts` 的 `firstMatch` 与两条候选表)按优先级表驱动、首个命中即止;只有后段候选存在时仍命中;全部缺失时返回空。两条候选表的顺序被逐项冻结(加入或删除候选必须同一次改这里与 §三 的表)。宽度变量的记忆规则用假 inline style 驱动:每个目标只在第一次写入前记一次原值、后出现的目标补记、离开文档的目标被丢弃、还原放回原值(含优先级)且没写过的元素不碰。
+- **单元测试**(`tests/unit/host.test.ts`):候选链的纯函数解析(`src/ui/host.ts` 的 `firstMatch` 与两条候选表)按优先级表驱动、首个命中即止;只有后段候选存在时仍命中;全部缺失时返回空。两条候选表的顺序被逐项冻结(加入或删除候选必须同一次改这里与 §三 的表)。宽度属性的记忆规则用假 inline style 驱动:每个目标只在第一次写入前记一次原值、后出现的目标补记、离开文档的目标被丢弃、还原放回原值(含优先级)、**已捕获集合之外的元素一律不碰**(这条断言必须能失败,不能拿空集合自证),以及该规则与属性名无关(宿主 `width` 与 `--d-sidebar-width` 共用)。
 - **真站核对**(需 agent-browser-cli 与已登录 profile):在 linux.do(`uc-` 打开)与 www.nodeloc.com(站方主题)上拖拽,确认 grid 首列与面板宽度同步变化;在 forum.chrultrabook.com(旧版本)上确认按钮与面板仍正常;meta.discourse.org 自 3.2.0 起在内置 match 内,同样适用。没有安装新版脚本时,退而用 §二 的真站 A/B(临时 inline 试写并还原)核对写入点集合——它不需要安装脚本。
 
 ## 七、已知边界
