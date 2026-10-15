@@ -5,7 +5,7 @@ This plan tracks the agreed design for changing the Feed Panel from a LinuxDO-sp
 ## Resolved Decisions
 
 - Phase one keeps the Feed Panel tied to Discourse's native sidebar. Sites without a usable native sidebar host are not supported until there is explicit demand.
-- Phase one ships exactly two built-in userscript matches: `https://linux.do/*` and `https://www.nodeloc.com/*`.
+- Built-in userscript matches are the forums validated by this project: `https://linux.do/*`, `https://www.nodeloc.com/*`, `https://forum.chrultrabook.com/*`, `https://community.openai.com/*` and `https://meta.discourse.org/*`. Sites without a built-in match are not unsupported, only unavailable until a match rule is added.
 - Additional forums are added by the user through the userscript manager's include/match settings. The userscript does not provide in-script enable/disable commands.
 - The userscript does not auto-detect whether an arbitrary page is Discourse and does not show activation success or failure status. Users are responsible for incorrect manual matches.
 - Discourse base path is not part of site identity for this project.
@@ -26,7 +26,10 @@ This plan tracks the agreed design for changing the Feed Panel from a LinuxDO-sp
 - The existing ranked-period behavior is preserved where supported: `period=all` ranked orders use latest-style ordering, while non-`all` ranked periods use top-style period requests.
 - UI copy and relative-time formatting use the forum page language first, then Discourse/browser language if needed. Phase one supports `zh-CN` and `en`, with English fallback for unknown languages.
 - Topic titles follow the locale the forum resolved for the request: list responses carry the localized `fancy_title`, which the Feed Panel prefers over the source-language `title`. The userscript never sends `?tl=`. See [language compatibility](language-compatibility.md).
-- README must document the first-phase support model: built-in support for LinuxDO and NodeLoc, manual userscript-manager match additions for other forums, native-sidebar-only behavior, and user responsibility for incorrect manual matches.
+- Sidebar width is driven through the `--d-sidebar-width` custom property written on `document.documentElement`, `document.body` and `#main-outlet-wrapper`; the Native Sidebar Host's own inline `width` is kept as the layout mechanism for versions without the grid track and as the upper bound when the track is wider. See [DOM compatibility](discourse-dom-compatibility.md).
+- Native Sidebar Host and header anchors are resolved through additive candidate chains. A candidate is removed only when no supported forum uses it; a candidate is added only after it is observed on a real forum. No version sniffing.
+- Hosting tolerates Discourse replacing its own markup: the panel container, the resizer and the header toggle are all re-established from the DOM when they disappear, instead of being created once.
+- README must document the support model: the built-in match list, manual userscript-manager match additions for other forums, native-sidebar-only behavior, and user responsibility for incorrect manual matches.
 
 ## Deferred Phase-Two Work
 

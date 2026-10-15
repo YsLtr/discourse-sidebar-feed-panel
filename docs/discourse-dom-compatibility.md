@@ -1,0 +1,245 @@
+# Discourse 页面结构与侧边栏宽度兼容
+
+面板 (Feed Panel) 挂在 Discourse 原生侧边栏里,并把该侧边栏的宽度改成用户拖拽出的值。本文件是这两件事的**定位契约**:宿主与页头锚点用**可叠加的候选链**定位(旧定位只增不删),侧边栏宽度通过 `--d-sidebar-width` 自定义属性驱动 `#main-outlet-wrapper` 的 grid 轨道,而不是只给侧边栏自己写 `width`。
+
+**事实来源**:本机 `agent-browser-cli`(真实 Chrome + 扩展桥)对 5 个站点的只读探测,原始记录在 `.pi/tmp/dom-probe*.md` 与 `.pi/tmp/probe/`(scratch,不随仓库提交);样式表规则原文用 CDP `CSS.getMatchedStylesForNode` 与 `fetch(sheet.href,{credentials:'omit'})` 交叉取得(CDP 的 `stylesheet.sourceURL` 恒为 `null`,故用全文长度比对表归属)。
+
+**工作项来源**:用户报告「linux.do 无法调整宽度」「meta.discourse.org 连切换侧边栏按钮都无法正确显示」。
+
+## 术语
+
+**Native Sidebar Host / 侧边栏宿主**:
+承载面板的 Discourse 原生侧边栏元素。当前实现里是 `<nav id="d-sidebar" class="sidebar-container">`,`#d-sidebar` 与 `.sidebar-container` 命中的是**同一个元素**。
+_Avoid_: 把 `.sidebar-wrapper`(宿主的父元素,`display:flex` 的 flex 容器)当作宿主——面板要隐藏的是宿主内的原生 section,宽度动画却需要连 wrapper 一起过渡。
+
+**Sidebar Track / 侧边栏轨道**:
+`#main-outlet-wrapper`(`display:grid`)的第一条列轨道。当 `body.has-sidebar-page` 时它的宽度是 `var(--d-sidebar-width)` 在该元素上的解析值,**侧边栏的最终渲染宽度由它决定**。
+
+**Header Anchor / 页头锚点**:
+插入「切换侧边栏信息流」按钮的位置。当前是 `.home-logo-wrapper-outlet .title`,见 §三。
+
+**Toggle Button / 切换按钮**:
+页头上的 `button.sfp-toggle-btn`,点击切换面板模式(替代原生侧边栏内容)。
+
+**Upcoming-change class / 预告开关 class**:
+Discourse 按访客命中的 upcoming change 往 `<body>` 加的 `uc-*` class(Discourse 核心 CSS 自带对应规则)。它属于访客/站点设置,**不随版本号变化**。
+
+## 目标
+
+- 在同一份脚本里兼容「侧边栏宽度由 grid 轨道决定」的现代版本与「直接给侧边栏写 `width`」的旧版本,不依赖版本号判断。
+- 拖拽调宽在所有已支持站点上生效:linux.do / meta.discourse.org(`uc-enable-main-outlet-grid-layout-change` 打开)、www.nodeloc.com(站方 6 列 grid 主题)、forum.chrultrabook.com(2025.12 版)。
+- 页头锚点与宿主定位使用**候选链**:新版本出现新结构时追加候选,**旧候选不删除**。
+- 页面结构被 Ember 替换后能自愈:按钮与面板都不依赖「只尝试一次」的挂载。
+
+## 非目标
+
+- 不引入版本号嗅探(`meta[name=generator]`、`Discourse.VERSION`、`discourse_version`):实测三站同版本表现不同、老版本表现与新版本一致,**版本号不是判据**;`window.Discourse.VERSION` 与 `meta[name=discourse_version]` 在实测站点上都不存在。
+- 不接管站方主题的 `grid-template-columns`:nodeloc 的主题用 `!important` 私有 6 列 grid,面板只改它读的变量,不直接写轨道。
+- 不为移动端/抽屉式侧边栏做适配(原生折叠按钮在窄视口下改为抽屉,面板未适配)。
+- 不新增设置项、不新增 storage key、不改 UI 文案。
+- 不在隔离世界里探测页面 DOM(见 §七)。
+
+## 一、侧边栏宽度由谁决定
+
+现代版本里侧边栏**不是**由它自己的 `width` 撑宽的,宽度链条是:
+
+```
+:root                                  { --d-sidebar-width: 17em }
+body.<uc-…>                            { --d-sidebar-width: 15em }   ← 预告开关的规则,写在 body 上
+#main-outlet-wrapper                    { display: grid; grid-template-columns: 0 minmax(0, 1fr) }
+body.has-sidebar-page #main-outlet-wrapper
+                                        { grid-template-columns: var(--d-sidebar-width) minmax(0, 1fr) }
+.sidebar-wrapper                        { display: flex; position: sticky }
+.sidebar-wrapper .sidebar-container     { display: flex; flex-direction: column; width: 100%; padding: 0 }
+```
+
+以上规则全部来自**核心 bundle** `common_<hash>.css`(三站同源,非站方主题):
+
+| 规则 | 归属 | 证据 |
+| --- | --- | --- |
+| `:root{--d-sidebar-width:…}`、`#main-outlet-wrapper{display:grid;grid-template-columns:0 minmax(0,1fr)}`、`body.has-sidebar-page #main-outlet-wrapper{grid-template-columns:var(--d-sidebar-width) minmax(0,1fr)}` | Discourse 核心 `common_<hash>.css` | linux.do 1 195 889 字符 / meta 1 196 899 / nodeloc 1 193 499 的核心 bundle 内,紧邻 `:where(.uc-composer-redesign)` 等同类规则 |
+| `:where(.uc-enable-main-outlet-grid-layout-change){--d-sidebar-width:15em}`(另有 `@media (width<64rem){13em}`) | **同为核心 bundle**,选择器匹配的是 `body`,因为该 class 在 `body` 上 | CDP 报 `origin: regular`、`sheet: ""`;`fetch` 全文长度与 CDP `CSS.getStyleSheetText` 逐字节一致 |
+| `:root{--d-sidebar-width:19rem}` + `!important` 的 6 列 `grid-template-columns` | **站方主题** `common_theme_51_*.css` / `desktop_theme_51_*.css`(nodeloc,`discourse_theme_id=51`) | 规则里出现 `--community-sidebar-width`、`--ads-sidebar-width`、`--main-outlet-width` 等站方私有变量 |
+
+于是:**侧边栏渲染宽度 = min(轨道宽, 宿主自身已用宽度)**。宿主是 flex item 且 `flex-shrink:1`,轨道窄时它被压回轨道宽——给它写 `width:333px !important` 也无效。
+
+实测(视口 1864px):
+
+| 项 | linux.do | meta.discourse.org | www.nodeloc.com |
+| --- | --- | --- | --- |
+| body 有 `uc-enable-main-outlet-grid-layout-change` | 有 | 有 | 无 |
+| `--d-sidebar-width` 在 `<html>` | 333px(脚本写的 inline,核心默认 17em) | 17em | 336px(脚本写的 inline,主题默认 19rem) |
+| `--d-sidebar-width` 在 `body` | **15em**(核心规则) | **15em**(核心规则) | 336px(继承自 `<html>`) |
+| `--d-sidebar-width` 在 `#main-outlet-wrapper` | 15em | 15em | 336px |
+| `grid-template-columns`(computed) | `240px 1597.28px` | `240px 1597.28px` | `336px 110px 732px 316px 110px 260px` |
+| `#d-sidebar` 实测宽 | **240px** | 240px | **336px** |
+| `#d-sidebar` inline `width` | `333px !important`(无效) | 无 | `336px !important`(生效) |
+
+## 二、为什么在 `<html>` 上写变量会失效
+
+`--d-sidebar-width: 15em` 声明在 `body` 上,而 `<html>` 上的 inline 值只是**继承源**:body 上的声明覆盖继承值,`#main-outlet-wrapper` 于是拿到 15em = 240px。nodeloc 的 `body` 没有这条规则(站点未开启该预告开关),继承不被隔断,`<html>` 上的 336px 一路传到轨道。
+
+可逆实验(linux.do,只读探测中的唯一一次写入,已还原;记录 `240px|240px → 400px|333px → …`),采样项为 `grid 首列 | #d-sidebar 实测宽`:
+
+| 写入位置 | 结果 | 说明 |
+| --- | --- | --- |
+| 基线 | `240px \| 240px` | body 上的 `15em` 生效 |
+| `body.style.setProperty('--d-sidebar-width','400px')` | `400px \| 333px` | **轨道跟着变**;宿主停在 333px,因为它的 inline `width:333px !important` 是上限 |
+| `#main-outlet-wrapper.style.setProperty(…)` | `400px \| 333px` | 直接写在 grid 元素上也生效 |
+| `document.documentElement.style.setProperty(…)` | `240px \| 240px` | 被 body 上的 `15em` 隔断,完全无效 |
+
+结论:写入点必须在**规则所在的那一层或更近**,即 `body` 与 `#main-outlet-wrapper`;`<html>` 只是为了让「从 `:root` 读变量」的旧版式继续工作而保留。
+
+## 三、挂载点定位链
+
+三站的宿主链完全一致(5 个实测站点):
+
+```
+nav#d-sidebar.sidebar-container        ← Native Sidebar Host(#d-sidebar 与 .sidebar-container 同元素)
+  └ div.sidebar-wrapper                 ← 宽度过渡对象
+      └ div#main-outlet-wrapper         ← grid,承载 Sidebar Track
+          └ div#ember3.discourse-root
+```
+
+页头链:
+
+```
+header.d-header                         ← 注意:没有 id,`#d-header` 在实测站点上命中数为 0
+  └ div.wrap > div.contents
+      ├ span.header-sidebar-toggle > button.btn-sidebar-toggle[aria-controls="d-sidebar"]   ← 原生折叠按钮
+      ├ div.home-logo-wrapper-outlet > div.title > a(logo)                                  ← 当前按钮插入点
+      ├ div.before-header-panel-outlet
+      └ div.panel > span.header-buttons + ul.icons.d-header-icons
+```
+
+实测命中数(`querySelectorAll().length`):
+
+| 选择器 | linux.do | meta | nodeloc | chrultrabook | openai |
+| --- | --- | --- | --- | --- | --- |
+| `#d-sidebar` / `.sidebar-container` / `.sidebar-wrapper` / `#main-outlet-wrapper` | 1 / 1 / 1 / 1 | 同 | 同 | 同 | 同 |
+| `.home-logo-wrapper-outlet` / 其内 `.title` | 1 / 1 | 1 / 1 | 1 / 1 | 1 / 1 | 1 / 1 |
+| `header.d-header`(class) | 1 | 1 | 1 | 1 | 1 |
+| `#d-header`(id) | **0** | 0 | 0 | 0 | 0 |
+| `[data-sidebar]`、`.sidebar-panel`、`.sidebar-hamburger-dropdown`、`.sidebar-toggle`、`.header-dropdown-toggle.sidebar-toggle` | 0 | 0 | 0 | 0 | 0 |
+| `.d-header-logo`、`.d-header__logo`、`.logo-wrapper`、`.title-wrapper` | 0 | 0 | 0 | 0 | 0 |
+
+规则:
+
+- **候选链只含实测命中过的选择器**。上表命中数为 0 的选择器(含 `[data-sidebar]`、`.sidebar-panel`、`.sidebar-hamburger-dropdown`、`.sidebar-toggle`)一律不加入候选链——它们既不是旧版式也不是新版式,只是猜测。
+- **旧候选不删除**:`.home-logo-wrapper-outlet .title` 在 2025.12 与 2026.10 上都命中,且是 nodeloc(站方主题)上的唯一可行插入点。
+- `#d-header` 不得使用:实测 5 站都不存在这个 id,能用的只有 `header.d-header` 这个 class。
+- **按钮插入点候选链**(首个命中即止,越靠前越贴近 logo):
+
+  1. `.home-logo-wrapper-outlet .title` — 当前实现,全部实测站点命中
+  2. `.home-logo-wrapper-outlet` — 其 `.title` 被主题改写/丢弃时
+  3. `header.d-header .contents` — `.home-logo-wrapper-outlet` 整体消失时(见 §七:激活 Chat 时该 outlet 会被占用)
+  4. `.d-header .contents` — 只有 class、没有 id 的旧版页头
+  5. `.d-header .panel` — 兜底
+
+- **宿主候选链**:`#d-sidebar` → `.sidebar-container` → `.sidebar-wrapper .sidebar-container`(id 被去掉时的关系式兜底)。两者命中同一元素时以后者为准,不得同时返回两个宿主。
+- 定位失败不是终局:`init` 只在 Ember 就绪后尝试一次;按钮与面板都必须能由后续的结构变化再次触发(见 §五.3)。
+
+## 四、旧版本与新版本对照
+
+| 站点 | 构建 | `uc-enable-main-outlet-grid-layout-change` | 定位与宽度表现 |
+| --- | --- | --- | --- |
+| linux.do | `2026.10.0-latest` (a114182) | 有 | 选择器全命中;宽度链路见 §一(轨道 240px,拖拽失效) |
+| meta.discourse.org | `2026.10.0-latest` (16cb540) | 有 | 选择器全命中;脚本未注入(不在 `@match`,见 §七) |
+| community.openai.com | `2026.10.0-latest` (16cb540) | 无 | 选择器全命中;轨道 = `#d-sidebar` = 272px,脚本正常注入 |
+| forum.chrultrabook.com | `2025.12.0-latest` | 无 | 选择器全命中;`--d-sidebar-width` 在 html/body 都是 17em,轨道 = 272px |
+| www.nodeloc.com | `2026.10.0-latest` (209233c) | 无 | 选择器全命中;站方主题 6 列 grid,用 `var(--d-sidebar-width)` 作首列 |
+
+因此「新版本 vs 旧版本」不是区分点:**2025.12 的 chrultrabook 与 2026.10 的 openai 表现一致,2026.10 的 linux.do 与 2026.10 的 nodeloc 表现相反**。真正的区分点是站点/访客是否命中 `uc-enable-main-outlet-grid-layout-change`,以及站方主题是否私有化了 grid 规则。
+
+## 五、实现规则
+
+### 1. 宽度的写入与还原
+
+`src/ui/host.ts` 的宽度设置(`applySidebarWidth` 与动画路径 `setSidebarWidthForAnimation`)同时写三处:
+
+- `document.documentElement`、`document.body`、`#main-outlet-wrapper`(不存在则跳过)各设 `--d-sidebar-width: <n>px`
+- 宿主自身的 `width: <n>px !important` **保留**:它是旧版式的撑宽手段,也是「上限」——轨道更宽时面板不会超过用户拖出的宽度
+
+`restoreSidebarWidth` 必须把这三处的属性**全部**移除(不止 `<html>`),并清掉宽度动画 class。
+
+写入用**普通 inline 声明,不加 `!important`**:inline 已经压过 `:where(.uc-…)` 这类作者规则(§二 实测),而加 `!important` 会连核心在窄视口下的收窄(`@media (width<64rem){--d-sidebar-width:13em}`)一起压掉。
+
+### 2. 定位
+
+- 宿主与按钮插入点按 §三 的候选链取首个命中,**永不删除旧候选**;新增候选必须先在真实站点上实测命中(记录在 §三 的表里),不能凭样式命名猜测。
+- 每次解析都重新走候选链,不缓存元素引用(Ember 会整块替换侧边栏与页头)。
+- 面板只在宿主内插入自己的容器,不改站方的 DOM 结构;隐藏原生内容仍由既有 CSS(`.sfp-feed-mode > :not(...)` 与显式的 section/footer 规则)完成。
+
+### 3. 自愈
+
+- 路由 watcher 的 mutation 回调已负责「面板容器/拖拽手柄丢失 → 重新挂载」;按钮需要同样的待遇:页头被替换或首次定位失败时,**重新走插入点候选链**并补上按钮,而不是只在 `init` 时尝试一次。
+- 结构自愈不重置用户状态:面板宽度、筛选与排序偏好、已读状态都不受影响。
+
+### 4. 与迁移对照基线的约束
+
+`tests/unit/migration-parity.test.ts` 冻结了 `src/constants.ts`、`src/storage-keys.ts`、`src/styles/feed.css` 的签名与 `src/i18n.ts` 的词表。本主题的改动**不得**新增 storage key、改缓存版本号、改 `MIN/MAX/DEFAULT_WIDTH` 的取值或新增 UI 文案:
+
+- 宽度写入点是行为而非常量,不需要新 key。
+- 需要新增 CSS 规则时,必须同一次改动显式重建对照基线(`node tools/capture-migration-baseline.mjs`)并在提交信息里说明理由。
+
+## 六、验收
+
+`docs/development.md#checks` 的完整命令清单,本主题新增的断言:
+
+- **浏览器夹具**(`tests/browser/site-fixture.html` + `tools/check-built-userscript.py`):夹具必须建模真实的宽度链路——`#main-outlet-wrapper` 用 grid,`.sidebar-wrapper` 包住宿主,并在 `<body>` 上挂 `uc-enable-main-outlet-grid-layout-change` 与「`body{--d-sidebar-width:15em}`」,使「只写 `<html>`」在夹具里**同样失效**。断言:
+  - 开启面板后 `#main-outlet-wrapper` 的 `grid-template-columns` 首列等于面板宽度(而不是停在 15em 换算出的值);
+  - 拖拽后 grid 首列与宿主宽度都变化,且只在 mouseup 时落盘一次(沿用既有断言);
+  - dispose 后 `<html>`、`<body>`、`#main-outlet-wrapper` 三处的 `--d-sidebar-width` 都不存在(现有断言只查 `<html>`,需扩展);
+  - 页头被移除后重新插入时,按钮按候选链被补回,且只有一个 `button.sfp-toggle-btn`。
+- **单元测试**:候选链的纯函数解析(`src/ui/host.ts` 的插入点/宿主解析)按优先级表驱动;候选链在只有后段候选存在时仍命中;无候选时返回空。
+- **真站人工核对**(需 agent-browser-cli 与已登录 profile):在 linux.do(`uc-` 打开)与 www.nodeloc.com(站方主题)上拖拽,确认 grid 首列与面板宽度同步变化;在 forum.chrultrabook.com(旧版本)上确认按钮与面板仍正常。
+
+## 七、已知边界
+
+- **`meta.discourse.org` 不在内置 `@match` 里**:三处 `sfp-` 痕迹为 0 的原因就是脚本没在那个源上运行,与 DOM 定位无关。需要用该站时必须由用户/userscript 管理器添加 match 规则(或把它加入内置 match 列表)。
+- **`.home-logo-wrapper-outlet` 会被 Chat 占用**:上游已记录「Chat 激活时该 outlet 被占用,对第三方定制形同失效」。候选链与自愈是缓解,不是保证;若该 outlet 整块被替换,按钮会落到 `header.d-header .contents`。
+- **窄视口**:原生侧边栏在窄视口下变成抽屉/收窄,面板未适配;写入 inline 变量会覆盖核心的 `@media (width<64rem)` 收窄。
+- **挂载被 `requestAnimationFrame` 门控**:`waitForStableHeaderMount` 在 Ember 就绪后等两帧 rAF 才回调,而隐藏/后台标签页不派发 rAF——按钮与面板要等该标签页首次渲染后才出现(实测:后台标签 `button.sfp-toggle-btn` 恒为 0,截图强制渲染一次后立刻变成 1)。这是「未渲染」而非「定位失败」,定位问题时不要据此判定站点不兼容。
+- **站方主题可以整块接管 grid**:nodeloc 用 `!important` 私有 6 列 grid;面板只改 `--d-sidebar-width` 这个它自己的输入,不保证主题读取的时机与方式永远不变。
+- **隔离世界未验证**:上述探测全部来自页面世界;**用户脚本管理器的隔离世界 `window` 是否与页面世界同源未验证**(页面世界能查到的 DOM/`window` 属性在隔离世界不一定可达)。真实管理器下的行为仍属发布前人工核对项。
+- **`__container__` 不是失效原因**:5 个站点都 `Object.keys(window.Discourse)` 为 `["_booted","_bootPromise","rootElement","_router","base","application","__registry__","__container__"]`、`_booted:true`、`__container__` 可 `lookup`;`window.Ember` 全局一律 `undefined`。不要把「等待 Ember」当成各站点差异的解释。
+- 探测只覆盖 `/latest` 路由、桌面宽度与匿名/已登录其中的一种状态;topic 页、user 页与移动端结构未采。
+- 读到的 linux.do / nodeloc 页面已被本脚本改过(宿主 inline 宽度、`sfp-feed-mode` class、`<html>` 上的变量),这些数值不是站点原生基线;§一 的「世界」对照以 CDP 规则原文与可逆实验为准。
+
+## 八、复现方式
+
+只读 DOM 探测(需 agent-browser-cli 与扩展桥;`exec` 用临时脚本文件,不要把大对象粘回对话):
+
+```js
+// 1) 定位与命中数
+const q = (s) => document.querySelectorAll(s).length;
+({ sidebar: q('#d-sidebar'), container: q('.sidebar-container'), wrapper: q('.sidebar-wrapper'),
+   outlet: q('#main-outlet-wrapper'), logoOutlet: q('.home-logo-wrapper-outlet'),
+   logoTitle: q('.home-logo-wrapper-outlet .title'), oldHeader: q('#d-header'), header: q('header.d-header'),
+   uc: document.body.className.includes('uc-enable-main-outlet-grid-layout-change'),
+   hasSidebarPage: document.body.classList.contains('has-sidebar-page') });
+// 2) 宽度链路:变量在哪一层被谁覆盖 + 轨道实测值
+const g = document.querySelector('#main-outlet-wrapper'), sid = document.querySelector('#d-sidebar');
+({ html: getComputedStyle(document.documentElement).getPropertyValue('--d-sidebar-width'),
+   body: getComputedStyle(document.body).getPropertyValue('--d-sidebar-width'),
+   outlet: getComputedStyle(g).getPropertyValue('--d-sidebar-width'),
+   track: getComputedStyle(g).gridTemplateColumns, sidebarPx: sid.getBoundingClientRect().width,
+   sidebarInline: sid.style.width });
+// 3) 规则归属(哪些样式表定义了它)
+[...document.styleSheets].flatMap(s => { try { return [...s.cssRules] } catch { return [] } })
+  .filter(r => r.cssText.includes('--d-sidebar-width') || r.cssText.includes('uc-enable-main-outlet-grid-layout-change'))
+  .map(r => r.cssText.slice(0, 200));
+```
+
+可逆写入实验(会改页面,**只在确认可还原时手动执行**;实验后必须把三处 inline 属性恢复原值):
+
+```js
+const r = document.documentElement, b = document.body, w = document.querySelector('#main-outlet-wrapper');
+const read = () => getComputedStyle(w).gridTemplateColumns.split(' ')[0];
+r.style.setProperty('--d-sidebar-width', '400px'); const viaHtml = read();
+b.style.setProperty('--d-sidebar-width', '400px'); const viaBody = read();
+w.style.setProperty('--d-sidebar-width', '400px'); const viaOutlet = read();
+// 逐处 removeProperty 还原
+```
+
+浏览器检查用 `npm run check:browser`(临时 headless profile,不安装脚本到用户浏览器);真站人工核对用 `agent-browser-cli`。
