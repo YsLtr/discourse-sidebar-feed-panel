@@ -1,6 +1,6 @@
 # Discourse 页面结构与侧边栏宽度兼容
 
-面板 (Feed Panel) 挂在 Discourse 原生侧边栏里,并把该侧边栏的宽度改成用户拖拽出的值。本文件是这两件事的**定位契约**:宿主与页头锚点用**可叠加的候选链**定位(旧定位只增不删),侧边栏宽度通过 `--d-sidebar-width` 自定义属性驱动 `#main-outlet-wrapper` 的 grid 轨道,而不是只给侧边栏自己写 `width`。
+面板 (Feed Panel) 挂在 Discourse 原生侧边栏里,并把该侧边栏的宽度改成用户拖拽出的值。本文件是这两件事的**定位契约**:宿主与页头锚点用**可叠加的候选链**定位(候选只在被另一条完全覆盖时才删,新增必须有真实站点命中),侧边栏宽度通过 `--d-sidebar-width` 自定义属性驱动 `#main-outlet-wrapper` 的 grid 轨道,而不是只给侧边栏自己写 `width`;收尾时把这三处元素上原本就有的 inline 值**还原**回去,而不是一律删除。
 
 **事实来源**:本机 `agent-browser-cli`(真实 Chrome + 扩展桥)对 5 个站点的只读探测,原始记录在 `.pi/tmp/dom-probe*.md` 与 `.pi/tmp/probe/`(scratch,不随仓库提交);样式表规则原文用 CDP `CSS.getMatchedStylesForNode` 与 `fetch(sheet.href,{credentials:'omit'})` 交叉取得(CDP 的 `stylesheet.sourceURL` 恒为 `null`,故用全文长度比对表归属)。
 
@@ -138,17 +138,16 @@ header.d-header                         ← 注意:没有 id,`#d-header` 在实�
 规则:
 
 - **候选链只含实测命中过的选择器**。上表命中数为 0 的选择器(含 `[data-sidebar]`、`.sidebar-panel`、`.sidebar-hamburger-dropdown`、`.sidebar-toggle`)一律不加入候选链——它们既不是旧版式也不是新版式,只是猜测。
-- **旧候选不删除**:`.home-logo-wrapper-outlet .title` 在 2025.12 与 2026.10 上都命中,且是 nodeloc(站方主题)上的唯一可行插入点。
+- **候选不删除**:`.home-logo-wrapper-outlet .title` 在 2025.12 与 2026.10 上都命中,且是 nodeloc(站方主题)上的唯一可行插入点。唯一可以删的情形是某个候选被另一条完全覆盖(`header.d-header .contents` 必然同时命中 `.d-header .contents`,故只留后者)。
 - `#d-header` 不得使用:实测 5 站都不存在这个 id,能用的只有 `header.d-header` 这个 class。
 - **按钮插入点候选链**(首个命中即止,越靠前越贴近 logo):
 
   1. `.home-logo-wrapper-outlet .title` — 当前实现,全部实测站点命中
   2. `.home-logo-wrapper-outlet` — 其 `.title` 被主题改写/丢弃时
-  3. `header.d-header .contents` — `.home-logo-wrapper-outlet` 整体消失时(见 §七:激活 Chat 时该 outlet 会被占用)
-  4. `.d-header .contents` — 只有 class、没有 id 的旧版页头
-  5. `.d-header .panel` — 兜底
+  3. `.d-header .contents` — `.home-logo-wrapper-outlet` 整体消失时(见 §七:激活 Chat 时该 outlet 会被占用)
+  4. `.d-header .panel` — 兜底
 
-- **宿主候选链**:`#d-sidebar` → `.sidebar-container` → `.sidebar-wrapper .sidebar-container`(id 被去掉时的关系式兜底)。两者命中同一元素时以后者为准,不得同时返回两个宿主。
+- **宿主候选链**:`#d-sidebar` → `.sidebar-container`。两条命中同一元素(`nav#d-sidebar.sidebar-container`)时取**第一个命中的**,不是最后一个;`firstMatch` 一旦命中就不再往后看,因此不得出现「被前一条完全覆盖」的候选。
 - 定位失败不是终局:`init` 只在 Ember 就绪后尝试一次;按钮与面板都必须能由后续的结构变化再次触发(见 §五.3)。
 
 ## 四、旧版本与新版本对照
@@ -172,9 +171,12 @@ header.d-header                         ← 注意:没有 id,`#d-header` 在实�
 - `document.documentElement`、`document.body`、`#main-outlet-wrapper`(不存在则跳过)各设 `--d-sidebar-width: <n>px`
 - 宿主自身的 `width: <n>px !important` **保留**:它是旧版式的撑宽手段,也是「上限」——轨道更宽时面板不会超过用户拖出的宽度
 
-`restoreSidebarWidth` 必须把这三处的属性**全部**移除(不止 `<html>`),并清掉宽度动画 class。
+`restoreSidebarWidth` 必须把这三处**全部**处理掉(不止 `<html>`),并清掉宽度动画 class。它要满足两条:
 
-写入用**普通 inline 声明,不加 `!important`**:inline 已经压过 `:where(.uc-…)` 这类作者规则(§二 实测),而加 `!important` 会连核心在窄视口下的收窄(`@media (width<64rem){--d-sidebar-width:13em}`)一起压掉。
+1. **必须真的发生**:`unmount()` 走的是 `animateSidebarWidth(..., { cleanupAfter: true })`,而宿主已经消失时那条路径原本直接 return —— 所以无宿主时也必须执行清理,否则面板关掉了、grid 轨道还停在面板宽度。
+2. **还原而不是删除**:写之前记下每个目标原来的 inline 值与优先级,还原时放回去;面板没写过的元素一律不碰。删除一个不是自己写的值(站方/主题写在 `body` 或 `#main-outlet-wrapper` 上的同名变量)会破坏站方布局。
+
+写入用**普通 inline 声明,不加 `!important`**:inline 已经压过 `:where(.uc-…)` 这类作者规则(§二 实测),包括核心在窄视口下的收窄(`@media (width<64rem){:where(.uc-…){--d-sidebar-width:13em}}`,特异性 0、非 `!important`)——**加不加 `!important` 它都会被覆盖**,所以「不加 `!important`」并不是为了保住窄视口收窄(见 §七)。真正的取舍是:普通 inline 会**输**给用 `!important` 写死该变量的主题,而不加 `!important` 正是为了不与这种主题对抗。
 
 ### 2. 定位
 
@@ -201,15 +203,19 @@ header.d-header                         ← 注意:没有 id,`#d-header` 在实�
 - **浏览器夹具**(`tests/browser/site-fixture.html` + `tools/check-built-userscript.py`):夹具必须建模真实的宽度链路——`#main-outlet-wrapper` 用 grid,`.sidebar-wrapper` 包住宿主,并在 `<body>` 上挂 `uc-enable-main-outlet-grid-layout-change` 与「`body{--d-sidebar-width:15em}`」,使「只写 `<html>`」在夹具里**同样失效**。断言:
   - 开启面板后 `#main-outlet-wrapper` 的 `grid-template-columns` 首列等于面板宽度(而不是停在 15em 换算出的值);
   - 拖拽后 grid 首列与宿主宽度都变化,且只在 mouseup 时落盘一次(沿用既有断言);
-  - dispose 后 `<html>`、`<body>`、`#main-outlet-wrapper` 三处的 `--d-sidebar-width` 都不存在(现有断言只查 `<html>`,需扩展);
+  - 宿主在面板开启时被移除(面板随之关闭)后,三处 `--d-sidebar-width` 立刻都不存在,grid 首列回到站方默认值——这条覆盖「清理只挂在动画路径上」的缺口;
+  - dispose 后 `<html>`、`<body>`、`#main-outlet-wrapper` 三处的 `--d-sidebar-width` 都不存在;
+  - 面板开启前 `body` 上已有的 inline `--d-sidebar-width` 在 dispose 后被**还原成原值**(而不是被删掉);
   - 页头被移除后重新插入时,按钮按候选链被补回,且只有一个 `button.sfp-toggle-btn`。
-- **单元测试**(`tests/unit/host-locators.test.ts`):候选链的纯函数解析(`src/ui/host.ts` 的 `firstMatch` 与两条候选表)按优先级表驱动、首个命中即止;只有后段候选存在时仍命中;全部缺失时返回空。两条候选表的顺序被逐项冻结(加入新候选必须同一次改这里与 §三 的表)。
+- **单元测试**(`tests/unit/host.test.ts`):候选链的纯函数解析(`src/ui/host.ts` 的 `firstMatch` 与两条候选表)按优先级表驱动、首个命中即止;只有后段候选存在时仍命中;全部缺失时返回空。两条候选表的顺序被逐项冻结(加入或删除候选必须同一次改这里与 §三 的表)。宽度变量的记忆规则用假 inline style 驱动:每个目标只在第一次写入前记一次原值、后出现的目标补记、离开文档的目标被丢弃、还原放回原值(含优先级)且没写过的元素不碰。
 - **真站核对**(需 agent-browser-cli 与已登录 profile):在 linux.do(`uc-` 打开)与 www.nodeloc.com(站方主题)上拖拽,确认 grid 首列与面板宽度同步变化;在 forum.chrultrabook.com(旧版本)上确认按钮与面板仍正常;meta.discourse.org 自 3.2.0 起在内置 match 内,同样适用。没有安装新版脚本时,退而用 §二 的真站 A/B(临时 inline 试写并还原)核对写入点集合——它不需要安装脚本。
 
 ## 七、已知边界
 
 - **内置 metadata 与「脚本是否在该站运行」是两件事**:3.1.0 的内置 match 只有 LinuxDO / NodeLoc / Chrultrabook / OpenAI,而同一台机器上 meta.discourse.org 的探测结果会随该站是否被手动加入 match 而变(首次探测时 `sfp-` 痕迹为 0,后来同一标签页已装着脚本:`button.sfp-toggle-btn`、`div.sfp-feed-container`、`.sfp-feed-mode`、`window.SFPFeedPanel` 全部存在,页头 `.title` 内就是该按钮)。**不要用「页内有没有 `sfp-` 痕迹」判断定位是否失败**——判断定位要看候选链命中与 `--d-sidebar-width` 的解析结果。3.2.0 起 meta.discourse.org 进入内置 match。
-- **`.home-logo-wrapper-outlet` 会被 Chat 占用**:上游已记录「Chat 激活时该 outlet 被占用,对第三方定制形同失效」。候选链与自愈是缓解,不是保证;若该 outlet 整块被替换,按钮会落到 `header.d-header .contents`。
+- **`.home-logo-wrapper-outlet` 会被 Chat 占用**:上游已记录「Chat 激活时该 outlet 被占用,对第三方定制形同失效」。候选链与自愈是缓解,不是保证;若该 outlet 整块被替换,按钮会落到 `.d-header .contents`。
+- **面板运行期间被第三方改写的变量会被覆盖**:记忆的是「面板第一次写入**之前**」的原值。若站方/主题/其它扩展在面板运行期间写自己的 inline 值,面板的下一次写入会覆盖它,dispose 也不会把它放回去——这一层无法在不观测外部写入的前提下区分,故不在本期处理。
+- **变量不自愈**:面板不会主动定期重写 `--d-sidebar-width`;被外部清掉后要等下一次拖拽、开合面板或结构自愈时才恢复。
 - **窄视口**:原生侧边栏在窄视口下变成抽屉/收窄,面板未适配;写入 inline 变量会覆盖核心的 `@media (width<64rem)` 收窄。
 - **挂载被 `requestAnimationFrame` 门控**:`waitForStableHeaderMount` 在 Ember 就绪后等两帧 rAF 才回调,而隐藏/后台标签页不派发 rAF——按钮与面板要等该标签页首次渲染后才出现(实测:后台标签 `button.sfp-toggle-btn` 恒为 0,截图强制渲染一次后立刻变成 1)。这是「未渲染」而非「定位失败」,定位问题时不要据此判定站点不兼容。
 - **站方主题可以整块接管 grid**:nodeloc 用 `!important` 私有 6 列 grid;面板只改 `--d-sidebar-width` 这个它自己的输入,不保证主题读取的时机与方式永远不变。
