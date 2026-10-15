@@ -3,14 +3,13 @@ import type { createI18n } from "../i18n";
 import type { Lifetime } from "../platform/lifetime";
 
 /**
- * Native Sidebar Host candidates, most specific first. The chain only grows:
- * a candidate is dropped only when no supported forum uses it, and it is added
- * only after being observed on a real forum.
+ * Native Sidebar Host candidates, most specific first. A candidate may be
+ * dropped only when another one already covers every element it can match, and
+ * added only after being observed on a real forum.
  */
 export const SIDEBAR_HOST_SELECTORS = [
   "#d-sidebar",
   ".sidebar-container",
-  ".sidebar-wrapper .sidebar-container",
 ] as const;
 
 /**
@@ -20,7 +19,6 @@ export const SIDEBAR_HOST_SELECTORS = [
 export const TOGGLE_ANCHOR_SELECTORS = [
   ".home-logo-wrapper-outlet .title",
   ".home-logo-wrapper-outlet",
-  "header.d-header .contents",
   ".d-header .contents",
   ".d-header .panel",
 ] as const;
@@ -35,6 +33,62 @@ export function firstMatch<T>(
     if (found) return found;
   }
   return null;
+}
+
+export const WIDTH_VARIABLE = "--d-sidebar-width";
+
+/** The inline-style surface the width variable is written through. */
+export interface InlineTarget {
+  isConnected: boolean;
+  style: {
+    getPropertyValue(name: string): string;
+    getPropertyPriority(name: string): string;
+    setProperty(name: string, value: string, priority?: string): void;
+    removeProperty(name: string): void;
+  };
+}
+
+export interface SavedInlineValue<T extends InlineTarget> {
+  el: T;
+  value: string;
+  priority: string;
+}
+
+/**
+ * Record what each target held before the panel's first write, so restore can
+ * put a value back instead of deleting one the panel never wrote. Targets that
+ * left the document are dropped: their inline style no longer affects layout.
+ */
+export function captureInlineValues<T extends InlineTarget>(
+  saved: readonly SavedInlineValue<T>[],
+  targets: readonly T[],
+  property: string,
+): SavedInlineValue<T>[] {
+  const kept = saved.filter(
+    (entry) => entry.el.isConnected && targets.includes(entry.el),
+  );
+  for (const el of targets) {
+    if (!el.isConnected) continue;
+    if (kept.some((entry) => entry.el === el)) continue;
+    kept.push({
+      el,
+      value: el.style.getPropertyValue(property),
+      priority: el.style.getPropertyPriority(property),
+    });
+  }
+  return kept;
+}
+
+export function restoreInlineValues<T extends InlineTarget>(
+  saved: readonly SavedInlineValue<T>[],
+  property: string,
+): void {
+  for (const entry of saved) {
+    entry.el.style.removeProperty(property);
+    if (entry.value) {
+      entry.el.style.setProperty(property, entry.value, entry.priority);
+    }
+  }
 }
 
 interface HostDependencies {
@@ -105,23 +159,37 @@ export function createFeedHost({
     return document.querySelector<HTMLElement>("#main-outlet-wrapper");
   }
 
+  let savedWidthValues: SavedInlineValue<InlineTarget>[] = [];
+
+  function widthVariableTargets(): InlineTarget[] {
+    const targets: InlineTarget[] = [document.documentElement, document.body];
+    const outlet = getOutletElement();
+    if (outlet) targets.push(outlet);
+    return targets;
+  }
   /**
    * The grid track reads the variable from its own element, while the
    * upcoming-change rule declares it on `body` and therefore shadows a
    * root-level value. Writing all three keeps the track following the panel on
-   * either layout; the sidebar's own width above stays the cap.
+   * either layout; the sidebar's own width above stays the cap. Each target
+   * keeps whatever it held before the first write, so restore puts that back
+   * instead of deleting a value the panel never wrote.
    */
   function setSidebarWidthVariable(width: number) {
+    savedWidthValues = captureInlineValues(
+      savedWidthValues,
+      widthVariableTargets(),
+      WIDTH_VARIABLE,
+    );
     const value = width + "px";
-    document.documentElement.style.setProperty("--d-sidebar-width", value);
-    document.body.style.setProperty("--d-sidebar-width", value);
-    getOutletElement()?.style.setProperty("--d-sidebar-width", value);
+    for (const target of widthVariableTargets()) {
+      target.style.setProperty(WIDTH_VARIABLE, value);
+    }
   }
 
   function clearSidebarWidthVariable() {
-    document.documentElement.style.removeProperty("--d-sidebar-width");
-    document.body.style.removeProperty("--d-sidebar-width");
-    getOutletElement()?.style.removeProperty("--d-sidebar-width");
+    restoreInlineValues(savedWidthValues, WIDTH_VARIABLE);
+    savedWidthValues = [];
   }
 
   function applySidebarWidth(width: number) {
@@ -159,8 +227,12 @@ export function createFeedHost({
     { cleanupAfter = false, enforceMin = true } = {},
   ) {
     const sidebar = getSidebarElement();
-    if (!sidebar) return;
-
+    if (!sidebar) {
+      // Without a host there is no animation to run, but a requested cleanup
+      // still has to happen or the width variables outlive the panel.
+      if (cleanupAfter) restoreSidebarWidth();
+      return;
+    }
     if (widthAnimationTimer) {
       getScope().clearTimeout(widthAnimationTimer);
       widthAnimationTimer = null;

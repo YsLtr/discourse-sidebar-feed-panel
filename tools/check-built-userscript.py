@@ -162,7 +162,13 @@ try:
 
             cdp.evaluate("fixture.pause=true;document.querySelector('.sfp-refresh-btn').click()")
             wait_for('fixture.pending.length===1')
-            cdp.evaluate("document.querySelector('.sfp-resizer').dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:500}));document.querySelector('#d-sidebar').remove();SFPFeedPanel.dispose();fixture.release()")
+            cdp.evaluate("document.querySelector('.sfp-resizer').dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:500}))")
+            cdp.evaluate("document.querySelector('#d-sidebar').remove()")
+            wait_for("!document.querySelector('.sfp-feed-container')")
+            check('losing the host clears the width variables while the panel turns off', """!document.documentElement.style.getPropertyValue('--d-sidebar-width') &&
+              !document.body.style.getPropertyValue('--d-sidebar-width') &&
+              !document.querySelector('#main-outlet-wrapper').style.getPropertyValue('--d-sidebar-width')""")
+            cdp.evaluate("SFPFeedPanel.dispose();fixture.release()")
             wait_for("fixture.effects.timeouts.size===0 && fixture.effects.intervals.size===0 && fixture.effects.frames.size===0")
             check('dispose cleans absent host, drag listeners, history, styles and queued effects', """!document.querySelector('.sfp-feed-container,.sfp-toggle-btn,.sfp-help-tooltip') &&
               [...fixture.subscriptions.values()].every(s=>s.size===0) &&
@@ -252,6 +258,14 @@ try:
             wait_for("document.querySelectorAll('.sfp-topic-item').length===270")
             check('retry requests the failed page again without skipping depth', "fixture.requests.slice(-2).every(r=>r.path.endsWith('page=8')) && !document.querySelector('.sfp-load-more-error')")
             cdp.evaluate("SFPFeedPanel.dispose()")
+            wait_for("!document.querySelector('.sfp-feed-container')")
+            cdp.evaluate("""document.body.style.setProperty('--d-sidebar-width','777px');
+              SFPFeedPanel.start();""")
+            wait_for("document.querySelectorAll('.sfp-topic-item').length===30")
+            cdp.evaluate("SFPFeedPanel.dispose()")
+            wait_for("!document.querySelector('.sfp-feed-container')")
+            check('dispose restores the pre-existing inline width value', "document.body.style.getPropertyValue('--d-sidebar-width')==='777px'")
+            cdp.evaluate("document.body.style.removeProperty('--d-sidebar-width')")
         for label, descriptor in [
             ('readonly', "{value:undefined,writable:false}"),
             ('throwing setter', "{get:()=>undefined,set:()=>{throw new Error('bridge denied')}}"),
