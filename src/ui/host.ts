@@ -161,7 +161,7 @@ export function createFeedHost({
 
   let savedWidthValues: SavedInlineValue<InlineTarget>[] = [];
   let savedSidebarWidths: SavedInlineValue<InlineTarget>[] = [];
-  /** Bumped by every animation and by every restore; stale frames bail out. */
+  /** Bumped by every animation; frames from an earlier one bail out. */
   let widthAnimationEpoch = 0;
 
   function widthVariableTargets(): InlineTarget[] {
@@ -194,7 +194,6 @@ export function createFeedHost({
     restoreInlineValues(savedWidthValues, WIDTH_VARIABLE);
     savedWidthValues = [];
   }
-
 
   /** Remember the host's own inline width before the panel's first write. */
   function setSidebarWidth(sidebar: HTMLElement, width: number) {
