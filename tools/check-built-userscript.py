@@ -71,6 +71,17 @@ try:
           const bodyVar=getComputedStyle(document.body).getPropertyValue('--d-sidebar-width').trim();
           return Math.abs(track-written)<1 && Math.abs(track-sidebarPx)<1 && !bodyVar.endsWith('em');
         })()""")
+        cdp.evaluate("""window.panelWidthBefore=document.querySelector('#d-sidebar').style.getPropertyValue('width');
+          document.querySelector('.sfp-feed-container').remove();""")
+        wait_for("document.querySelectorAll('.sfp-feed-container').length===1")
+        time.sleep(.5)
+        check('a container re-mount keeps the panel width past the animation window', """(() => {
+          const side=document.querySelector('#d-sidebar');
+          const track=parseFloat(getComputedStyle(document.querySelector('#main-outlet-wrapper')).gridTemplateColumns.split(' ')[0]);
+          return side.style.getPropertyValue('width')===panelWidthBefore &&
+            Math.abs(track-parseFloat(panelWidthBefore))<1 &&
+            document.body.style.getPropertyValue('--d-sidebar-width')===panelWidthBefore;
+        })()""")
         check('full CSS preserves native scroll rules', """(() => {
           const s=getComputedStyle(document.querySelector('.sfp-feed-scroll'));
           return s.overscrollBehaviorY==='contain' && s.touchAction==='pan-y pinch-zoom';
@@ -165,9 +176,14 @@ try:
             cdp.evaluate("document.querySelector('.sfp-resizer').dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:500}))")
             cdp.evaluate("document.querySelector('#d-sidebar').remove()")
             wait_for("!document.querySelector('.sfp-feed-container')")
-            check('losing the host clears the width variables while the panel turns off', """!document.documentElement.style.getPropertyValue('--d-sidebar-width') &&
-              !document.body.style.getPropertyValue('--d-sidebar-width') &&
-              !document.querySelector('#main-outlet-wrapper').style.getPropertyValue('--d-sidebar-width')""")
+            check('losing the host clears the width variables while the panel turns off', """(() => {
+              const track=parseFloat(getComputedStyle(document.querySelector('#main-outlet-wrapper')).gridTemplateColumns.split(' ')[0]);
+              const siteDefault=15*parseFloat(getComputedStyle(document.body).fontSize);
+              return !document.documentElement.style.getPropertyValue('--d-sidebar-width') &&
+                !document.body.style.getPropertyValue('--d-sidebar-width') &&
+                !document.querySelector('#main-outlet-wrapper').style.getPropertyValue('--d-sidebar-width') &&
+                Math.abs(track-siteDefault)<1;
+            })()""")
             cdp.evaluate("SFPFeedPanel.dispose();fixture.release()")
             wait_for("fixture.effects.timeouts.size===0 && fixture.effects.intervals.size===0 && fixture.effects.frames.size===0")
             check('dispose cleans absent host, drag listeners, history, styles and queued effects', """!document.querySelector('.sfp-feed-container,.sfp-toggle-btn,.sfp-help-tooltip') &&
@@ -265,6 +281,10 @@ try:
             cdp.evaluate("SFPFeedPanel.dispose()")
             wait_for("!document.querySelector('.sfp-feed-container')")
             check('dispose restores the pre-existing inline width value', "document.body.style.getPropertyValue('--d-sidebar-width')==='777px'")
+            time.sleep(.4)
+            check('a disposed panel does not re-apply its width from a pending frame', """!document.documentElement.style.getPropertyValue('--d-sidebar-width') &&
+              !document.querySelector('#main-outlet-wrapper').style.getPropertyValue('--d-sidebar-width') &&
+              document.body.style.getPropertyValue('--d-sidebar-width')==='777px'""")
             cdp.evaluate("document.body.style.removeProperty('--d-sidebar-width')")
         for label, descriptor in [
             ('readonly', "{value:undefined,writable:false}"),

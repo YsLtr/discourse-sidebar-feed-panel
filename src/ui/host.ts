@@ -160,6 +160,9 @@ export function createFeedHost({
   }
 
   let savedWidthValues: SavedInlineValue<InlineTarget>[] = [];
+  let savedSidebarWidths: SavedInlineValue<InlineTarget>[] = [];
+  /** Bumped by every animation and by every restore; stale frames bail out. */
+  let widthAnimationEpoch = 0;
 
   function widthVariableTargets(): InlineTarget[] {
     const targets: InlineTarget[] = [document.documentElement, document.body];
@@ -192,6 +195,22 @@ export function createFeedHost({
     savedWidthValues = [];
   }
 
+
+  /** Remember the host's own inline width before the panel's first write. */
+  function setSidebarWidth(sidebar: HTMLElement, width: number) {
+    savedSidebarWidths = captureInlineValues(
+      savedSidebarWidths,
+      [sidebar],
+      "width",
+    );
+    sidebar.style.setProperty("width", width + "px", "important");
+  }
+
+  function clearSidebarWidths() {
+    restoreInlineValues(savedSidebarWidths, "width");
+    savedSidebarWidths = [];
+  }
+
   function applySidebarWidth(width: number) {
     const clampedWidth = Math.min(
       MAX_WIDTH,
@@ -199,7 +218,7 @@ export function createFeedHost({
     );
     const sidebar = getSidebarElement();
     if (sidebar) {
-      sidebar.style.setProperty("width", clampedWidth + "px", "important");
+      setSidebarWidth(sidebar, clampedWidth);
     }
     setSidebarWidthVariable(clampedWidth);
   }
@@ -218,7 +237,7 @@ export function createFeedHost({
   ) {
     const minWidth = enforceMin ? getMinSidebarWidth() : 0;
     const clampedWidth = Math.min(MAX_WIDTH, Math.max(minWidth, width));
-    sidebar.style.setProperty("width", clampedWidth + "px", "important");
+    setSidebarWidth(sidebar, clampedWidth);
     setSidebarWidthVariable(clampedWidth);
   }
 
@@ -233,6 +252,10 @@ export function createFeedHost({
       if (cleanupAfter) restoreSidebarWidth();
       return;
     }
+    // Supersede any earlier animation. The timer handle alone is not enough:
+    // an animation that has not reached its frame yet has armed nothing, and
+    // its cleanup (which restores the width) would still fire later.
+    const epoch = ++widthAnimationEpoch;
     if (widthAnimationTimer) {
       getScope().clearTimeout(widthAnimationTimer);
       widthAnimationTimer = null;
@@ -247,6 +270,7 @@ export function createFeedHost({
     transitionEls.forEach((el) => el.classList.add("sfp-width-animating"));
 
     requestAnimationFrame(() => {
+      if (epoch !== widthAnimationEpoch) return;
       setSidebarWidthForAnimation(sidebar, clampedTarget, { enforceMin });
 
       widthAnimationTimer = setTimeout(() => {
@@ -262,9 +286,12 @@ export function createFeedHost({
   }
 
   function restoreSidebarWidth() {
+    // Restoring invalidates any animation still in flight, or its frame would
+    // write the panel width straight back after a dispose.
+    widthAnimationEpoch++;
+    clearSidebarWidths();
     const sidebar = getSidebarElement();
     if (sidebar) {
-      sidebar.style.removeProperty("width");
       getSidebarWidthTransitionElements(sidebar).forEach((el) =>
         el.classList.remove("sfp-width-animating"),
       );

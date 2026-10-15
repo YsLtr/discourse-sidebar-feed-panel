@@ -70,10 +70,14 @@ it("resolves the host chain against a fake root", () => {
 });
 
 /** Fake inline style surface that keeps values and priorities per property. */
-function fakeTarget(initial?: { value: string; priority?: string }) {
+function fakeTarget(initial?: {
+  value: string;
+  priority?: string;
+  property?: string;
+}) {
   const values = new Map<string, { value: string; priority: string }>();
   if (initial) {
-    values.set(WIDTH_VARIABLE, {
+    values.set(initial.property ?? WIDTH_VARIABLE, {
       value: initial.value,
       priority: initial.priority ?? "",
     });
@@ -163,10 +167,25 @@ it("restores a remembered value and deletes one that was never set", () => {
   expect(body.style.getPropertyValue(WIDTH_VARIABLE)).toBe("");
 });
 
-it("restores nothing when the panel never wrote", () => {
-  const body = fakeTarget({ value: "777px" });
+it("never touches an element outside the captured set", () => {
+  const root = fakeTarget({ value: "480px" });
+  const foreign = fakeTarget({ value: "777px" });
+  const saved = captureInlineValues<InlineTarget>([], [root], WIDTH_VARIABLE);
+  root.style.setProperty(WIDTH_VARIABLE, "272px");
 
-  restoreInlineValues([], WIDTH_VARIABLE);
+  restoreInlineValues(saved, WIDTH_VARIABLE);
 
-  expect(body.style.getPropertyValue(WIDTH_VARIABLE)).toBe("777px");
+  expect(root.style.getPropertyValue(WIDTH_VARIABLE)).toBe("480px");
+  expect(foreign.style.getPropertyValue(WIDTH_VARIABLE)).toBe("777px");
+});
+
+it("keeps the host width rules property-agnostic", () => {
+  const host = fakeTarget({ value: "555px", property: "width" });
+  const saved = captureInlineValues<InlineTarget>([], [host], "width");
+  host.style.setProperty("width", "272px", "important");
+
+  restoreInlineValues(saved, "width");
+
+  expect(host.style.getPropertyValue("width")).toBe("555px");
+  expect(host.style.getPropertyValue(WIDTH_VARIABLE)).toBe("");
 });
