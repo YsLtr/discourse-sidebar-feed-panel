@@ -281,11 +281,26 @@ try:
             cdp.evaluate("SFPFeedPanel.dispose()")
             wait_for("!document.querySelector('.sfp-feed-container')")
             check('dispose restores the pre-existing inline width value', "document.body.style.getPropertyValue('--d-sidebar-width')==='777px'")
-            time.sleep(.4)
-            check('a disposed panel does not re-apply its width from a pending frame', """!document.documentElement.style.getPropertyValue('--d-sidebar-width') &&
+            time.sleep(.12)
+            check('dispose leaves the width variables cleared', """!document.documentElement.style.getPropertyValue('--d-sidebar-width') &&
+              !document.querySelector('#main-outlet-wrapper').style.getPropertyValue('--d-sidebar-width') &&
+              document.body.style.getPropertyValue('--d-sidebar-width')==='777px'""")
+            time.sleep(.3)
+            check('the width stays cleared after the animation window', """!document.documentElement.style.getPropertyValue('--d-sidebar-width') &&
               !document.querySelector('#main-outlet-wrapper').style.getPropertyValue('--d-sidebar-width') &&
               document.body.style.getPropertyValue('--d-sidebar-width')==='777px'""")
             cdp.evaluate("document.body.style.removeProperty('--d-sidebar-width')")
+            cdp.evaluate("""fixture.store.set(scoped('sfp_feed_mode_enabled'),false);
+              document.querySelector('#d-sidebar').style.setProperty('width','555px','important');
+              SFPFeedPanel.start();""")
+            wait_for("document.querySelectorAll('.sfp-toggle-btn').length===1")
+            time.sleep(.2)
+            cdp.evaluate("SFPFeedPanel.dispose()")
+            time.sleep(.2)
+            check('a disabled feed leaves the host inline width untouched', """!document.querySelector('.sfp-feed-container') &&
+              document.querySelector('#d-sidebar').style.getPropertyValue('width')==='555px'""")
+            cdp.evaluate("""document.querySelector('#d-sidebar').style.removeProperty('width');
+              fixture.store.set(scoped('sfp_feed_mode_enabled'),true)""")
         for label, descriptor in [
             ('readonly', "{value:undefined,writable:false}"),
             ('throwing setter', "{get:()=>undefined,set:()=>{throw new Error('bridge denied')}}"),

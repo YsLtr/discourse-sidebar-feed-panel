@@ -286,9 +286,6 @@ export function createFeedHost({
   }
 
   function restoreSidebarWidth() {
-    // Restoring invalidates any animation still in flight, or its frame would
-    // write the panel width straight back after a dispose.
-    widthAnimationEpoch++;
     clearSidebarWidths();
     const sidebar = getSidebarElement();
     if (sidebar) {
