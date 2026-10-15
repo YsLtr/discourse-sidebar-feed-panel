@@ -90,6 +90,18 @@ body.has-sidebar-page #main-outlet-wrapper
 
 结论:写入点必须在**规则所在的那一层或更近**,即 `body` 与 `#main-outlet-wrapper`;`<html>` 只是为了让「从 `:root` 读变量」的旧版式继续工作而保留。
 
+五个站点的真站 A/B(逐站一次调用:先记下 `<html>` / `body` / `#main-outlet-wrapper` 的 inline 变量与 `#d-sidebar` 的 inline 宽度及其优先级,再按两种写入集合各试写 450px,最后逐条还原)。采样项同上:
+
+| 站点 | body 有 `uc-…` | 试写前 | 只写 `<html>`(修复前的写入集合) | 写 `<html>` + `body` + `#main-outlet-wrapper` |
+| --- | --- | --- | --- | --- |
+| linux.do | 有 | `240px \| 240px` | `240px \| 240px`(无效) | **`450px \| 450px`** |
+| meta.discourse.org | 有 | `240px \| 240px`(宿主 inline 373px) | `240px \| 240px`(无效) | **`450px \| 450px`** |
+| www.nodeloc.com | 无 | `336px \| 336px` | `450px \| 450px` | `450px \| 450px` |
+| forum.chrultrabook.com | 无 | `399px \| 399px` | `450px \| 450px` | `450px \| 450px` |
+| community.openai.com | 无 | `331px \| 331px` | `450px \| 450px` | `450px \| 450px` |
+
+五个站点试写后都还原到试写前状态(三处变量与宿主 inline 宽度逐条比较一致)。这是本文件唯一带写入的真站核对:写入的是临时 inline 样式,同一次调用内还原;`body` 上写着 `15em` 的两站,只写 `<html>` 无论写什么值都无效,与面板宽度无关。
+
 ## 三、挂载点定位链
 
 三站的宿主链完全一致(5 个实测站点):
@@ -144,7 +156,7 @@ header.d-header                         ← 注意:没有 id,`#d-header` 在实�
 | 站点 | 构建 | `uc-enable-main-outlet-grid-layout-change` | 定位与宽度表现 |
 | --- | --- | --- | --- |
 | linux.do | `2026.10.0-latest` (a114182) | 有 | 选择器全命中;宽度链路见 §一(轨道 240px,拖拽失效) |
-| meta.discourse.org | `2026.10.0-latest` (16cb540) | 有 | 选择器全命中;脚本未注入(不在 `@match`,见 §七) |
+| meta.discourse.org | `2026.10.0-latest` (16cb540) | 有 | 选择器全命中;3.1.0 的内置 metadata 没有该站,手动添加 match 后脚本正常运行,宽度问题在同一处复现(轨道 240px,而脚本写在 `#d-sidebar` 上的 inline 宽度是 373px) |
 | community.openai.com | `2026.10.0-latest` (16cb540) | 无 | 选择器全命中;轨道 = `#d-sidebar` = 272px,脚本正常注入 |
 | forum.chrultrabook.com | `2025.12.0-latest` | 无 | 选择器全命中;`--d-sidebar-width` 在 html/body 都是 17em,轨道 = 272px |
 | www.nodeloc.com | `2026.10.0-latest` (209233c) | 无 | 选择器全命中;站方主题 6 列 grid,用 `var(--d-sidebar-width)` 作首列 |
@@ -191,12 +203,12 @@ header.d-header                         ← 注意:没有 id,`#d-header` 在实�
   - 拖拽后 grid 首列与宿主宽度都变化,且只在 mouseup 时落盘一次(沿用既有断言);
   - dispose 后 `<html>`、`<body>`、`#main-outlet-wrapper` 三处的 `--d-sidebar-width` 都不存在(现有断言只查 `<html>`,需扩展);
   - 页头被移除后重新插入时,按钮按候选链被补回,且只有一个 `button.sfp-toggle-btn`。
-- **单元测试**:候选链的纯函数解析(`src/ui/host.ts` 的插入点/宿主解析)按优先级表驱动;候选链在只有后段候选存在时仍命中;无候选时返回空。
-- **真站人工核对**(需 agent-browser-cli 与已登录 profile):在 linux.do(`uc-` 打开)与 www.nodeloc.com(站方主题)上拖拽,确认 grid 首列与面板宽度同步变化;在 forum.chrultrabook.com(旧版本)上确认按钮与面板仍正常。
+- **单元测试**(`tests/unit/host-locators.test.ts`):候选链的纯函数解析(`src/ui/host.ts` 的 `firstMatch` 与两条候选表)按优先级表驱动、首个命中即止;只有后段候选存在时仍命中;全部缺失时返回空。两条候选表的顺序被逐项冻结(加入新候选必须同一次改这里与 §三 的表)。
+- **真站核对**(需 agent-browser-cli 与已登录 profile):在 linux.do(`uc-` 打开)与 www.nodeloc.com(站方主题)上拖拽,确认 grid 首列与面板宽度同步变化;在 forum.chrultrabook.com(旧版本)上确认按钮与面板仍正常;meta.discourse.org 自 3.2.0 起在内置 match 内,同样适用。没有安装新版脚本时,退而用 §二 的真站 A/B(临时 inline 试写并还原)核对写入点集合——它不需要安装脚本。
 
 ## 七、已知边界
 
-- **`meta.discourse.org` 不在内置 `@match` 里**:三处 `sfp-` 痕迹为 0 的原因就是脚本没在那个源上运行,与 DOM 定位无关。需要用该站时必须由用户/userscript 管理器添加 match 规则(或把它加入内置 match 列表)。
+- **内置 metadata 与「脚本是否在该站运行」是两件事**:3.1.0 的内置 match 只有 LinuxDO / NodeLoc / Chrultrabook / OpenAI,而同一台机器上 meta.discourse.org 的探测结果会随该站是否被手动加入 match 而变(首次探测时 `sfp-` 痕迹为 0,后来同一标签页已装着脚本:`button.sfp-toggle-btn`、`div.sfp-feed-container`、`.sfp-feed-mode`、`window.SFPFeedPanel` 全部存在,页头 `.title` 内就是该按钮)。**不要用「页内有没有 `sfp-` 痕迹」判断定位是否失败**——判断定位要看候选链命中与 `--d-sidebar-width` 的解析结果。3.2.0 起 meta.discourse.org 进入内置 match。
 - **`.home-logo-wrapper-outlet` 会被 Chat 占用**:上游已记录「Chat 激活时该 outlet 被占用,对第三方定制形同失效」。候选链与自愈是缓解,不是保证;若该 outlet 整块被替换,按钮会落到 `header.d-header .contents`。
 - **窄视口**:原生侧边栏在窄视口下变成抽屉/收窄,面板未适配;写入 inline 变量会覆盖核心的 `@media (width<64rem)` 收窄。
 - **挂载被 `requestAnimationFrame` 门控**:`waitForStableHeaderMount` 在 Ember 就绪后等两帧 rAF 才回调,而隐藏/后台标签页不派发 rAF——按钮与面板要等该标签页首次渲染后才出现(实测:后台标签 `button.sfp-toggle-btn` 恒为 0,截图强制渲染一次后立刻变成 1)。这是「未渲染」而非「定位失败」,定位问题时不要据此判定站点不兼容。
@@ -242,4 +254,6 @@ w.style.setProperty('--d-sidebar-width', '400px'); const viaOutlet = read();
 // 逐处 removeProperty 还原
 ```
 
+
+§二 的真站 A/B 写成一次调用:保存三处 inline 变量与宿主 inline 宽度的值与优先级 → 只写 `<html>` 试一次 → 补写 `body` 与 `#main-outlet-wrapper` 再试一次 → 逐条 `removeProperty` / `setProperty` 还原,并比较试写前后的读数是否一致。
 浏览器检查用 `npm run check:browser`(临时 headless profile,不安装脚本到用户浏览器);真站人工核对用 `agent-browser-cli`。
