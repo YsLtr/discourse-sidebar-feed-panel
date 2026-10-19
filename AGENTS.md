@@ -1,6 +1,6 @@
 # Discourse Sidebar Feed Panel - Active Handoff
 
-The userscript replaces a selected area of a Discourse forum with a compact, locally-filtered topic feed panel, hosted from the userscript metadata of a single built file. `CONTEXT.md`, `docs/adr/` and `docs/` hold the durable contracts; this file records only the current session.
+The userscript replaces a selected area of a Discourse forum with a compact, locally-filtered topic feed panel, hosted from the userscript metadata of a single built file. `CONTEXT.md` holds the domain terms; `docs/INDEX.md` indexes the durable contracts under `docs/`; this file records only the current session.
 
 **Project root**: `C:\Users\28676\builds\discourse\userscript`
 **Branch / remote**: `main` / `https://github.com/YsLtr/discourse-sidebar-feed-panel.git`
@@ -20,7 +20,7 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
   - F5 候选表删掉被另一条完全覆盖的条目;文档写明「只在覆盖者排在它前面时才可删」。
   - F6 容器被替换后重挂会丢宽度:旧实现只按 `widthAnimationTimer` 句柄取消动画,而句柄在帧回调内才赋值,同一轮两次动画时旧清理会在约 260ms 后清掉新宽度。改为自增 `widthAnimationEpoch`,帧回调发现自己过时即返回(插桩日志 `unmount → anim(cleanup=true) → ensure → anim(cleanup=false) → restore t=269` 已消除)。T1 后来把那行「还原时自增 epoch」删掉:rAF 探针证明 dispose 路径上帧被安排在已被 `viewScope.dispose()` 取消的作用域里(无 `ran`),那行无路可依。
   - 新增断言(浏览器检查 36 → **44**):宽度驱动 grid 轨道、页头替换后按钮补回、宿主消失时清变量且轨道回默认、容器重挂过动画窗口仍保持宽度、dispose 还原已有 inline 值(0.12s/0.42s 两次采样)、feed 未启用时不动宿主 inline 宽度;`tests/unit/host-locators.test.ts` 改名 `tests/unit/host.test.ts`(13 例)并补记忆规则。变异复核(dist 副本 + `--source`):M1/M3/M4 会失败,MR 全绿。
-- **文档复位**(`3ae3a82` docs commit):`docs/discourse-dom-compatibility.md`(新文档,§一~§八)记录了术语、宽度链路、候选链、新旧对照、实现规则、验收、边界与复现;`docs/development.md` 增加 DOM compatibility 段并更新检查覆盖;`docs/cross-site-discourse-adaptation-plan.md` 更新 resolved decisions;本轮的 `Native Sidebar Host` 术语补了与 `CONTEXT.md` 的交叉说明。
+- **文档复位**(`3ae3a82` docs commit):`docs/discourse/01-页面结构与侧边栏宽度.md`(§一~§八)记录了术语、宽度链路、候选链、新旧对照、实现规则、验收、边界与复现;`docs/development/01-开发与校验.md` 增加 DOM compatibility 段并更新检查覆盖;`docs/discourse/03-跨站适配范围.md` 更新跨站范围条款;本轮的 `Native Sidebar Host` 术语补了与 `CONTEXT.md` 的交叉说明。
 - **最终校验**:typecheck、13 files / **71** 单测、`check:dev`、`build`(193.35 kB / gzip 44.15 kB)、`check:artifact`、`check:scroll`(12)、`check:browser`(**44**)全绿;`.pi/tmp/t14-checks.log`、`f6b-checks.log` 等日志在 scratch。
 
 ## 当前仓库状况
@@ -33,8 +33,8 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 - **是否发布 3.2.0 未定**(同上一轮):push `main` 即发布;`npm version` 已在本地完成。
 - **未经实测,不得当作已验证**:真实站点安装 3.2.0 后的行为;用户脚本管理器隔离世界(`window`/`document` 可达性);窄视口/移动端(写入 inline 变量会覆盖核心 `@media (width<64rem)` 的收窄,面板未适配抽屉式侧边栏);真实站点上「容器被替换」(触发 F6 路径)的实际频率;meta.discourse.org 上按钮与宽度的真机观感。
-- **审查接受的残余风险**(已记入 `docs/discourse-dom-compatibility.md` §七):正确性依赖「`deactivateFeed` 先 dispose viewScope、再 `host.unmount()`」的顺序不变量;无宿主分支不清理动画定时器(仅 260ms 后一次幂等清理);面板运行期间被第三方改写的变量仍会被覆盖且 dispose 时不还原;变量不自愈;`.home-logo-wrapper-outlet` 在 Chat 使用时会被占用(候选链与自愈是缓解);同一宿主节点 detach→reattach 会把面板自己写的值当原值还原。
-- **`CONTEXT.md` 未加入本轮新术语**(本轮流程只允许改 `docs/` 与仓库根 `AGENTS.md`):`Sidebar Track`、`Header Anchor`、`Toggle Button`、`Upcoming-change class` 的定义目前只在 `docs/discourse-dom-compatibility.md` 的 §术语;`Native Sidebar Host` 与 `CONTEXT.md` 的 Feed Panel Host 关系已在该文件里交叉说明。下次动 `CONTEXT.md` 时可考虑把这些术语合并进去。
+- **审查接受的残余风险**(已记入 `docs/discourse/01-页面结构与侧边栏宽度.md` §七):正确性依赖「`deactivateFeed` 先 dispose viewScope、再 `host.unmount()`」的顺序不变量;无宿主分支不清理动画定时器(仅 260ms 后一次幂等清理);面板运行期间被第三方改写的变量仍会被覆盖且 dispose 时不还原;变量不自愈;`.home-logo-wrapper-outlet` 在 Chat 使用时会被占用(候选链与自愈是缓解);同一宿主节点 detach→reattach 会把面板自己写的值当原值还原。
+- **`CONTEXT.md` 未加入本轮新术语**:`Sidebar Track`、`Header Anchor`、`Toggle Button`、`Upcoming-change class` 的定义目前只在 `docs/discourse/01-页面结构与侧边栏宽度.md` 的 §术语;`Native Sidebar Host` 与 `CONTEXT.md` 的 Feed Panel Host 关系已在该文件里交叉说明。下次动 `CONTEXT.md` 时可考虑把这些术语合并进去。
 - `todo.md` 里「稍后再读」与 meta 品牌主题等条目是用户自己的待办,不是本会话开工的活。
 
 ## 后续任务
