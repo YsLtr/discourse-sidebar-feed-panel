@@ -196,7 +196,7 @@ The old GitHub Raw path retains a complete 3.0.0 migration script whose `@update
 
 Source lives in `src/` and is built with Vite and vite-plugin-monkey. `dist/` is ignored. The root `.user.js` is a 3.0.0 migration snapshot for old Raw installations; do not edit it directly.
 
-Pushing to `main` triggers the Release workflow, which reads the version from `package.json` in the latest commit of that push. For an unpublished version, it runs all checks, builds the script, automatically creates the matching tag (for example, `v3.0.0`), and publishes the `.user.js` asset as the latest Release. No manual tag push is needed. Already published versions are skipped; the check workflow still validates ordinary commits. Future versions ship through Releases while the root 3.0.0 snapshot stays in place. See [release instructions](docs/development.md#release-distribution).
+Pushing to `main` triggers the Release workflow, which reads the version from `package.json` in the latest commit of that push. For an unpublished version, it runs all checks, builds the script, automatically creates the matching tag (for example, `v3.0.0`), and publishes the `.user.js` asset as the latest Release. No manual tag push is needed. Already published versions are skipped; the check workflow still validates ordinary commits. Future versions ship through Releases while the root 3.0.0 snapshot stays in place. See [release instructions](docs/development/01-开发与校验.md#release-distribution).
 
 ```sh
 npm ci
@@ -217,7 +217,7 @@ npm run check:artifact
 
 Requires Node.js `^22.20.0 || ^24.12.0 || >=26.0.0`; Node 22 LTS is recommended. Browser checks also require Python and Chrome; use `CHROME_BIN` or `--chrome` to choose the browser. The built-userscript smoke check uses mock GM/Discourse services. Real userscript managers, sleep/wake sessions, and mobile devices need separate validation.
 
-See [development and validation](docs/development.md), the [migration plan and progress](docs/vite-plugin-monkey-refactor-plan.md), and the [migration completeness audit](docs/migration-completeness-audit-2026-10-05.md).
+See [docs/INDEX.md](docs/INDEX.md); development and validation, module boundaries, and the migration baseline live in the three topic files under `docs/development/`.
 
 ## License
 

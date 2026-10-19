@@ -196,7 +196,7 @@ GitHub 安装与脚本内置更新地址现统一指向最新正式 Release 的 
 
 源码位于 `src/`，使用 Vite 和 vite-plugin-monkey 构建。`dist/` 不纳入 Git；根目录 `.user.js` 是保留给旧 Raw 安装的 3.0.0 迁移快照，不直接编辑。
 
-推送到 `main` 会触发 Release 工作流，自动读取这次推送最新提交中的 `package.json` 版本号。若该版本尚未发布，全部检查通过后自动构建、创建对应标签（例如 `v3.0.0`）并发布 `.user.js` 附件，将该 Release 设为 latest，无需手动推送标签。已发布的同版本会跳过发布，普通提交仍由检查工作流验证。后续版本只发布 Release，保留根目录 3.0.0 快照。发布步骤见[开发与验证说明](docs/development.md#release-distribution)。
+推送到 `main` 会触发 Release 工作流，自动读取这次推送最新提交中的 `package.json` 版本号。若该版本尚未发布，全部检查通过后自动构建、创建对应标签（例如 `v3.0.0`）并发布 `.user.js` 附件，将该 Release 设为 latest，无需手动推送标签。已发布的同版本会跳过发布，普通提交仍由检查工作流验证。后续版本只发布 Release，保留根目录 3.0.0 快照。发布步骤见[开发与验证说明](docs/development/01-开发与校验.md#release-distribution)。
 
 ```sh
 npm ci
@@ -217,7 +217,7 @@ npm run check:artifact
 
 需要 Node.js `^22.20.0 || ^24.12.0 || >=26.0.0`，建议使用 Node 22 LTS。浏览器检查还需 Python 和 Chrome，可通过 `CHROME_BIN` 或 `--chrome` 指定路径。`check:browser` 使用模拟的 GM/Discourse 服务验证实际构建包，真实脚本管理器、长驻唤醒和移动端仍需单独验收。
 
-详见[开发与验证说明](docs/development.md)、[迁移方案及进度](docs/vite-plugin-monkey-refactor-plan.md)和[迁移完整性审计](docs/migration-completeness-audit-2026-10-05.md)。
+详见 [docs/INDEX.md](docs/INDEX.md),其中开发与验证说明、模块边界与迁移基线分别在 `docs/development/` 下的三份主题文档。
 
 ## 许可证
 
