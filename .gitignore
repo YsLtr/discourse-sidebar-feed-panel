@@ -1,5 +1,5 @@
 .claude/
-
+CLAUDE.md
 
 LINUX DO Timeline-1.29.1.user.js
 discourse-content-preserver.user.js
@@ -21,3 +21,4 @@ coverage/
 __pycache__/
 
 .pi/
+todo
