@@ -13,6 +13,7 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - **文档转契约**（`64b979e`）：设计稿状态改为现行契约并补 `file:line`。
 - **两轮真站反馈修正**（`08501a4`、`91c8ce0`、`49b3766`）：共 13 处，见下。
 - **第三轮真站反馈修正**（`c84537b`）：8 处，见下。行为细节以 [docs/feed/02-稍后再读.md](docs/feed/02-稍后再读.md) 为契约，不再在本文复述。
+- **第四轮真站反馈修正**（`be3d4da`）：5 处，见下。
 
 ## 真站反馈修掉的问题
 
@@ -48,11 +49,19 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - 遮罩文案一次到位 → 分两段：未进入「拖进加入稍后再读」无底色，进入后「松开后加入稍后再读」并加深底色。
 - 顺带：存储版本升到 2（数组新→旧，索引即视觉顺序），v1 读取时反转一次。
 
+第四轮（`be3d4da`）：
+
+- 遮罩两段文案没生效 → 原来只有 `dragover` 落在 `section` 上才切换，而容器的 `dragover` 抢先设了 `dropActive`；现在容器的 `dragover` 只负责 `preventDefault()` 与让区域出现，高亮只由 `section` 自己的 `dragenter`/`dragover`/`dragleave` 驱动。
+- 移除条目上的 `title`（拖出即删除）提示，连 `readLaterDragOut` 词条一起删。
+- 「松开后加入稍后再读」→「松开加入稍后再读」。
+- 拖分隔线会搬动内容 → 根因是「贴底」靠 `margin-top: auto`，在「放得下」与「放不下」之间会换一次对齐方式。改为 `.sfp-rl-scroll { flex-direction: column-reverse }`：主轴原点在底部，`scrollTop = 0` 就是贴底、向上滚为负方向，改高度只让上方多露内容。所有 `pinToBottom()`/`scrollTop` 补丁彻底删除，DOM 按存储倒序 append。
+- 删掉非话题条目再加回来不取预览 → 页内 `failedUrls`/`requestedUrls` 会永久记住这个 URL。现在每次 `render()` 按当前列表清理这两个集合与待发队列，重新加入就重新取一次。
+
 ## 当前仓库状况
 
-- HEAD 为 `c84537b`，位于 `feat/read-later`；工作区干净。
+- HEAD 为 `be3d4da`，位于 `feat/read-later`；工作区干净。
 - `package.json` 仍是 3.2.0。
-- 完整校验全绿：typecheck 0、14 文件 / 85 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **95 项**。
+- 完整校验全绿：typecheck 0、14 文件 / 85 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **98 项**。
 - **本机注意**：`npm test` 的 Vite 配置加载会 `exec("net use")`，在受限文件沙箱下报 `spawn EPERM`；需要 danger-full-access 才跑通，不是代码问题。
 
 ## 未决问题
@@ -71,4 +80,4 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 真站再核对（拖入四个位置、拖昵称/用户名、拖出删除、拖动排序、拖分隔线看内容是否稳定、两标签页同步、`/onebox` 的登录与 429、语言切换），再决定是否 push。
 
-Updated: 2026-10-25 00:50 中国标准时间 +0800
+Updated: 2026-10-25 01:20 中国标准时间 +0800
