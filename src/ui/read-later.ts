@@ -13,6 +13,7 @@ import {
   parseReadLaterLink,
   type ParsedReadLaterLink,
   type ReadLaterItem,
+  type ReadLaterPreview,
   readLaterFallbackTitle,
 } from "../read-later";
 import type { createTopicRenderer } from "./topic-item";
@@ -76,6 +77,11 @@ export function createReadLaterView({
   let availability: "available" | "unavailable" = "unavailable";
   const failedUrls = new Set<string>();
   const requestedUrls = new Set<string>();
+  /**
+   * 已拿到的预览按 URL 缓存：条目被拖出删除后，`item.preview` 随记录一起消失，
+   * 再加回来不该再发一次 `/onebox`。只缓存成功结果——失败不缓存，重加即重试。
+   */
+  const previewCache = new Map<string, ReadLaterPreview>();
   let previewQueue: string[] = [];
   let previewBusy = false;
 
@@ -135,6 +141,7 @@ export function createReadLaterView({
       } else if (status >= 200 && status < 300 && html) {
         const preview = parsePreview(html);
         if (preview.title || preview.excerpt || preview.imageUrl || preview.badge) {
+          previewCache.set(url, preview);
           updateItems(
             items().map((item) =>
               item.url === url ? { ...item, preview } : item,
@@ -156,7 +163,12 @@ export function createReadLaterView({
 
   function schedulePreview(item: ReadLaterItem) {
     if (availability !== "available") return;
-    if (item.preview || requestedUrls.has(item.url) || failedUrls.has(item.url))
+    if (
+      item.preview ||
+      previewCache.has(item.url) ||
+      requestedUrls.has(item.url) ||
+      failedUrls.has(item.url)
+    )
       return;
     requestedUrls.add(item.url);
     previewQueue.push(item.url);
@@ -164,7 +176,7 @@ export function createReadLaterView({
   }
 
   function cardElement(item: ReadLaterItem) {
-    const preview = item.preview || {};
+    const preview = item.preview || previewCache.get(item.url) || {};
     const title =
       preview.title ||
       item.title ||
@@ -311,12 +323,10 @@ export function createReadLaterView({
     section.hidden = false;
     if (divider) divider.hidden = false;
     section.setAttribute("aria-label", t("readLaterTitle"));
-    // 存储是「新 → 旧」，视觉是「旧在上、新在下」：DOM 顺序 = 从上到下的
-    // 视觉顺序，所以倒着 append。贴底与滚动原点都交给 `.sfp-rl-scroll` 的
-    // `column-reverse`，这里一个字都不碰 scrollTop。
-    for (let index = current.length - 1; index >= 0; index--) {
-      list.append(renderItem(current[index]));
-    }
+    // 存储是「新 → 旧」，DOM 就按这个顺序写：DOM 顺序 = 从上到下的视觉顺序，
+    // 最新条目落在最上方。整块列表贴底、滚动原点在底部，由 `.sfp-rl-scroll`
+    // 的 `column-reverse` 负责，这里一个字都不碰 scrollTop。
+    for (const item of current) list.append(renderItem(item));
 
     applyHeight();
     onLayoutChange();
@@ -629,12 +639,10 @@ export function createReadLaterView({
         const to = insertionIndexAt(event.clientY);
         internalHandled = true;
         setInsertMark(null);
-        // 先移除自己再插入，所以目标下标要按移除后的数组修正。
+        // DOM 下标就是存储下标（两者都是「新 → 旧」），只需按「先摘出自己」
+        // 修正一次：目标在源之后时前移一位。
         const target = to > from ? to - 1 : to;
-        // 插入下标是视觉顺序（旧在上），存储是「新 → 旧」，换回存储下标。
-        if (from >= 0 && target !== from) {
-          moveItem(url, nodes.length - 1 - target);
-        }
+        if (from >= 0 && target !== from) moveItem(url, target);
         endDrag();
         return;
       }

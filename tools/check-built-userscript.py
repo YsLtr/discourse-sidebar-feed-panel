@@ -338,11 +338,11 @@ try:
         })()""")
         cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/t/298')")
         wait_for("""document.querySelectorAll('.sfp-rl-item').length===2""")
-        check('new entries stack upward with the newest at the bottom', """(() => {
+        check('new entries stack upward with the newest on top', """(() => {
           const items = [...document.querySelectorAll('.sfp-rl-item')];
-          // DOM 是从上到下的视觉顺序：先加入的在上，最新的在下。
-          return items[0].dataset.url==='/t/299' && items[1].dataset.url==='/t/298' &&
-            items[1].getBoundingClientRect().top > items[0].getBoundingClientRect().top;
+          // 存储「新 → 旧」，DOM 按同序写入，所以最新条目在最上方。
+          return items[0].dataset.url==='/t/298' && items[1].dataset.url==='/t/299' &&
+            items[0].getBoundingClientRect().top < items[1].getBoundingClientRect().top;
         })()""")
         cdp.evaluate("""dragTo('.sfp-read-later', 'https://elsewhere.example/t/1');
           dragTo('.sfp-read-later', 'javascript:alert(1)');""")
@@ -459,17 +459,16 @@ try:
             return mark;
           };
           window.beforeOrder=rlItems();
-          // 把最新的（视觉最下）拖到最旧的前面。
-          window.lastMark=dragItem('/t/297', '/t/299', 'before');""")
+          // 把最旧的（视觉最下）拖到最上方。
+          window.lastMark=dragItem('/t/299', '/t/297', 'before');""")
         wait_for("JSON.stringify(rlItems())!==JSON.stringify(beforeOrder)")
-        check('a read-later drag carries the internal move marker', """lastMark.internal==='/t/297'""")
+        check('a read-later drag carries the internal move marker', """lastMark.internal==='/t/299'""")
         check('dragging an entry onto another reorders the list', """(() => {
           const order=rlItems();
           const stored=JSON.parse(localStorage.getItem('sfp_read_later_v1')).items.map(i=>i.url);
-          return order[0]==='/t/297' && order.at(-1)==='/about' &&
-            order.length===beforeOrder.length &&
-            // 存储是「新 → 旧」，正好是视觉顺序的倒序。
-            stored[0]==='/about' && stored.at(-1)==='/t/297';
+          // DOM 顺序 = 存储顺序 = 从上到下的视觉顺序，三者一致。
+          return order[0]==='/t/299' && order.length===beforeOrder.length &&
+            JSON.stringify(stored)===JSON.stringify(order);
         })()""")
         check('an internal drag shows no add overlay', """document.querySelector('.sfp-rl-drop').hidden""")
         cdp.evaluate("dragItem('/t/299')")
@@ -607,12 +606,12 @@ try:
           dragTo('.sfp-read-later', location.origin + '/t/297');
           dragTo('.sfp-read-later', location.origin + '/t/296');""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===4")
-        check('a new item appears below the older ones', """(() => {
+        check('a new item appears above the older ones', """(() => {
           const items=[...document.querySelectorAll('.sfp-rl-item')];
           const urls=items.map(i=>i.dataset.url);
           const newest=items.find(i=>i.dataset.url==='/t/296');
           const older=items.find(i=>i.dataset.url==='/t/299');
-          return urls.at(-1)==='/t/296' && newest.getBoundingClientRect().top >
+          return urls[0]==='/t/296' && newest.getBoundingClientRect().top <
             older.getBoundingClientRect().top;
         })()""")
         check('the read-later scrollbar matches the main list', """(() => {
@@ -738,7 +737,7 @@ try:
             card.querySelector('.sfp-rl-card-excerpt').textContent==='Preview excerpt' &&
             card.querySelector('.sfp-rl-card-image').getAttribute('src')===location.origin + '/uploads/preview.png';
         })()""")
-        # 移除再加回来：页内「已请求/已失败」状态不能把这条挡住。
+        # 移除再加回来：已经拿到的预览留在页内缓存里，不该再发一次请求。
         cdp.evaluate("""window.removeRlItem=(url) => {
             const item=document.querySelector(`.sfp-rl-item[data-url="${url}"]`);
             const dt=new DataTransfer();
@@ -751,10 +750,24 @@ try:
           removeRlItem('/u/alice');""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===0")
         cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/u/alice')")
-        wait_for("fixture.oneboxRequests.length>oneboxBefore")
-        check('removing a link and adding it back fetches the preview again', """(() => {
+        wait_for("!!document.querySelector('.sfp-rl-card')")
+        time.sleep(.3)
+        check('removing a link and adding it back reuses the cached preview', """(() => {
           const item=document.querySelector('.sfp-rl-item[data-url="/u/alice"]');
-          return fixture.oneboxRequests.filter(u=>u.endsWith('/u/alice')).length===2 &&
+          return fixture.oneboxRequests.length===oneboxBefore &&
+            fixture.oneboxRequests.filter(u=>u.endsWith('/u/alice')).length===1 &&
+            !!item && !!item.querySelector('.sfp-rl-card');
+        })()""")
+        # 直接重新拖入已在列表里的链接：幂等 no-op，不重排、不丢预览、不再请求。
+        cdp.evaluate("""window.rlUrls=() => [...document.querySelectorAll('.sfp-rl-item')].map(i=>i.dataset.url);
+          window.orderBeforeRedrag=rlUrls();
+          window.requestsBeforeRedrag=fixture.oneboxRequests.length;
+          dragTo('.sfp-read-later', location.origin + '/u/alice');""")
+        time.sleep(.35)
+        check('re-dragging an existing link changes nothing', """(() => {
+          const item=document.querySelector('.sfp-rl-item[data-url="/u/alice"]');
+          return JSON.stringify(rlUrls())===JSON.stringify(orderBeforeRedrag) &&
+            fixture.oneboxRequests.length===requestsBeforeRedrag &&
             !!item && !!item.querySelector('.sfp-rl-card');
         })()""")
         # 200 也可能是失败：`<a href="url">url</a>` 兜底照样是 200，必须按失败处理。
@@ -766,6 +779,17 @@ try:
           const item=document.querySelector('.sfp-rl-item[data-url="/u/bob"]');
           return !!item && !!item.querySelector('.sfp-rl-fallback') &&
             !item.querySelector('.sfp-rl-card');
+        })()""")
+        # 失败不进缓存：删掉再加回来要重新试一次，而不是永远卡在降级卡片。
+        cdp.evaluate("""window.bobBefore=fixture.oneboxRequests.filter(u=>u.endsWith('/u/bob')).length;
+          removeRlItem('/u/bob');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===1")
+        cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/u/bob')")
+        wait_for("fixture.oneboxRequests.filter(u=>u.endsWith('/u/bob')).length>bobBefore")
+        check('a failed preview is retried after the entry is re-added', """(() => {
+          const item=document.querySelector('.sfp-rl-item[data-url="/u/bob"]');
+          return fixture.oneboxRequests.filter(u=>u.endsWith('/u/bob')).length===bobBefore+1 &&
+            !!item && !!item.querySelector('.sfp-rl-fallback');
         })()""")
         cdp.evaluate("""fixture.oneboxHtml=null;
           localStorage.removeItem('sfp_read_later_v1');
@@ -794,7 +818,7 @@ try:
             !!about && !!about.querySelector('.sfp-rl-fallback');
         })()""")
         cdp.evaluate("""localStorage.setItem('fixture_expect_count', String(document.querySelectorAll('.sfp-rl-item').length));
-          localStorage.setItem('fixture_expect_url', [...document.querySelectorAll('.sfp-rl-item')].at(-1).dataset.url);""")
+          localStorage.setItem('fixture_expect_url', document.querySelector('.sfp-rl-item').dataset.url);""")
         cdp.call('Page.navigate', {'url': f'http://127.0.0.1:{server.server_port}/'})
         cdp.event('Page.loadEventFired')
         cdp.evaluate(source)
@@ -802,7 +826,7 @@ try:
         check('items survive a page reload and restore in order', """(() => {
           const items=[...document.querySelectorAll('.sfp-rl-item')];
           return String(items.length)===localStorage.getItem('fixture_expect_count') &&
-            items.at(-1).dataset.url===localStorage.getItem('fixture_expect_url');
+            items[0].dataset.url===localStorage.getItem('fixture_expect_url');
         })()""")
         cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
           localStorage.removeItem('sfp_read_later_height_v1');

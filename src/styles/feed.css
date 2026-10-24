@@ -1230,9 +1230,13 @@
   min-height: 0;
   /*
    * `column-reverse` 是这个区域唯一的贴底手段，也是它「从下往上算」的来源：
-   * 主轴起点在底部，内容不足时自动靠底，滚动原点也在底部——改高度只是让
-   * 上方多露出内容，内容本身一步都不动。用 `column` + `margin-top: auto`
-   * 会在「放得下」与「放不下」之间换一次对齐方式，拖分隔线时内容就跳。
+   * 主轴起点在底部，整块列表（唯一子元素）钉在底边，滚动原点也在底部——
+   * 改高度只是让上方多露出内容，内容本身一步都不动。用 `column` +
+   * `margin-top: auto` 会在「放得下」与「放不下」之间换一次对齐方式，
+   * 拖分隔线时内容就跳。
+   *
+   * 注意它只负责「整块贴底」，不反转条目：`.sfp-rl-list` 自身仍是正常
+   * `column`，所以 DOM 顺序（新 → 旧）就是从上到下的视觉顺序。
    */
   display: flex;
   flex-direction: column-reverse;
@@ -1258,7 +1262,7 @@
 .sfp-rl-scroll::-webkit-scrollbar-track {
   background-color: transparent;
 }
-/* 列表自身保持正序：DOM 顺序就是从上到下的视觉顺序。 */
+/* 列表自身是正常 `column`：DOM 顺序（新 → 旧）就是从上到下的视觉顺序。 */
 .sfp-rl-list {
   display: flex;
   flex-direction: column;

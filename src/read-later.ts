@@ -268,15 +268,18 @@ export function createReadLaterStore({
         console.warn("[SFP] read later height not persisted:", error);
       }
     },
+    /**
+     * 加入一条。已经存在的 URL 是**幂等 no-op**：不移动位置、不覆盖已有记录。
+     * 覆盖会顺手丢掉 `preview`/`topic` 快照，而「已在列表里」本身就是全部信息——
+     * 拖进来第二次不该改变任何东西。
+     */
     add(item: Omit<ReadLaterItem, "addedAt"> & { addedAt?: number }) {
+      if (items.some((existing) => existing.url === item.url)) return items;
       const entry: ReadLaterItem = {
         ...item,
         addedAt: item.addedAt ?? now(),
       };
-      const kept = items.filter((existing) => existing.url !== entry.url);
-      // 最新的排最前：数组索引与「从上到下」的视觉顺序一致。
-      kept.unshift(entry);
-      items = writeItems(kept.slice(0, limit)) as ReadLaterItem[];
+      items = writeItems([entry, ...items].slice(0, limit)) as ReadLaterItem[];
       return items;
     },
     /** 把某条移到 `toIndex`（结果数组里的下标），用于拖动排序。 */

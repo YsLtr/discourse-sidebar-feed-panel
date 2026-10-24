@@ -287,6 +287,9 @@ export function createFeedController({
   }
 
   function addReadLaterLink(link: ParsedReadLaterLink, title: string) {
+    // 已在列表里：什么都不做。不重排（拖第二次不该把旧条目顶到最新）、
+    // 也不重建记录（重建会丢掉 preview/topic 快照，且不会补发请求）。
+    if (readLaterStore.items().some((item) => item.url === link.url)) return;
     // 主列表里已经有这个话题时直接复制快照，省掉一次补全请求。
     const known = link.topicId
       ? resident.topics.find((topic) => topic.id === link.topicId)

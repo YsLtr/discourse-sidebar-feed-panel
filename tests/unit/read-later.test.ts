@@ -78,15 +78,16 @@ describe("readLaterFallbackTitle", () => {
 });
 
 describe("createReadLaterStore", () => {
-  it("keeps the newest entry first and moves duplicates to the front", () => {
+  it("keeps the newest entry first and ignores a duplicate", () => {
     const storage = fakeStorage();
     const store = createReadLaterStore({ storage, origin: ORIGIN });
     store.add(item("/a"));
     store.add(item("/b"));
     expect(store.items().map((entry) => entry.url)).toEqual(["/b", "/a"]);
+    // 已在列表里：不移动、不覆盖（覆盖会丢掉 preview/topic 快照）。
     store.add(item("/a", { title: "again" }));
-    expect(store.items().map((entry) => entry.url)).toEqual(["/a", "/b"]);
-    expect(store.items()[0].title).toBe("again");
+    expect(store.items().map((entry) => entry.url)).toEqual(["/b", "/a"]);
+    expect(store.items()[1].title).toBe("/a");
   });
 
   it("drops the oldest entry past the limit", () => {
