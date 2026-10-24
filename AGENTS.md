@@ -4,32 +4,37 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 **Project root**: `C:\Users\28676\builds\discourse\userscript`
 **Branch / remote**: `feat/read-later` / `https://github.com/YsLtr/discourse-sidebar-feed-panel.git`
-**User request**: 创建新分支设计「稍后再读」；随后指出迁移基线已过期、要求按新的交互裁定更新设计。
+**User request**: 创建新分支设计「稍后再读」，随后按裁定实现。
 
 ## 本轮完成的工作
 
-- **新分支与设计稿**（`feat/read-later`，自 `8d3558f` 切出；`e616e28`、`b3b90e8`）：在 [docs/feed/02-稍后再读.md](docs/feed/02-稍后再读.md) 写出「稍后再读」设计稿，并在 [docs/feed/README.md](docs/feed/README.md) 挂索引。设计要点：拖入本站链接加入、localStorage 存储、话题复用 `createTopicItem`、其余用编辑器同一个 `/onebox` 端点生成预览卡片、可拖拽分隔线的「第二空间」、条目自下而上排列。**未实现任何源码**。
-- **移除迁移对照基线**（`450e0f6`）：项目已无需要迁移的旧版本，删除 `tests/unit/migration-parity.test.ts`、`tests/fixtures/2.2.3.behavior.json`、`tests/fixtures/2.2.3.metadata.json`、`tools/capture-migration-baseline.mjs`、`tests/css-signature.mjs`、`tests/css-signature.d.mts`、`docs/development/03-迁移基线契约.md`；同步清理 `README.md`、`README.en.md`、`docs/INDEX.md`、`docs/development/README.md`、`docs/development/01-开发与校验.md`、`docs/discourse/01-页面结构与侧边栏宽度.md` §五.4、`docs/discourse/02-网页语言兼容.md` §五.3/§五.5/§六 中的冻结项描述。现在常量、样式与文案都不再受基线约束。
-- **按用户裁定更新设计稿**（`b3b90e8`、`d4eef17`）：打开后不自动移除；自动高度为一个条目起步、两项时变两项、之后不再增高（拖过则以用户值为准）；跨标签页监听 `storage`；主列表刷新后按 id 批量重取已保存话题、缺失的按话题异常处理；非话题链接改用 `/onebox` 预览卡片。加入入口只保留拖动，摘要固定两行；`/onebox` 前先用 `platform/discourse.ts` 新增的 `isLoggedIn()` 探测登录态（读 `service:current-user`，抛错退回 `#data-preloaded` 文本），可用性只存页内内存、随刷新失效，失败 URL 本页不再重试，失败时显示链接预览占位与标题（不再回落 favicon）。
+- **设计与裁定**（`e616e28`、`450e0f6`、`b3b90e8`、`d4eef17`）：设计稿 [docs/feed/02-稍后再读.md](docs/feed/02-稍后再读.md)；迁移对照基线整体移除（项目已无旧版本需要迁移）。
+- **实现**（`ec49d36`）：新增 `src/read-later.ts`（纯逻辑）与 `src/ui/read-later.ts`（DOM），控制器接线，样式、文案、常量，两个新单测文件，夹具与浏览器检查。行为细节以 [docs/feed/02-稍后再读.md](docs/feed/02-稍后再读.md) 为契约，不再在本文复述。
+- **文档转契约**（`64b979e`）：设计稿状态改为现行契约并补 `file:line`；`docs/feed/README.md` 与 `docs/development/01-开发与校验.md` 同步。
+
+## 实现中做出的两处修正
+
+- **高度钳制的 `available`**：设计稿原写 `feedScroll.offsetHeight + section.offsetHeight`，实测在区域溢出容器时这个和会跟着虚高，永远钳不住（面板缩到 `chrome + 100px` 时区域仍是 316px）。改为 `feedContainer.clientHeight - feedScroll.offsetTop`，并让拖拽与键盘共用同一个 `clampHeight()`。
+- **打开条目后的已读**：`resident.markRead()` 对不在常驻窗口里的话题是空操作。改为在控制器里用 `_applyReadMarker()` 改快照并持久化，DOM 侧只加 `sfp-read`。
 
 ## 当前仓库状况
 
-- HEAD 为 `d4eef17`，位于 `feat/read-later`；工作区只剩本文件。
-- 本轮改动**全部是文档与测试夹具**，`src/` 与 `dist/` 未变；`package.json` 仍是 3.2.0。
-- 移除基线后的完整校验：typecheck 0、12 文件 / 63 单测（原 13 / 71）、`check:dev`、`build`（194.49 kB / gzip 44.51 kB）、`check:artifact`、`check:scroll` 12 项、`check:browser` 44 项全绿。
-- **本机注意**：`npm test` 的 Vite 配置加载会 `exec("net use")`，在受限文件沙箱下报 `spawn EPERM`；本会话切到 danger-full-access 后才跑通，不是代码问题。
+- HEAD 为 `64b979e`，位于 `feat/read-later`；工作区只剩本文件。
+- `package.json` 仍是 3.2.0。
+- 完整校验全绿：typecheck 0、14 文件 / 83 单测、`check:dev`、`build`（224.12 kB / gzip 51.24 kB）、`check:artifact`、`check:scroll`、`check:browser` 68 项。
+- **本机注意**：`npm test` 的 Vite 配置加载会 `exec("net use")`，在受限文件沙箱下报 `spawn EPERM`；需要 danger-full-access 才跑通，不是代码问题。
 
 ## 未决问题
 
-- **设计稿未实现**：`docs/feed/02-稍后再读.md` 的状态仍是「设计，未实现」，实施顺序见其 §十一。§十二 已改为「已裁定」表（只有拖动入口、摘要两行、登录态探测与降级、可用性只存页内内存），当前无开放问题。
-- **`/onebox` 的实测缺口**：端点与模板来自本机 Discourse 克隆（`app/controllers/onebox_controller.rb`、`lib/oneboxer.rb`、`frontend/pretty-text/addon/oneboxer.js`），但未在任何真实站点上跑过请求；`requires_login` 与「同一用户一个预览」的排队行为属发布前核对项。
+- **`/onebox` 未在真站跑过**：端点、模板与客户端节奏都来自本机 Discourse 克隆（`app/controllers/onebox_controller.rb`、`lib/oneboxer.rb`、`frontend/pretty-text/addon/oneboxer.js`）；`requires_login`、`recently_failed?` 与「同一用户一个预览」的排队行为属发布前人工核对项。夹具里的 `/onebox` 是模拟的。
+- **侧边栏高度变化不会自动重新钳制**：只在渲染、窗口 `resize`、头部重建时重算。真站上 `#d-sidebar` 高度是否随滚动/头部折叠变化未实测；若会变，需要 `ResizeObserver`。
 - **未 push**：`main` 上 3.2.0 的发布仍未授权；本分支未推送到远端。
-- **`perf/` 产物不可复算**（已记入 `docs/discourse/04-消息总线与主线程成本.md` §八）：原始 trace 与四个分析工具从未入库，`perf/_cpu.txt` 的产出工具在仓库内没有文件记载。
-- **`docs/` 的链接与索引无自动化校验**：新增或改名主题文件后，须人工核对 `docs/INDEX.md` 与各级 `README.md` 的相对链接层级（子目录互链为 `../<部分>/<文件>.md`，不使用 `../../`）。
-- **`CONTEXT.md` 未纳入新术语**：`Sidebar Track`、`Header Anchor`、`Toggle Button`、`Upcoming-change class` 只在 `docs/discourse/01-页面结构与侧边栏宽度.md` 的术语小节；稍后再读的 `Read Later Section`、`Preview Card` 等只在设计稿内。
+- **`perf/` 产物不可复算**（已记入 `docs/discourse/04-消息总线与主线程成本.md` §八）：原始 trace 与四个分析工具从未入库。
+- **`docs/` 的链接与索引无自动化校验**：新增或改名主题文件后须人工核对 `docs/INDEX.md` 与各级 `README.md` 的相对层级（子目录互链为 `../<部分>/<文件>.md`）。
+- **`CONTEXT.md` 未纳入新术语**：`Read Later Section`、`Preview Card`、`Preview Availability` 只在 `docs/feed/02-稍后再读.md` 的术语小节。
 
 ## 后续任务
 
-按设计稿 §十一 实施「稍后再读」。
+真站核对（拖入四个位置、两标签页同步、`/onebox` 的登录与 429、语言切换），再决定是否 push。
 
-Updated: 2026-10-24 22:20 中国标准时间 +0800
+Updated: 2026-10-24 23:05 中国标准时间 +0800
