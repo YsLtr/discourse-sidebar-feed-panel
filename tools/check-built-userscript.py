@@ -301,6 +301,225 @@ try:
               document.querySelector('#d-sidebar').style.getPropertyValue('width')==='555px'""")
             cdp.evaluate("""document.querySelector('#d-sidebar').style.removeProperty('width');
               fixture.store.set(scoped('sfp_feed_mode_enabled'),true)""")
+
+        # --- 稍后再读 ---
+        # 匿名会话：预览端点一次都不该被请求。
+        cdp.call('Page.navigate', {'url': f'http://127.0.0.1:{server.server_port}/'})
+        cdp.event('Page.loadEventFired')
+        cdp.evaluate(source)
+        wait_for("document.querySelectorAll('.sfp-topic-item').length===30")
+        cdp.evaluate("""window.dragTo=(selector, uri, plain) => {
+            const dt = new DataTransfer();
+            dt.setData('text/uri-list', uri);
+            if (plain) dt.setData('text/plain', plain);
+            const target = document.querySelector(selector);
+            target.dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dt}));
+          };
+          window.startDrag=(selector) => {
+            const dt = new DataTransfer();
+            dt.setData('text/uri-list', '');
+            document.querySelector(selector).dispatchEvent(new DragEvent('dragstart', {bubbles:true, cancelable:true, dataTransfer:dt}));
+          };""")
+        check('an empty read-later section stays hidden', """(() => {
+          const section = document.querySelector('.sfp-read-later');
+          return !!section && section.hidden && !document.querySelector('.sfp-rl-item');
+        })()""")
+        cdp.evaluate("startDrag('.sfp-feed-scroll .sfp-topic-item')")
+        check('dragging a feed link reveals the drop placeholder', """(() => {
+          const section = document.querySelector('.sfp-read-later');
+          return !section.hidden && !!section.querySelector('.sfp-rl-drop');
+        })()""")
+        cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/t/299')")
+        wait_for("""document.querySelectorAll('.sfp-rl-item .sfp-topic-item').length===1""")
+        check('dropping a topic adds a read-later topic item and persists it', """(() => {
+          const stored = JSON.parse(localStorage.getItem('sfp_read_later_v1') || '{}');
+          return stored.items.length===1 && stored.items[0].topicId===299 &&
+            document.querySelector('.sfp-rl-item .sfp-topic-item').dataset.topicId==='299';
+        })()""")
+        cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/t/298')")
+        wait_for("""document.querySelectorAll('.sfp-rl-item').length===2""")
+        check('new entries append bottom-most, newest last', """(() => {
+          const items = [...document.querySelectorAll('.sfp-rl-item')];
+          return items[0].dataset.url==='/t/299' && items[1].dataset.url==='/t/298';
+        })()""")
+        cdp.evaluate("""dragTo('.sfp-read-later', 'https://elsewhere.example/t/1');
+          dragTo('.sfp-read-later', 'javascript:alert(1)');""")
+        check('cross-origin and javascript drops are rejected', """document.querySelectorAll('.sfp-rl-item').length===2 &&
+          JSON.parse(localStorage.getItem('sfp_read_later_v1') || '{}').items.length===2""")
+        cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/about')")
+        wait_for("""document.querySelectorAll('.sfp-rl-item').length===3""")
+        check('an anonymous session renders the link-preview fallback without any onebox request', """(() => {
+          const item = [...document.querySelectorAll('.sfp-rl-item')].pop();
+          return !!item.querySelector('.sfp-rl-fallback') &&
+            item.querySelector('.sfp-rl-fallback-title').textContent==='about' &&
+            item.querySelector('.sfp-rl-fallback-note').textContent==='链接预览' &&
+            !item.querySelector('.sfp-rl-card') &&
+            fixture.oneboxRequests.length===0;
+        })()""")
+        cdp.evaluate("""window.rlItemHeight=document.querySelector('.sfp-rl-item').offsetHeight;
+          window.rlSection=document.querySelector('.sfp-read-later');""")
+        check('height grows from one item to two and then stops', """(() => {
+          const count = document.querySelectorAll('.sfp-rl-item').length;
+          const height = rlSection.offsetHeight;
+          return count===3 && Math.abs(height - rlItemHeight*2) <= 2;
+        })()""")
+        cdp.evaluate("""const divider=document.querySelector('.sfp-rl-divider');
+          divider.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,button:0,clientY:200}));
+          document.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientY:120}));
+          document.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,clientY:120}));""")
+        wait_for("localStorage.getItem('sfp_read_later_height_v1')!==null")
+        check('dragging the divider persists the height once', """(() => {
+          const saved = Number(localStorage.getItem('sfp_read_later_height_v1'));
+          return saved > 0 && Math.abs(rlSection.offsetHeight - saved) <= 2;
+        })()""")
+        cdp.evaluate("""window.savedHeight=Number(localStorage.getItem('sfp_read_later_height_v1'));
+          dragTo('.sfp-read-later', location.origin + '/t/297');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===4")
+        check('a manually dragged height no longer follows the item count', """Math.abs(rlSection.offsetHeight - savedHeight) <= 2""")
+        cdp.evaluate("""window.feedScroll=document.querySelector('.sfp-feed-scroll');
+          window.roomyHeight=rlSection.offsetHeight;
+          window.chromeHeight=feedScroll.offsetTop;
+          document.querySelector('#d-sidebar').style.height=(chromeHeight+100)+'px';
+          window.dispatchEvent(new Event('resize'));""")
+        time.sleep(.15)
+        check('a too-short panel locks the divider and splits the room in half', """(() => {
+          const divider=document.querySelector('.sfp-rl-divider');
+          const available=document.querySelector('.sfp-feed-container').clientHeight-feedScroll.offsetTop;
+          return divider.getAttribute('aria-disabled')==='true' &&
+            !divider.hasAttribute('aria-valuenow') &&
+            Math.abs(rlSection.offsetHeight - Math.floor(available/2)) <= 1;
+        })()""")
+        cdp.evaluate("""document.querySelector('.sfp-rl-divider').dispatchEvent(
+            new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));""")
+        check('a locked divider ignores the keyboard', """(() => {
+          const available=document.querySelector('.sfp-feed-container').clientHeight-feedScroll.offsetTop;
+          return rlSection.offsetHeight===Math.floor(available/2);
+        })()""")
+        cdp.evaluate("""document.querySelector('#d-sidebar').style.height='700px';
+          window.dispatchEvent(new Event('resize'));""")
+        time.sleep(.15)
+        check('restoring the height returns to the user value and unlocks the divider', """(() => {
+          const divider=document.querySelector('.sfp-rl-divider');
+          return !divider.hasAttribute('aria-disabled') &&
+            Math.abs(rlSection.offsetHeight - savedHeight) <= 2;
+        })()""")
+        cdp.evaluate("""document.querySelector('.sfp-rl-item .sfp-rl-remove').click();""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===3")
+        check('removing an item keeps the others and persists', """JSON.parse(localStorage.getItem('sfp_read_later_v1') || '{}').items.length===3""")
+        cdp.evaluate("""window.removalCounts=[];
+          while (document.querySelector('.sfp-rl-item .sfp-rl-remove')) {
+            document.querySelector('.sfp-rl-item .sfp-rl-remove').click();
+            removalCounts.push(document.querySelectorAll('.sfp-rl-item').length);
+            if (removalCounts.length > 10) break;
+          }""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===0")
+        check('each remove click drops exactly one item and the last one hides the section', """(() => {
+          const section = document.querySelector('.sfp-read-later');
+          return removalCounts.join(',')==='2,1,0' && section.hidden &&
+            !document.querySelector('.sfp-rl-item');
+        })()""")
+        cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
+          localStorage.removeItem('sfp_read_later_height_v1');""")
+
+        # 登录会话：预览卡片走 /onebox，失败与限流都降级。
+        cdp.call('Page.navigate', {'url': f'http://127.0.0.1:{server.server_port}/'})
+        cdp.event('Page.loadEventFired')
+        cdp.evaluate("fixture.currentUser={id:1,username:'alice'}")
+        cdp.evaluate(source)
+        wait_for("document.querySelectorAll('.sfp-topic-item').length===30")
+        cdp.evaluate("""window.dragTo=(selector, uri) => {
+            const dt = new DataTransfer();
+            dt.setData('text/uri-list', uri);
+            document.querySelector(selector).dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dt}));
+          };""")
+        cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/u/alice')")
+        wait_for("!!document.querySelector('.sfp-rl-card')")
+        check('a logged-in session renders the onebox preview card', """(() => {
+          const card = document.querySelector('.sfp-rl-card');
+          return fixture.oneboxRequests.length===1 &&
+            card.querySelector('.sfp-rl-card-title').textContent==='Preview title' &&
+            card.querySelector('.sfp-rl-card-excerpt').textContent==='Preview excerpt' &&
+            card.querySelector('.sfp-rl-card-image').getAttribute('src')===location.origin + '/uploads/preview.png';
+        })()""")
+        cdp.evaluate("""fixture.oneboxStatus=403;
+          dragTo('.sfp-read-later', location.origin + '/c/dev/3');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===2")
+        time.sleep(.4)
+        check('a 403 downgrades preview availability for the rest of the page', """(() => {
+          const items = [...document.querySelectorAll('.sfp-rl-item')];
+          return !!items[1].querySelector('.sfp-rl-fallback') && fixture.oneboxRequests.length===2;
+        })()""")
+        cdp.evaluate("""fixture.oneboxStatus=200;
+          dragTo('.sfp-read-later', location.origin + '/about');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===3")
+        time.sleep(.4)
+        check('preview requests stop entirely after the downgrade', """fixture.oneboxRequests.length===2 &&
+          !!document.querySelectorAll('.sfp-rl-item')[2].querySelector('.sfp-rl-fallback')""")
+        cdp.evaluate("""localStorage.setItem('fixture_expect_count', String(document.querySelectorAll('.sfp-rl-item').length));
+          localStorage.setItem('fixture_expect_url', [...document.querySelectorAll('.sfp-rl-item')][0].dataset.url);""")
+        cdp.call('Page.navigate', {'url': f'http://127.0.0.1:{server.server_port}/'})
+        cdp.event('Page.loadEventFired')
+        cdp.evaluate(source)
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===3")
+        check('items survive a page reload and restore in order', """(() => {
+          const items=[...document.querySelectorAll('.sfp-rl-item')];
+          return String(items.length)===localStorage.getItem('fixture_expect_count') &&
+            items[0].dataset.url===localStorage.getItem('fixture_expect_url');
+        })()""")
+        cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
+          localStorage.removeItem('sfp_read_later_height_v1');
+          window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:null}));""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===0")
+        cdp.evaluate("""window.dropTo=(uri) => {
+            const dt = new DataTransfer();
+            dt.setData('text/uri-list', uri);
+            document.querySelector('.sfp-read-later').dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dt}));
+          };
+          dropTo(location.origin + '/t/296');
+          dropTo(location.origin + '/t/295');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===2")
+        cdp.evaluate("fixture.missingTopicIds=[296]")
+        cdp.evaluate("document.querySelector('.sfp-refresh-btn').click()")
+        wait_for("fixture.requests.some(r=>r.path.includes('topic_ids=296'))")
+        wait_for("!!document.querySelector('.sfp-rl-item .sfp-topic-unavailable')")
+        check('a refresh re-reads saved topics and marks a missing one unavailable', """(() => {
+          const items=[...document.querySelectorAll('.sfp-rl-item')];
+          return items[0].dataset.url==='/t/296' &&
+            !!items[0].querySelector('.sfp-topic-unavailable') &&
+            !items[1].querySelector('.sfp-topic-unavailable');
+        })()""")
+        # 刷新会触发两次同步请求；等它们都落地，否则同步写回会覆盖测试的删除。
+        time.sleep(.6)
+        cdp.evaluate("""fixture.missingTopicIds=[];
+          localStorage.removeItem('sfp_read_later_v1');
+          window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:null}));""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===0")
+        check('a cross-tab storage event re-reads the list and hides the empty section', """document.querySelector('.sfp-read-later').hidden""")
+        cdp.evaluate("""localStorage.setItem('sfp_read_later_v1', JSON.stringify({version:1,items:[
+            {url:'/t/294',title:'From another tab',kind:'topic',topicId:294,addedAt:5}
+          ]}));
+          window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:'x'}));""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===1")
+        check('a cross-tab storage event renders the other tab entries', """(() => {
+          const item=document.querySelector('.sfp-rl-item');
+          return item.dataset.url==='/t/294' && !!item.querySelector('.sfp-topic-item');
+        })()""")
+        check('an unread saved topic shows the unread marker before it is opened', """!!document.querySelector('.sfp-rl-item .sfp-unread-dot:not(.sfp-unread-dot--hidden)')""")
+        cdp.evaluate("document.querySelector('.sfp-rl-item .sfp-topic-item').click()")
+        wait_for("!!document.querySelector('.sfp-rl-item .sfp-topic-item.sfp-read')")
+        check('opening a saved topic keeps it in the list and persists the read marker', """(() => {
+          const stored = JSON.parse(localStorage.getItem('sfp_read_later_v1') || '{}').items;
+          return document.querySelectorAll('.sfp-rl-item').length===1 &&
+            stored.length===1 && stored[0].topic.unseen===false &&
+            stored[0].topic.last_read_post_number===stored[0].topic.highest_post_number;
+        })()""")
+        cdp.evaluate("SFPFeedPanel.dispose()")
+        wait_for("!document.querySelector('.sfp-feed-container')")
+        check('dispose removes the read-later section and its listeners', """!document.querySelector('.sfp-read-later') &&
+          !fixture.effects.listeners.some(e=>['dragstart','dragend','drop','storage'].includes(e.type))""")
+        cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
+          localStorage.removeItem('sfp_read_later_height_v1');""")
+
         for label, descriptor in [
             ('readonly', "{value:undefined,writable:false}"),
             ('throwing setter', "{get:()=>undefined,set:()=>{throw new Error('bridge denied')}}"),

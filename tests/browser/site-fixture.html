@@ -77,15 +77,28 @@ window.GM_deleteValue = key => store.delete(key);
 window.GM_addStyle = css => { const style=document.createElement('style');style.textContent=css;document.head.appendChild(style);return style; };
 window.GM_registerMenuCommand = (label, callback) => { fixture.menus.push({label,callback});return fixture.menus.length; };
 window.unsafeWindow = window;
-window.Discourse = {SiteSettings:{default_locale:'zh_CN'},__container__:{lookup:() => ({
+window.Discourse = {SiteSettings:{default_locale:'zh_CN'},__container__:{lookup:(name) => name === 'service:current-user'
+  ? (fixture.currentUser ?? null)
+  : ({
   lastId:() => 0,
   subscribe(channel, callback) { if(!subscriptions.has(channel)) subscriptions.set(channel,new Set());subscriptions.get(channel).add(callback); },
   unsubscribe(channel, callback) { subscriptions.get(channel)?.delete(callback); },
 })}};
+// 默认匿名；预览可用性探测读的就是这个值。
+fixture.currentUser = null;
+fixture.oneboxRequests = [];
+fixture.oneboxStatus = 200;
 window.require = () => ({default:{routeTo:path => history.pushState({},'',path)}});
 window.fetch = async (path, options) => {
   const url = new URL(path,location.origin);
   fixture.requests.push({path:url.pathname+url.search,csrf:options?.headers?.['X-CSRF-Token']});
+  if(url.pathname==='/onebox') {
+    fixture.oneboxRequests.push(url.searchParams.get('url'));
+    if(fixture.oneboxStatus !== 200) return new Response('nope',{status:fixture.oneboxStatus});
+    const target = url.searchParams.get('url') || '';
+    const html = fixture.oneboxHtml ? fixture.oneboxHtml(target) : `<aside class="onebox"><article class="onebox-body"><img src="/uploads/preview.png" class="thumbnail"><h3><a href="${target}">Preview title</a></h3><p>Preview excerpt</p></article></aside>`;
+    return new Response(html,{headers:{'Content-Type':'text/html'}});
+  }
   if(fixture.failNext && url.pathname.includes('latest.json')) { fixture.failNext=false;return new Response('temporary failure',{status:503}); }
   let data;
   if(url.pathname==='/site.json') data={
@@ -96,7 +109,7 @@ window.fetch = async (path, options) => {
   else {
     const ids=url.searchParams.get('topic_ids');
     const page=Number(url.searchParams.get('page')||0);
-    const topics=ids ? ids.split(',').map(id=>fixture.topic(Number(id))) : page ? (fixture.pageTopics?.(page) || Array.from({length:30},(_,i)=>fixture.topic(200-i))) : fixture.head;
+    const topics=ids ? ids.split(',').map(id=>fixture.topic(Number(id))).filter(topic => !(fixture.missingTopicIds || []).includes(topic.id)) : page ? (fixture.pageTopics?.(page) || Array.from({length:30},(_,i)=>fixture.topic(200-i))) : fixture.head;
     data={topic_list:{topics:structuredClone(topics),more_topics_url:'/latest.json?page=8'},users:[{id:1,username:'alice',name:'Alice',avatar_template:''}]};
   }
   if(fixture.pause && url.pathname.includes('latest.json')) await new Promise(resolve => fixture.pending.push(resolve));

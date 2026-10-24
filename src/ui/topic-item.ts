@@ -163,9 +163,21 @@ export function createTopicRenderer({
     return `<span class="${classes.join(" ")}"${styleAttr}>${iconHtml}${escapeHtml(tagName)}</span>`;
   }
 
-  function createTopicItem(topic: Topic, isNew = false) {
+  function createTopicItem(
+    topic: Topic,
+    isNew = false,
+    {
+      href,
+      user,
+      onActivate,
+    }: {
+      href?: string;
+      user?: TopicUser;
+      onActivate?: () => void;
+    } = {},
+  ) {
     const item = document.createElement("a");
-    const targetUrl = _topicListUrl(topic);
+    const targetUrl = href || _topicListUrl(topic);
     item.className = "sfp-topic-item";
     item.href = toAbsoluteSiteUrl(targetUrl);
     item.dataset.topicId = String(topic.id);
@@ -187,16 +199,14 @@ export function createTopicRenderer({
     let name = "";
     let username = "";
     let userProfileUrl = "";
-    if (topic.posters && topic.posters.length > 0) {
-      const userId = topic.posters[0].user_id;
-      const user = getUser(userId);
-      if (user) {
-        name = user.name || "";
-        username = user.username || "";
-        userProfileUrl = getUserProfileUrl(username);
-        if (user.avatar_template) {
-          avatarUrl = getAvatarUrl(user.avatar_template, 45);
-        }
+    const posterUserId = topic.posters?.length ? topic.posters[0].user_id : null;
+    const resolvedUser = user || (posterUserId === null ? undefined : getUser(posterUserId));
+    if (resolvedUser) {
+      name = resolvedUser.name || "";
+      username = resolvedUser.username || "";
+      userProfileUrl = getUserProfileUrl(username);
+      if (resolvedUser.avatar_template) {
+        avatarUrl = getAvatarUrl(resolvedUser.avatar_template, 45);
       }
     }
 
@@ -263,7 +273,8 @@ export function createTopicRenderer({
       </div>
     `;
 
-    // 点击跳转
+    // 点击跳转。稍后再读传入自己的 onActivate（标记快照已读），主列表沿用默认。
+    const activate = onActivate || (() => markTopicAsRead(topic, item));
     item.addEventListener("click", (e) => {
       const profileLink = closestTarget(e, "[data-user-profile-link='true']");
       if (profileLink) {
@@ -273,7 +284,7 @@ export function createTopicRenderer({
         return;
       }
       handlePointerNavigation(e, targetUrl, {
-        onPrimaryActivate: () => markTopicAsRead(topic, item),
+        onPrimaryActivate: activate,
       });
     });
 
@@ -287,7 +298,7 @@ export function createTopicRenderer({
         return;
       }
       handlePointerNavigation(e, targetUrl, {
-        onMiddleActivate: () => markTopicAsRead(topic, item),
+        onMiddleActivate: activate,
       });
     });
 

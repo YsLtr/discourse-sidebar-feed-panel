@@ -1,15 +1,25 @@
 import { createI18n } from "../i18n";
+import { READ_LATER_SYNC_CHUNK } from "../constants";
 import type { createDiscourseBridge } from "../platform/discourse";
 import { Lifetime } from "../platform/lifetime";
 import { createRouteWatcher } from "../platform/route-watcher";
 import type { MessageBus } from "../platform/types";
 import type { ValueStore } from "../preferences";
 import { Preferences } from "../preferences";
+import {
+  createReadLaterStore,
+  readLaterFallbackTitle,
+  resolveReadLaterStorage,
+  type ParsedReadLaterLink,
+  type ReadLaterItem,
+} from "../read-later";
 import { createSiteData } from "../site/site-data";
 import { createTagStyles } from "../site/tag-styles";
 import * as storageKeys from "../storage-keys";
 import { createControls } from "../ui/controls";
 import { createFeedHost } from "../ui/host";
+import { selectTopicTitle } from "../ui/html";
+import { createReadLaterView } from "../ui/read-later";
 import { createFeedScroll } from "../ui/scroll";
 import { createTopicRenderer } from "../ui/topic-item";
 import { createTopicList } from "../ui/topic-list";
@@ -17,7 +27,7 @@ import { createFeedApi } from "./api";
 import { AutoLoadGate } from "./auto-load";
 import { IncomingTopics } from "./incoming";
 import { buildFeedUrl, feedQueryKey } from "./query";
-import { _hasUnreadMarker, _isPinnedTopic } from "./read-state";
+import { _applyReadMarker, _hasUnreadMarker, _isPinnedTopic } from "./read-state";
 import { ReadingState } from "./reading";
 import { PageActivity, RefreshCountdown } from "./refresh";
 import type { MergeOptions } from "./resident";
@@ -27,7 +37,9 @@ import type {
   Topic,
   TopicMessage,
   TopicResponse,
+  TopicUser,
 } from "./types";
+import { markUnavailable } from "./unavailable";
 interface ControllerDependencies {
   storage: ValueStore;
   discourse: ReturnType<typeof createDiscourseBridge>;
@@ -55,6 +67,7 @@ export function createFeedController({
     getCsrfToken,
     getDiscourse,
     getMessageBus,
+    toAbsoluteSiteUrl,
     waitForStableHeaderMount,
   } = discourse;
   const { t, getUiLocale, formatRelativeTime } = createI18n(getDiscourse);
@@ -218,6 +231,130 @@ export function createFeedController({
     restoreSidebarWidth,
   } = host;
   const { createTopicItem } = topicRenderer;
+
+  // 稍后再读的列表存在 localStorage（按 origin 隔离，正好对应一个站点），
+  // 不走 GM 键空间：那里是偏好与站点缓存的登记处。
+  const readLaterStore = createReadLaterStore({
+    storage: resolveReadLaterStorage(),
+    origin: location.origin,
+  });
+  const readLaterView = createReadLaterView({
+    t,
+    discourse,
+    renderer: topicRenderer,
+    items: () => readLaterStore.items(),
+    savedHeight: () => readLaterStore.height(),
+    saveHeight: (value) => readLaterStore.setHeight(value),
+    updateItems: (next) => readLaterStore.update(next),
+    reloadItems: () => readLaterStore.reload(),
+    onExternalItems: () => void syncReadLater(),
+    removeItem: (url) => readLaterStore.remove(url),
+    onAdd: (link, title) => addReadLaterLink(link, title),
+    markRead: (url) => markReadLaterItem(url),
+    fetchOnebox: (url, signal) => fetchOneboxPreview(url, signal),
+    getFeedScroll: () => host.feedScrollEl,
+    onLayoutChange: () => _scheduleHeadActionStateSync(),
+    getScope: () => viewScope,
+  });
+
+  function fetchOneboxPreview(url: string, signal: AbortSignal) {
+    const target = toAbsoluteSiteUrl(url);
+    return fetch(`/onebox?url=${encodeURIComponent(target)}`, {
+      headers: { "X-CSRF-Token": getCsrfToken() },
+      signal,
+    }).then(async (response) => ({
+      status: response.status,
+      html: response.ok ? await response.text() : "",
+    }));
+  }
+
+  function addReadLaterLink(link: ParsedReadLaterLink, title: string) {
+    readLaterStore.add({
+      url: link.url,
+      kind: link.kind,
+      topicId: link.topicId,
+      title: title || readLaterFallbackTitle(link.url),
+    });
+    readLaterView.refresh();
+    void syncReadLater();
+  }
+
+  /**
+   * 打开条目后把快照标成已读：与主列表共用 `_applyReadMarker` 的字段，
+   * 但不动 resident —— 稍后再读的话题通常不在常驻窗口里。
+   */
+  function markReadLaterItem(url: string) {
+    readLaterStore.update(
+      readLaterStore.items().map((item) => {
+        if (item.url !== url || !item.topic) return item;
+        const topic: Topic = { ...item.topic };
+        _applyReadMarker(topic);
+        return { ...item, topic };
+      }),
+    );
+  }
+
+  /**
+   * 主列表刷新后校正已保存的话题：统计、标题、首个 poster。
+   * 只有整轮请求都成功时才把「响应里没有」当成话题异常，
+   * 网络失败/中止不标记，避免把临时故障记成删除。
+   */
+  async function syncReadLater() {
+    if (disposed) return;
+    const ids = [
+      ...new Set(
+        readLaterStore
+          .items()
+          .map((item) => item.topicId)
+          .filter((id): id is number => Number.isFinite(id)),
+      ),
+    ];
+    if (ids.length === 0) {
+      readLaterView.refresh();
+      return;
+    }
+
+    const topics = new Map<number, Topic>();
+    const users = new Map<number, TopicUser>();
+    try {
+      for (let index = 0; index < ids.length; index += READ_LATER_SYNC_CHUNK) {
+        const chunk = ids.slice(index, index + READ_LATER_SYNC_CHUNK);
+        const data = await fetchFeedTopicsByIds(chunk, requests.signal);
+        if (!data) continue;
+        for (const topic of data.topic_list?.topics || []) {
+          topics.set(topic.id, topic);
+        }
+        for (const user of data.users || []) users.set(user.id, user);
+      }
+    } catch (e) {
+      return;
+    }
+    if (disposed) return;
+
+    let changed = false;
+    const next = readLaterStore.items().map((item) => {
+      if (!item.topicId) return item;
+      const fresh = topics.get(item.topicId);
+      if (!fresh) {
+        const topic: Topic = { ...(item.topic || { id: item.topicId }) };
+        if (!markUnavailable(topic)) return item;
+        changed = true;
+        return { ...item, topic };
+      }
+      const posterId = fresh.posters?.[0]?.user_id;
+      const user = posterId === undefined ? undefined : users.get(posterId);
+      const title = selectTopicTitle(fresh) || item.title;
+      changed = true;
+      return {
+        ...item,
+        topic: fresh,
+        user: user || item.user,
+        title,
+      };
+    });
+    if (changed) readLaterStore.update(next as ReadLaterItem[]);
+    readLaterView.refresh();
+  }
   const controls = createControls({
     renderTopics,
     _finishSidebarIncomingViewSettling,
@@ -387,6 +524,7 @@ export function createFeedController({
     if (disposed) return;
     site.reset();
     tags.reset();
+    readLaterView.refresh();
     if (!prefs.feedModeEnabled) return;
     _syncSiteDerivedControls({ force: true });
     _resetAutoLoadState();
@@ -400,6 +538,7 @@ export function createFeedController({
     active = true;
     if (host.feedContainer && sidebar.contains(host.feedContainer)) {
       host.ensure();
+      readLaterView.ensure(host.feedContainer);
       _startSidebarTopicLifecycleTracking();
       _syncDefaultViewControls();
       _syncIncomingHeadAction();
@@ -410,6 +549,7 @@ export function createFeedController({
     active = true;
     if (!host.mount(_buildHeaderControls, _buildTabBar, _buildFilterBar))
       return;
+    if (host.feedContainer) readLaterView.mount(host.feedContainer);
     _restoreTabState();
     _syncDefaultViewControls();
     loadTopics();
@@ -438,6 +578,7 @@ export function createFeedController({
     _resetRefreshButtonBusy();
     controls.feedRefreshBtn?.classList.remove("sfp-back-top-enter");
 
+    readLaterView.destroy();
     host.unmount();
     controls.reset();
 
@@ -1199,6 +1340,7 @@ export function createFeedController({
           data.topic_list.more_topics_url,
         );
         renderTopics();
+        void syncReadLater();
         _removeSidebarIncomingTopicIds(topics.map((topic) => topic.id));
         _syncIncomingHeadAction();
       } else {
@@ -1426,6 +1568,7 @@ export function createFeedController({
         _resetAutoRefreshCountdown();
         _flushQueuedSidebarIncomingApply();
         _syncHeadActionState();
+        void syncReadLater();
       }
       endRefreshBusy();
     }

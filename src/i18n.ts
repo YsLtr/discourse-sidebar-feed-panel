@@ -64,6 +64,10 @@ const I18N: Record<string, Record<string, string>> = {
     loadMore: "加载更多",
     noMore: "— 已经到底了 —",
     requestFailed: "请求失败",
+    readLaterTitle: "稍后再读",
+    readLaterDropHint: "松开加入稍后再读",
+    readLaterRemove: "从稍后再读移除",
+    linkPreview: "链接预览",
   },
   en: {
     all: "All",
@@ -129,6 +133,10 @@ const I18N: Record<string, Record<string, string>> = {
     loadMore: "Load more",
     noMore: "No more topics",
     requestFailed: "Request failed",
+    readLaterTitle: "Read later",
+    readLaterDropHint: "Drop to add to Read later",
+    readLaterRemove: "Remove from Read later",
+    linkPreview: "Link preview",
   },
 };
 

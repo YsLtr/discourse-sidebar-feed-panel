@@ -42,10 +42,10 @@ export function createFeedApi({
   getCsrfToken(): string;
   getSignal(): AbortSignal;
 }) {
-  async function request(url: string) {
+  async function request(url: string, signal: AbortSignal = getSignal()) {
     const response = await fetch(url, {
       headers: { "X-CSRF-Token": getCsrfToken() },
-      signal: getSignal(),
+      signal,
     });
     if (!response.ok) throw new Error(`API error: ${response.status}`);
     return topicResponse(await response.json());
@@ -53,10 +53,10 @@ export function createFeedApi({
   return {
     page: (query: FeedQuerySnapshot, page: number) =>
       request(buildUrl(query, page)),
-    byIds(ids: readonly number[]) {
+    byIds(ids: readonly number[], signal: AbortSignal = getSignal()) {
       const unique = [...new Set(ids.map(Number).filter(Number.isFinite))];
       return unique.length
-        ? request(`/latest.json?topic_ids=${unique.join(",")}`)
+        ? request(`/latest.json?topic_ids=${unique.join(",")}`, signal)
         : Promise.resolve(null);
     },
   };

@@ -78,6 +78,31 @@ export function createDiscourseBridge(pageWindow: Window) {
     }
   }
 
+  /**
+   * `/onebox` 需要登录，匿名请求只会失败；而登录态在页面里已有现成答案，
+   * 读它不花请求。容器未就绪时退回预载数据（只有登录用户才会写入
+   * `currentUser`），都判断不了就当作不可用——宁可不发请求。
+   */
+  function isLoggedIn() {
+    try {
+      const user = getDiscourse()?.__container__?.lookup("service:current-user") as
+        | { id?: number }
+        | null
+        | undefined;
+      if (user && Number.isFinite(user.id)) return true;
+      if (user === null) return false;
+    } catch (e) {
+      /* 容器未就绪，落到预载数据 */
+    }
+    try {
+      const preloaded = document.getElementById("data-preloaded")?.textContent;
+      if (preloaded) return preloaded.includes('"currentUser":');
+    } catch (e) {
+      /* ignore */
+    }
+    return false;
+  }
+
   function getAvatarUrl(template: string, size: number) {
     if (!template) return "";
     let url = template.replace("{size}", String(size));
@@ -175,6 +200,7 @@ export function createDiscourseBridge(pageWindow: Window) {
     navigateTo,
     getDiscourse,
     getMessageBus,
+    isLoggedIn,
     getAvatarUrl,
     getUserProfileUrl,
     openPathInNewTab,
