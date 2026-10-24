@@ -280,7 +280,7 @@ export function createReadLaterView({
     setSectionHeight(height);
   }
 
-  function dropPlaceholder() {
+  function createDropOverlay() {
     const box = document.createElement("div");
     box.className = "sfp-rl-drop";
     box.hidden = true;
@@ -571,7 +571,7 @@ export function createReadLaterView({
     list = document.createElement("div");
     list.className = "sfp-rl-list";
     scroll.append(list);
-    overlay = dropPlaceholder();
+    overlay = createDropOverlay();
     section.append(scroll, overlay);
     container.append(divider, section);
 
