@@ -357,7 +357,23 @@ try:
             fixture.oneboxRequests.length===0;
         })()""")
         cdp.evaluate("""window.rlItemHeight=document.querySelector('.sfp-rl-item').offsetHeight;
-          window.rlSection=document.querySelector('.sfp-read-later');""")
+          window.rlSection=document.querySelector('.sfp-read-later');
+          window.rlDivider=document.querySelector('.sfp-rl-divider');""")
+        check('the divider is a sibling of the section, not part of it', """rlDivider.parentElement===rlSection.parentElement &&
+          rlDivider.nextElementSibling===rlSection && !rlSection.contains(rlDivider)""")
+        check('the divider is the only boundary between the two areas', """(() => {
+          const divider=rlDivider.getBoundingClientRect();
+          const section=rlSection.getBoundingClientRect();
+          return Math.abs(section.top-divider.bottom)<=1 &&
+            getComputedStyle(rlSection).borderTopWidth==='0px';
+        })()""")
+        check('the list is pinned to the bottom so items grow upward', """(() => {
+          const scroll=document.querySelector('.sfp-rl-scroll').getBoundingClientRect();
+          const items=[...document.querySelectorAll('.sfp-rl-item')].map(n=>n.getBoundingClientRect());
+          const list=document.querySelector('.sfp-rl-list').getBoundingClientRect();
+          return Math.abs(list.bottom-scroll.bottom)<=1 &&
+            items.length>1 && items[0].top<items[items.length-1].top;
+        })()""")
         check('height grows from one item to two and then stops', """(() => {
           const count = document.querySelectorAll('.sfp-rl-item').length;
           const height = rlSection.offsetHeight;
@@ -384,16 +400,19 @@ try:
         time.sleep(.15)
         check('a too-short panel locks the divider and splits the room in half', """(() => {
           const divider=document.querySelector('.sfp-rl-divider');
-          const available=document.querySelector('.sfp-feed-container').clientHeight-feedScroll.offsetTop;
+          const room=document.querySelector('.sfp-feed-container').clientHeight
+            - feedScroll.offsetTop - divider.offsetHeight;
           return divider.getAttribute('aria-disabled')==='true' &&
             !divider.hasAttribute('aria-valuenow') &&
-            Math.abs(rlSection.offsetHeight - Math.floor(available/2)) <= 1;
+            Math.abs(rlSection.offsetHeight - Math.floor(room/2)) <= 1;
         })()""")
         cdp.evaluate("""document.querySelector('.sfp-rl-divider').dispatchEvent(
             new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));""")
         check('a locked divider ignores the keyboard', """(() => {
-          const available=document.querySelector('.sfp-feed-container').clientHeight-feedScroll.offsetTop;
-          return rlSection.offsetHeight===Math.floor(available/2);
+          const divider=document.querySelector('.sfp-rl-divider');
+          const room=document.querySelector('.sfp-feed-container').clientHeight
+            - feedScroll.offsetTop - divider.offsetHeight;
+          return rlSection.offsetHeight===Math.floor(room/2);
         })()""")
         cdp.evaluate("""document.querySelector('#d-sidebar').style.height='700px';
           window.dispatchEvent(new Event('resize'));""")
@@ -421,6 +440,35 @@ try:
         cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
           localStorage.removeItem('sfp_read_later_height_v1');""")
 
+        # 从主列表的发布者区域拖出：拿到的是资料页，不是话题页。
+        cdp.evaluate("""window.dragFrom=(selector, uri) => {
+            const dt = new DataTransfer();
+            dt.setData('text/uri-list', uri);
+            document.querySelector(selector).dispatchEvent(new DragEvent('dragstart', {bubbles:true, cancelable:true, dataTransfer:dt}));
+            document.querySelector('.sfp-read-later').dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dt}));
+          };
+          dragFrom('.sfp-feed-scroll .sfp-topic-item .sfp-topic-username',
+            document.querySelector('.sfp-feed-scroll .sfp-topic-item').href);""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===1")
+        check('dragging the poster area saves the profile, not the topic', """(() => {
+          const item=document.querySelector('.sfp-rl-item');
+          return item.dataset.url==='/u/alice' && !item.querySelector('.sfp-topic-item');
+        })()""")
+        # 主列表已有的话题：直接复制快照，不再发补全请求。
+        cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
+          window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:null}));""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===0")
+        cdp.evaluate("""fixture.requests.length=0;
+          dragTo('.sfp-read-later', location.origin + '/t/299');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===1")
+        check('a topic already in the main list is copied without another request', """(() => {
+          const item=document.querySelector('.sfp-rl-item .sfp-topic-item');
+          return !!item && item.dataset.topicId==='299' &&
+            !fixture.requests.some(r=>r.path.includes('topic_ids'));
+        })()""")
+        cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
+          localStorage.removeItem('sfp_read_later_height_v1');""")
+
         # 登录会话：预览卡片走 /onebox，失败与限流都降级。
         cdp.call('Page.navigate', {'url': f'http://127.0.0.1:{server.server_port}/'})
         cdp.event('Page.loadEventFired')
@@ -432,8 +480,25 @@ try:
             dt.setData('text/uri-list', uri);
             document.querySelector(selector).dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dt}));
           };""")
-        cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/u/alice')")
+        # 预览在飞时不显示任何加载行：条目立刻以占位卡片出现。
+        cdp.evaluate("""fixture.oneboxDelay=700;
+          dragTo('.sfp-read-later', location.origin + '/u/alice');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===1")
+        time.sleep(.12)
+        check('a pending preview shows no loading row and no extra height', """(() => {
+          const section=document.querySelector('.sfp-read-later');
+          return !section.querySelector('.sfp-rl-pending') &&
+            !/加载中/.test(section.textContent) &&
+            !!section.querySelector('.sfp-rl-fallback') &&
+            Math.abs(section.offsetHeight - document.querySelector('.sfp-rl-item').offsetHeight) <= 2;
+        })()""")
         wait_for("!!document.querySelector('.sfp-rl-card')")
+        cdp.evaluate("fixture.oneboxDelay=0")
+        check('the preview request matches the editor parameters', """(() => {
+          const request = fixture.requests.find(r=>r.path.startsWith('/onebox'));
+          return !!request && request.path.includes('refresh=true') &&
+            request.xhr==='XMLHttpRequest' && request.credentials==='include';
+        })()""")
         check('a logged-in session renders the onebox preview card', """(() => {
           const card = document.querySelector('.sfp-rl-card');
           return fixture.oneboxRequests.length===1 &&

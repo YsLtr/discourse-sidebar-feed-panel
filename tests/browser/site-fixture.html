@@ -91,9 +91,10 @@ fixture.oneboxStatus = 200;
 window.require = () => ({default:{routeTo:path => history.pushState({},'',path)}});
 window.fetch = async (path, options) => {
   const url = new URL(path,location.origin);
-  fixture.requests.push({path:url.pathname+url.search,csrf:options?.headers?.['X-CSRF-Token']});
+  fixture.requests.push({path:url.pathname+url.search,csrf:options?.headers?.['X-CSRF-Token'],xhr:options?.headers?.['X-Requested-With'],credentials:options?.credentials});
   if(url.pathname==='/onebox') {
     fixture.oneboxRequests.push(url.searchParams.get('url'));
+    if(fixture.oneboxDelay) await new Promise(resolve => setTimeout(resolve, fixture.oneboxDelay));
     if(fixture.oneboxStatus !== 200) return new Response('nope',{status:fixture.oneboxStatus});
     const target = url.searchParams.get('url') || '';
     const html = fixture.oneboxHtml ? fixture.oneboxHtml(target) : `<aside class="onebox"><article class="onebox-body"><img src="/uploads/preview.png" class="thumbnail"><h3><a href="${target}">Preview title</a></h3><p>Preview excerpt</p></article></aside>`;

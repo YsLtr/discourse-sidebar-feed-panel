@@ -72,12 +72,12 @@ export function createReadLaterView({
   let availability: "available" | "unavailable" = "unavailable";
   const failedUrls = new Set<string>();
   const requestedUrls = new Set<string>();
-  const pendingUrls = new Set<string>();
   let previewQueue: string[] = [];
   let previewBusy = false;
 
   let dragActive = false;
   let dragHref = "";
+  let dragIsProfile = false;
   let dropActive = false;
 
   let dividerLocked = false;
@@ -135,7 +135,6 @@ export function createReadLaterView({
       } else {
         failedUrls.add(url);
       }
-      pendingUrls.delete(url);
       previewBusy = false;
       render();
       if (previewQueue.length && availability === "available") {
@@ -149,7 +148,6 @@ export function createReadLaterView({
     if (item.preview || requestedUrls.has(item.url) || failedUrls.has(item.url))
       return;
     requestedUrls.add(item.url);
-    pendingUrls.add(item.url);
     previewQueue.push(item.url);
     pumpPreviewQueue();
   }
@@ -231,22 +229,21 @@ export function createReadLaterView({
   }
 
   /**
-   * 可分配的总高度不能从「当前 scroll + 当前 section」推算：section 溢出容器时
-   * 那个和会跟着虚高。改为从容器净高减去 section 之上的固定部分（头部/标签/筛选），
-   * 后者等于 `scroll.offsetTop`（`.sfp-feed-container` 是 offsetParent）。
+   * 可分配的高度不能从「当前 scroll + 当前 section」推算：section 溢出容器时
+   * 那个和会跟着虚高。改为容器净高减去固定部分（头部/标签/筛选，等于
+   * `scroll.offsetTop`）与分隔线；`.sfp-feed-container` 是 offsetParent。
    */
   function measureRoom() {
     const scroll = feedScrollEl;
     const container = section?.parentElement;
     if (!scroll || !container) return null;
-    const available = container.clientHeight - scroll.offsetTop;
+    const available =
+      container.clientHeight - scroll.offsetTop - (divider?.offsetHeight || 0);
     if (available <= 0) return null;
     return {
       available,
       mainMin: firstItemHeight(scroll) ?? READ_LATER_ITEM_FALLBACK_HEIGHT,
-      laterMin:
-        (divider?.offsetHeight || 0) +
-        (firstItemHeight(list) ?? READ_LATER_MIN_SECTION_HEIGHT),
+      laterMin: firstItemHeight(list) ?? READ_LATER_MIN_SECTION_HEIGHT,
     };
   }
 
@@ -302,22 +299,18 @@ export function createReadLaterView({
     if (current.length === 0 && !dragActive) {
       section.hidden = true;
       section.style.height = "";
+      if (divider) divider.hidden = true;
       onLayoutChange();
       return;
     }
     section.hidden = false;
+    if (divider) divider.hidden = false;
     section.setAttribute("aria-label", t("readLaterTitle"));
 
     if (current.length === 0) {
       list.append(dropPlaceholder());
     } else {
       for (const item of current) list.append(renderItem(item));
-      if (pendingUrls.size) {
-        const pending = document.createElement("div");
-        pending.className = "sfp-rl-pending";
-        pending.textContent = t("loading");
-        list.append(pending);
-      }
     }
 
     applyHeight();
@@ -343,11 +336,18 @@ export function createReadLaterView({
     if (!dragActive) return;
     dragActive = false;
     dragHref = "";
+    dragIsProfile = false;
     setDropActive(false);
     render();
   }
 
+  /**
+   * 优先用 dragstart 记下的地址，但只限「从发布者链接拖出」这一种：
+   * 浏览器给整张条目卡片（外层 `<a>`）准备的 `text/uri-list` 是话题链接，
+   * 会盖掉发布者链接。其余情况仍以 `text/uri-list` 为准，跨文档拖入也走它。
+   */
   function readDraggedHref(event: DragEvent) {
+    if (dragIsProfile && dragHref) return dragHref;
     const data = event.dataTransfer;
     if (!data) return dragHref;
     const uriList = data.getData("text/uri-list");
@@ -356,8 +356,7 @@ export function createReadLaterView({
       .map((line) => line.trim())
       .find((line) => line && !line.startsWith("#"));
     if (candidate) return candidate;
-    const plain = data.getData("text/plain");
-    return plain.trim() || dragHref;
+    return data.getData("text/plain").trim() || dragHref;
   }
 
   /** 把目标高度钳进 [laterMin, available - mainMin]，返回 null 表示量不到布局。 */
@@ -430,12 +429,15 @@ export function createReadLaterView({
       document,
       "dragstart",
       (event) => {
-        const target =
-          event.target instanceof Element
-            ? event.target.closest<HTMLElement>("a[href]")
-            : null;
-        if (!target) return;
-        dragHref = target.getAttribute("href") || "";
+        const origin = event.target instanceof Element ? event.target : null;
+        if (!origin) return;
+        // 条目本身是 `<a>`，头像/用户名是包在里面的 span：
+        // 直接 closest("a[href]") 会拿到话题链接，所以先认发布者链接。
+        const profile = origin.closest<HTMLElement>("[data-user-profile-link]");
+        const profileUrl = profile?.getAttribute("data-user-profile-url");
+        const anchor = profile ? null : origin.closest<HTMLElement>("a[href]");
+        dragHref = profileUrl || anchor?.getAttribute("href") || "";
+        dragIsProfile = Boolean(profileUrl);
         if (dragHref) beginDrag();
       },
       true,
@@ -493,26 +495,29 @@ export function createReadLaterView({
       return;
     }
     section?.remove();
+    divider?.remove();
     feedScrollEl = getFeedScroll();
 
-    section = document.createElement("section");
-    section.className = "sfp-read-later";
-    section.hidden = true;
-
+    // 分隔线挂在容器上、区域之前：它不属于任何一侧，线上方就是主列表。
     divider = document.createElement("div");
     divider.className = "sfp-rl-divider";
     divider.setAttribute("role", "separator");
     divider.setAttribute("aria-orientation", "horizontal");
     divider.setAttribute("aria-label", t("readLaterTitle"));
     divider.tabIndex = 0;
+    divider.hidden = true;
+
+    section = document.createElement("section");
+    section.className = "sfp-read-later";
+    section.hidden = true;
 
     const scroll = document.createElement("div");
     scroll.className = "sfp-rl-scroll";
     list = document.createElement("div");
     list.className = "sfp-rl-list";
     scroll.append(list);
-    section.append(divider, scroll);
-    container.append(section);
+    section.append(scroll);
+    container.append(divider, section);
 
     availability = isLoggedIn() ? "available" : "unavailable";
 
@@ -537,11 +542,11 @@ export function createReadLaterView({
   }
 
   function ensure(container: HTMLElement) {
-    if (!section) {
+    if (!section || !divider) {
       mount(container);
       return;
     }
-    if (!container.contains(section)) container.append(section);
+    if (!container.contains(section)) container.append(divider, section);
     feedScrollEl = getFeedScroll();
     render();
   }
@@ -552,12 +557,12 @@ export function createReadLaterView({
     render,
     destroy() {
       section?.remove();
+      divider?.remove();
       section = null;
       divider = null;
       list = null;
       feedScrollEl = null;
       previewQueue = [];
-      pendingUrls.clear();
     },
     /** 主列表刷新后重渲染（话题快照已由控制器更新）。 */
     refresh: () => render(),

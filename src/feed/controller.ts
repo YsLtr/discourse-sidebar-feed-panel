@@ -257,10 +257,23 @@ export function createFeedController({
     getScope: () => viewScope,
   });
 
+  /**
+   * 与编辑器同一个请求形状（`frontend/pretty-text/addon/oneboxer.js:79`）：
+   * `refresh=true` 绕过服务端缓存——否则曾经缓存下来的纯 `<a>` 兜底会一直生效，
+   * 表现就是「个人资料预览不出来」；`X-Requested-With` 让 `requires_login`
+   * 返回 403 而不是跳登录页。`category_id`/`topic_id` 只有话题预览用得上，
+   * 我们从不 onebox 话题，故不传。
+   */
   function fetchOneboxPreview(url: string, signal: AbortSignal) {
     const target = toAbsoluteSiteUrl(url);
-    return fetch(`/onebox?url=${encodeURIComponent(target)}`, {
-      headers: { "X-CSRF-Token": getCsrfToken() },
+    const query = new URLSearchParams({ url: target, refresh: "true" });
+    return fetch(`/onebox?${query}`, {
+      credentials: "include",
+      headers: {
+        "X-CSRF-Token": getCsrfToken(),
+        "X-Requested-With": "XMLHttpRequest",
+        Accept: "text/html, */*; q=0.01",
+      },
       signal,
     }).then(async (response) => ({
       status: response.status,
@@ -269,14 +282,22 @@ export function createFeedController({
   }
 
   function addReadLaterLink(link: ParsedReadLaterLink, title: string) {
+    // 主列表里已经有这个话题时直接复制快照，省掉一次补全请求。
+    const known = link.topicId
+      ? resident.topics.find((topic) => topic.id === link.topicId)
+      : undefined;
+    const posterId = known?.posters?.[0]?.user_id;
     readLaterStore.add({
       url: link.url,
       kind: link.kind,
       topicId: link.topicId,
-      title: title || readLaterFallbackTitle(link.url),
+      title: title || (known && selectTopicTitle(known)) || readLaterFallbackTitle(link.url),
+      topic: known,
+      user: posterId === undefined ? undefined : resident.users[posterId],
     });
     readLaterView.refresh();
-    void syncReadLater();
+    // 快照已经复制过来了，这一次不必再取；下一次主列表刷新会统一校正。
+    if (!known) void syncReadLater();
   }
 
   /**
