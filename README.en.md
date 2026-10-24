@@ -217,7 +217,7 @@ npm run check:artifact
 
 Requires Node.js `^22.20.0 || ^24.12.0 || >=26.0.0`; Node 22 LTS is recommended. Browser checks also require Python and Chrome; use `CHROME_BIN` or `--chrome` to choose the browser. The built-userscript smoke check uses mock GM/Discourse services. Real userscript managers, sleep/wake sessions, and mobile devices need separate validation.
 
-See [docs/INDEX.md](docs/INDEX.md); development and validation, module boundaries, and the migration baseline live in the three topic files under `docs/development/`.
+See [docs/INDEX.md](docs/INDEX.md); development and validation and module boundaries live in the two topic files under `docs/development/`.
 
 ## License
 

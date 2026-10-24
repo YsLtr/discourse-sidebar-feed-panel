@@ -217,7 +217,7 @@ npm run check:artifact
 
 需要 Node.js `^22.20.0 || ^24.12.0 || >=26.0.0`，建议使用 Node 22 LTS。浏览器检查还需 Python 和 Chrome，可通过 `CHROME_BIN` 或 `--chrome` 指定路径。`check:browser` 使用模拟的 GM/Discourse 服务验证实际构建包，真实脚本管理器、长驻唤醒和移动端仍需单独验收。
 
-详见 [docs/INDEX.md](docs/INDEX.md),其中开发与验证说明、模块边界与迁移基线分别在 `docs/development/` 下的三份主题文档。
+详见 [docs/INDEX.md](docs/INDEX.md),其中开发与验证说明、模块边界分别在 `docs/development/` 下的两份主题文档。
 
 ## 许可证
 
