@@ -248,7 +248,7 @@ export function createFeedController({
     updateItems: (next) => readLaterStore.update(next),
     reloadItems: () => readLaterStore.reload(),
     onExternalItems: () => void syncReadLater(),
-    removeItem: (url) => readLaterStore.remove(url),
+    removeItem: (url) => removeReadLaterItem(url),
     onAdd: (link, title) => addReadLaterLink(link, title),
     markRead: (url) => markReadLaterItem(url),
     fetchOnebox: (url, signal) => fetchOneboxPreview(url, signal),
@@ -298,6 +298,16 @@ export function createFeedController({
     readLaterView.refresh();
     // 快照已经复制过来了，这一次不必再取；下一次主列表刷新会统一校正。
     if (!known) void syncReadLater();
+  }
+
+  /**
+   * 删到一条不剩就回到初始状态：丢掉拖动过的高度，
+   * 下次加入时又按「一个条目高」出现，而不是沿用上次拖出来的尺寸。
+   */
+  function removeReadLaterItem(url: string) {
+    const next = readLaterStore.remove(url);
+    if (next.length === 0) readLaterStore.setHeight(null);
+    return next;
   }
 
   /**

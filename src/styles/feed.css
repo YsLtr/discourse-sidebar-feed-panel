@@ -1189,8 +1189,10 @@
 }
 
 /* ===== 稍后再读 ===== */
-/* 分隔线是容器的兄弟节点，不属于任何一侧：线上方是主列表，下方才是稍后再读。 */
+/* 分隔线是区域的兄弟节点：它不属于任何一侧，线上方就是主列表。
+   元素自身就是那条线，不留上下留白，也不带背景色，避免遮挡两侧内容。 */
 .sfp-read-later {
+  position: relative;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -1203,35 +1205,25 @@
 }
 .sfp-rl-divider {
   flex: 0 0 auto;
-  height: 7px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: ns-resize;
-  background: var(--secondary);
-  border: none;
+  /* 自动外边距把「分隔线 + 区域」一起压到容器底部；主滚动区撑满时为 0。 */
+  margin-top: auto;
+  height: 3px;
   padding: 0;
+  border: none;
+  background: var(--primary-low);
+  cursor: ns-resize;
+  transition: background 0.2s;
 }
 .sfp-rl-divider[hidden] {
   display: none;
 }
-.sfp-rl-divider::before {
-  content: "";
-  width: 100%;
-  height: 1px;
-  background: var(--primary-low);
-  transition: background 0.2s;
-}
-.sfp-rl-divider:hover::before,
-.sfp-rl-divider:focus-visible::before,
-.sfp-rl-divider.sfp-rl-dragging::before {
+.sfp-rl-divider:hover,
+.sfp-rl-divider:focus-visible,
+.sfp-rl-divider.sfp-rl-dragging {
   background: var(--tertiary);
 }
 .sfp-rl-divider[aria-disabled="true"] {
   cursor: default;
-}
-.sfp-rl-divider[aria-disabled="true"]::before {
-  background: var(--primary-low);
 }
 .sfp-rl-scroll {
   flex: 1 1 auto;
@@ -1240,18 +1232,26 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
   touch-action: pan-y pinch-zoom;
+  /* 与主滚动区同一套滚动条，两侧看起来才是同一个列表。 */
+  --scrollbarBg: transparent;
+  --scrollbarThumbBg: var(--d-selected, var(--token-color-surface-hovered));
+  --scrollbarWidth: var(--space-2, 0.5em);
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--scrollbarThumbBg) var(--scrollbarBg);
 }
 .sfp-rl-scroll::-webkit-scrollbar {
-  width: 8px;
+  width: var(--scrollbarWidth);
 }
 .sfp-rl-scroll::-webkit-scrollbar-thumb {
-  background: var(--primary-low-mid);
-  border-radius: 4px;
+  background-color: var(--scrollbarThumbBg);
+  border-radius: calc(var(--scrollbarWidth) / 2);
 }
 .sfp-rl-scroll::-webkit-scrollbar-track {
-  background: transparent;
+  background-color: transparent;
 }
 .sfp-rl-list {
   display: flex;
@@ -1391,22 +1391,31 @@
   font-size: 11px;
   color: var(--primary-low-mid);
 }
+/* 拖拽指示框：覆盖整个区域、压在条目之上，但不吃指针事件。 */
 .sfp-rl-drop {
-  flex: 1 1 auto;
-  min-height: 0;
-  margin: 6px;
-  border: 1px dashed var(--primary-low-mid);
-  border-radius: 6px;
+  position: absolute;
+  inset: 2px;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
+  border: 2px dashed var(--primary-low-mid);
+  border-radius: 6px;
+  pointer-events: none;
   font-size: 12px;
   color: var(--primary-medium);
   text-align: center;
 }
-.sfp-rl-drop-active {
+.sfp-rl-drop[hidden] {
+  display: none;
+}
+.sfp-rl-drop > span {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--secondary);
+  opacity: 0.95;
+}
+.sfp-rl-drop.sfp-rl-drop-active {
   border-color: var(--tertiary);
   color: var(--tertiary);
-  background: var(--tertiary-very-low);
 }

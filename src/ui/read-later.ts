@@ -66,7 +66,9 @@ export function createReadLaterView({
   let section: HTMLElement | null = null;
   let divider: HTMLElement | null = null;
   let list: HTMLElement | null = null;
+  let overlay: HTMLElement | null = null;
   let feedScrollEl: HTMLElement | null = null;
+  let renderedCount = 0;
 
   // 页内状态：随页面刷新消失，不进 localStorage、不跨标签页共享。
   let availability: "available" | "unavailable" = "unavailable";
@@ -257,8 +259,8 @@ export function createReadLaterView({
       // 两侧都放不下一个条目：固定在中间对半分，分隔线不可拖。
       dividerLocked = true;
       divider.setAttribute("aria-disabled", "true");
+      setSectionHeight(Math.floor(available / 2));
       divider.removeAttribute("aria-valuenow");
-      section.style.height = `${Math.floor(available / 2)}px`;
       return;
     }
 
@@ -270,66 +272,93 @@ export function createReadLaterView({
       Math.min(items().length || 1, 2);
     const desired = saved ?? autoHeight;
     const height = Math.min(Math.max(desired, laterMin), available - mainMin);
-    section.style.height = `${height}px`;
     divider.setAttribute("aria-valuemin", String(Math.round(laterMin)));
     divider.setAttribute(
       "aria-valuemax",
       String(Math.round(available - mainMin)),
     );
-    divider.setAttribute("aria-valuenow", String(Math.round(height)));
+    setSectionHeight(height);
   }
 
   function dropPlaceholder() {
     const box = document.createElement("div");
     box.className = "sfp-rl-drop";
-    box.textContent = t("readLaterDropHint");
-    if (dropActive) box.classList.add("sfp-rl-drop-active");
+    box.hidden = true;
+    box.innerHTML = `<span>${escapeHtml(t("readLaterDropHint"))}</span>`;
     return box;
+  }
+
+  function readLaterScroll() {
+    return section?.querySelector<HTMLElement>(".sfp-rl-scroll") || null;
+  }
+
+  function isAtBottom(scroll: HTMLElement) {
+    return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 4;
+  }
+
+  function pinToBottom(scroll: HTMLElement) {
+    scroll.scrollTop = scroll.scrollHeight;
   }
 
   function render() {
     if (!section || !list) return;
     const current = items();
     const scroll = section.querySelector<HTMLElement>(".sfp-rl-scroll");
-    const atBottom = scroll
-      ? scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 4
-      : true;
+    const atBottom = scroll ? isAtBottom(scroll) : true;
+    const grew = current.length > renderedCount;
+    renderedCount = current.length;
+
     // 先清空：空态时若直接 return，旧的条目节点会留在隐藏的容器里。
     list.replaceChildren();
-    if (current.length === 0 && !dragActive) {
+    if (current.length === 0) {
       section.hidden = true;
       section.style.height = "";
       if (divider) divider.hidden = true;
+      setOverlay(false);
       onLayoutChange();
       return;
     }
     section.hidden = false;
     if (divider) divider.hidden = false;
     section.setAttribute("aria-label", t("readLaterTitle"));
-
-    if (current.length === 0) {
-      list.append(dropPlaceholder());
-    } else {
-      for (const item of current) list.append(renderItem(item));
-    }
+    // 倒序渲染：最新一条在最上面，列表整体贴底，于是新条目往「上」堆。
+    for (const item of [...current].reverse()) list.append(renderItem(item));
 
     applyHeight();
-    if (scroll && atBottom) scroll.scrollTop = scroll.scrollHeight;
+    // 新条目在顶部；溢出时贴底会把它挡在可视区外，所以跟着滚到顶部。
+    if (scroll) {
+      if (grew) scroll.scrollTop = 0;
+      else if (atBottom) pinToBottom(scroll);
+    }
     onLayoutChange();
+  }
+
+  /** 指示框是覆盖整个区域的遮罩，不参与列表排版。 */
+  function setOverlay(visible: boolean) {
+    if (!overlay) return;
+    overlay.hidden = !visible;
+    overlay.classList.toggle("sfp-rl-drop-active", dropActive);
   }
 
   function setDropActive(active: boolean) {
     if (dropActive === active) return;
     dropActive = active;
-    const box = list?.querySelector(".sfp-rl-drop");
-    if (box) box.classList.toggle("sfp-rl-drop-active", active);
-    section?.classList.toggle("sfp-rl-drop-active", active);
+    overlay?.classList.toggle("sfp-rl-drop-active", active);
   }
 
+  /**
+   * 开始拖拽只切换可见性，**不能重渲染列表**：dragstart 期间把条目节点换掉，
+   * 浏览器会取消这次拖拽（文本拖拽尤其如此，图片拖拽因为数据已抓取才幸存）。
+   */
   function beginDrag() {
     if (dragActive) return;
     dragActive = true;
-    render();
+    if (!section) return;
+    section.hidden = false;
+    if (divider) divider.hidden = false;
+    setOverlay(true);
+    applyHeight();
+    onLayoutChange();
   }
 
   function endDrag() {
@@ -337,8 +366,24 @@ export function createReadLaterView({
     dragActive = false;
     dragHref = "";
     dragIsProfile = false;
-    setDropActive(false);
+    dropActive = false;
+    setOverlay(false);
     render();
+  }
+
+  /**
+   * 文本拖拽时 `dragstart.target` 会退到整张条目卡片（外层 `<a>`），
+   * 于是从昵称、用户名拖出会被当成话题。选区里还留着真正被拖的那段文字，
+   * 顺着它的祖先找发布者链接即可；选区为空说明这次不是文本拖拽，不作数。
+   */
+  function selectionProfile() {
+    const selection = document.getSelection();
+    if (!selection || selection.isCollapsed) return null;
+    const anchor = selection.anchorNode;
+    if (!anchor) return null;
+    const element =
+      anchor instanceof Element ? anchor : (anchor.parentElement ?? null);
+    return element?.closest<HTMLElement>("[data-user-profile-link]") || null;
   }
 
   /**
@@ -367,10 +412,16 @@ export function createReadLaterView({
     return Math.round(Math.min(Math.max(next, room.laterMin), max));
   }
 
+  /**
+   * 改高度只改变可见窗口：底边钉在容器底部，内容不跟着分隔线走。
+   * 变高时从上方多露出更早的条目，而不是把整摞内容往下推。
+   */
   function setSectionHeight(height: number) {
     if (!section) return;
     section.style.height = `${height}px`;
     divider?.setAttribute("aria-valuenow", String(height));
+    const scroll = readLaterScroll();
+    if (scroll) pinToBottom(scroll);
   }
 
   function setupHeightDrag() {
@@ -431,13 +482,17 @@ export function createReadLaterView({
       (event) => {
         const origin = event.target instanceof Element ? event.target : null;
         if (!origin) return;
-        // 条目本身是 `<a>`，头像/用户名是包在里面的 span：
+        // 条目本身是 `<a>`，头像/昵称/用户名是包在里面的 span：
         // 直接 closest("a[href]") 会拿到话题链接，所以先认发布者链接。
-        const profile = origin.closest<HTMLElement>("[data-user-profile-link]");
-        const profileUrl = profile?.getAttribute("data-user-profile-url");
-        const anchor = profile ? null : origin.closest<HTMLElement>("a[href]");
-        dragHref = profileUrl || anchor?.getAttribute("href") || "";
-        dragIsProfile = Boolean(profileUrl);
+        // 文本拖拽的 target 有时会退到整张卡片，这时用选区找回被拖的那段文字。
+        const profile =
+          origin.closest<HTMLElement>("[data-user-profile-link]") ||
+          selectionProfile();
+        dragHref =
+          profile?.getAttribute("data-user-profile-url") ||
+          origin.closest<HTMLElement>("a[href]")?.getAttribute("href") ||
+          "";
+        dragIsProfile = Boolean(profile);
         if (dragHref) beginDrag();
       },
       true,
@@ -516,10 +571,12 @@ export function createReadLaterView({
     list = document.createElement("div");
     list.className = "sfp-rl-list";
     scroll.append(list);
-    section.append(scroll);
+    overlay = dropPlaceholder();
+    section.append(scroll, overlay);
     container.append(divider, section);
 
     availability = isLoggedIn() ? "available" : "unavailable";
+    renderedCount = 0;
 
     setupHeightDrag();
     setupDragAndDrop(container);
@@ -561,7 +618,9 @@ export function createReadLaterView({
       section = null;
       divider = null;
       list = null;
+      overlay = null;
       feedScrollEl = null;
+      renderedCount = 0;
       previewQueue = [];
     },
     /** 主列表刷新后重渲染（话题快照已由控制器更新）。 */
