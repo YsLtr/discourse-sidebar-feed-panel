@@ -338,10 +338,11 @@ try:
         })()""")
         cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/t/298')")
         wait_for("""document.querySelectorAll('.sfp-rl-item').length===2""")
-        check('new entries stack upward, newest on top', """(() => {
+        check('new entries stack upward with the newest at the bottom', """(() => {
           const items = [...document.querySelectorAll('.sfp-rl-item')];
-          return items[0].dataset.url==='/t/298' && items[1].dataset.url==='/t/299' &&
-            items[0].getBoundingClientRect().top < items[1].getBoundingClientRect().top;
+          // DOM 是从上到下的视觉顺序：先加入的在上，最新的在下。
+          return items[0].dataset.url==='/t/299' && items[1].dataset.url==='/t/298' &&
+            items[1].getBoundingClientRect().top > items[0].getBoundingClientRect().top;
         })()""")
         cdp.evaluate("""dragTo('.sfp-read-later', 'https://elsewhere.example/t/1');
           dragTo('.sfp-read-later', 'javascript:alert(1)');""")
@@ -350,8 +351,8 @@ try:
         cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/about')")
         wait_for("""document.querySelectorAll('.sfp-rl-item').length===3""")
         check('an anonymous session renders the link-preview fallback without any onebox request', """(() => {
-          const item = document.querySelector('.sfp-rl-item');
-          return item.dataset.url==='/about' && !!item.querySelector('.sfp-rl-fallback') &&
+          const item = document.querySelector('.sfp-rl-item[data-url="/about"]');
+          return !!item && !!item.querySelector('.sfp-rl-fallback') &&
             item.querySelector('.sfp-rl-fallback-title').textContent==='about' &&
             item.querySelector('.sfp-rl-fallback-note').textContent==='链接预览' &&
             !item.querySelector('.sfp-rl-card') &&
@@ -368,35 +369,40 @@ try:
           return Math.abs(section.top-divider.bottom)<=1 &&
             getComputedStyle(rlSection).borderTopWidth==='0px';
         })()""")
-        check('an overflowing list stays at the top so the newest entry is visible', """(() => {
-          const scroll=document.querySelector('.sfp-rl-scroll');
-          const list=document.querySelector('.sfp-rl-list').getBoundingClientRect();
-          const first=document.querySelector('.sfp-rl-item').getBoundingClientRect();
-          const s=scroll.getBoundingClientRect();
-          return scroll.scrollTop===0 && Math.abs(list.top-s.top)<=1 &&
-            Math.abs(first.top-s.top)<=1;
-        })()""")
-        check('a list shorter than its dragged height sits at the bottom', """(() => {
-          const section=document.querySelector('.sfp-read-later');
-          const saved=Number(localStorage.getItem('sfp_read_later_height_v1') || 0);
-          if (!saved) return true;
+        check('the list is pinned to the bottom edge of its scroll area', """(() => {
+          // `column-reverse` 让主轴原点落在底部：内容不足时靠底，内容溢出时
+          // `scrollTop = 0` 也是贴底，所以列表底边永远与滚动区底边重合。
           const scroll=document.querySelector('.sfp-rl-scroll').getBoundingClientRect();
           const list=document.querySelector('.sfp-rl-list').getBoundingClientRect();
-          return list.height >= section.offsetHeight - 2 || Math.abs(list.bottom-scroll.bottom)<=1;
+          return Math.abs(list.bottom-scroll.bottom)<=1;
         })()""")
         check('height grows from one item to two and then stops', """(() => {
           const count = document.querySelectorAll('.sfp-rl-item').length;
           const height = rlSection.offsetHeight;
           return count===3 && Math.abs(height - rlItemHeight*2) <= 2;
         })()""")
+        cdp.evaluate("""window.beforeDividerDrag=(() => {
+            const scroll=document.querySelector('.sfp-rl-scroll');
+            const first=document.querySelector('.sfp-rl-item').getBoundingClientRect();
+            return {top: first.top, scrollTop: scroll.scrollTop,
+              height: document.querySelector('.sfp-read-later').offsetHeight};
+          })()""")
         cdp.evaluate("""const divider=document.querySelector('.sfp-rl-divider');
           divider.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,button:0,clientY:200}));
-          document.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientY:120}));
-          document.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,clientY:120}));""")
+          document.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientY:160}));
+          document.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,clientY:160}));""")
         wait_for("localStorage.getItem('sfp_read_later_height_v1')!==null")
         check('dragging the divider persists the height once', """(() => {
           const saved = Number(localStorage.getItem('sfp_read_later_height_v1'));
           return saved > 0 && Math.abs(rlSection.offsetHeight - saved) <= 2;
+        })()""")
+        check('dragging the divider resizes the region without moving the content', """(() => {
+          // 内容从下往上算：底边固定、滚动原点在底部，所以高度变了条目也不动。
+          const first=document.querySelector('.sfp-rl-item').getBoundingClientRect();
+          const scroll=document.querySelector('.sfp-rl-scroll');
+          return Math.abs(rlSection.offsetHeight-beforeDividerDrag.height)>10 &&
+            Math.abs(first.top-beforeDividerDrag.top)<=1 &&
+            scroll.scrollTop===beforeDividerDrag.scrollTop;
         })()""")
         cdp.evaluate("""window.savedHeight=Number(localStorage.getItem('sfp_read_later_height_v1'));
           dragTo('.sfp-read-later', location.origin + '/t/297');""")
@@ -453,13 +459,17 @@ try:
             return mark;
           };
           window.beforeOrder=rlItems();
-          window.lastMark=dragItem('/about', '/t/297', 'before');""")
+          // 把最新的（视觉最下）拖到最旧的前面。
+          window.lastMark=dragItem('/t/297', '/t/299', 'before');""")
         wait_for("JSON.stringify(rlItems())!==JSON.stringify(beforeOrder)")
-        check('a read-later drag carries the internal move marker', """lastMark.internal==='/about'""")
+        check('a read-later drag carries the internal move marker', """lastMark.internal==='/t/297'""")
         check('dragging an entry onto another reorders the list', """(() => {
           const order=rlItems();
-          return order[0]==='/about' && order.length===beforeOrder.length &&
-            JSON.parse(localStorage.getItem('sfp_read_later_v1')).items[0].url==='/about';
+          const stored=JSON.parse(localStorage.getItem('sfp_read_later_v1')).items.map(i=>i.url);
+          return order[0]==='/t/297' && order.at(-1)==='/about' &&
+            order.length===beforeOrder.length &&
+            // 存储是「新 → 旧」，正好是视觉顺序的倒序。
+            stored[0]==='/about' && stored.at(-1)==='/t/297';
         })()""")
         check('an internal drag shows no add overlay', """document.querySelector('.sfp-rl-drop').hidden""")
         cdp.evaluate("dragItem('/t/299')")
@@ -597,12 +607,12 @@ try:
           dragTo('.sfp-read-later', location.origin + '/t/297');
           dragTo('.sfp-read-later', location.origin + '/t/296');""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===4")
-        check('a new item appears above the older ones', """(() => {
+        check('a new item appears below the older ones', """(() => {
           const items=[...document.querySelectorAll('.sfp-rl-item')];
           const urls=items.map(i=>i.dataset.url);
           const newest=items.find(i=>i.dataset.url==='/t/296');
           const older=items.find(i=>i.dataset.url==='/t/299');
-          return urls[0]==='/t/296' && newest.getBoundingClientRect().top <
+          return urls.at(-1)==='/t/296' && newest.getBoundingClientRect().top >
             older.getBoundingClientRect().top;
         })()""")
         check('the read-later scrollbar matches the main list', """(() => {
@@ -650,6 +660,18 @@ try:
           return !overlay.classList.contains('sfp-rl-drop-active') &&
             overlay.textContent.trim()==='拖进加入稍后再读';
         })()""")
+        # 悬停在主列表（面板的其余部分）不算进入区域：落点范围只限分隔线以下。
+        cdp.evaluate("""(() => {
+          const dt=new DataTransfer();
+          dt.setData('text/uri-list', location.origin + '/about');
+          const main=document.querySelector('.sfp-feed-scroll');
+          main.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:dt}));
+        })()""")
+        check('hovering the main list does not count as entering the region', """(() => {
+          const overlay=document.querySelector('.sfp-rl-drop');
+          return !overlay.classList.contains('sfp-rl-drop-active') &&
+            overlay.textContent.trim()==='拖进加入稍后再读';
+        })()""")
         cdp.evaluate("""(() => {
           const section=document.querySelector('.sfp-read-later');
           const dt=new DataTransfer();
@@ -660,8 +682,20 @@ try:
           const overlay=document.querySelector('.sfp-rl-drop');
           const style=getComputedStyle(overlay);
           return overlay.classList.contains('sfp-rl-drop-active') &&
-            overlay.textContent.trim()==='松开后加入稍后再读' &&
+            overlay.textContent.trim()==='松开加入稍后再读' &&
             style.backgroundColor!=='rgba(0, 0, 0, 0)';
+        })()""")
+        cdp.evaluate("""(() => {
+          // 退回主列表：落点高亮必须撤回。
+          const dt=new DataTransfer();
+          dt.setData('text/uri-list', location.origin + '/about');
+          document.querySelector('.sfp-read-later').dispatchEvent(
+            new DragEvent('dragleave',{bubbles:true,dataTransfer:dt,relatedTarget:document.body}));
+        })()""")
+        check('leaving the region takes the highlight back', """(() => {
+          const overlay=document.querySelector('.sfp-rl-drop');
+          return !overlay.classList.contains('sfp-rl-drop-active') &&
+            overlay.textContent.trim()==='拖进加入稍后再读';
         })()""")
         cdp.evaluate("document.dispatchEvent(new DragEvent('dragend'))")
         cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
@@ -704,14 +738,33 @@ try:
             card.querySelector('.sfp-rl-card-excerpt').textContent==='Preview excerpt' &&
             card.querySelector('.sfp-rl-card-image').getAttribute('src')===location.origin + '/uploads/preview.png';
         })()""")
+        # 移除再加回来：页内「已请求/已失败」状态不能把这条挡住。
+        cdp.evaluate("""window.removeRlItem=(url) => {
+            const item=document.querySelector(`.sfp-rl-item[data-url="${url}"]`);
+            const dt=new DataTransfer();
+            item.querySelector('a').dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:dt}));
+            document.querySelector('.sfp-read-later').dispatchEvent(
+              new DragEvent('dragleave',{bubbles:true,dataTransfer:dt,relatedTarget:document.body}));
+            document.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:dt}));
+          };
+          window.oneboxBefore=fixture.oneboxRequests.length;
+          removeRlItem('/u/alice');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===0")
+        cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/u/alice')")
+        wait_for("fixture.oneboxRequests.length>oneboxBefore")
+        check('removing a link and adding it back fetches the preview again', """(() => {
+          const item=document.querySelector('.sfp-rl-item[data-url="/u/alice"]');
+          return fixture.oneboxRequests.filter(u=>u.endsWith('/u/alice')).length===2 &&
+            !!item && !!item.querySelector('.sfp-rl-card');
+        })()""")
         # 200 也可能是失败：`<a href="url">url</a>` 兜底照样是 200，必须按失败处理。
         cdp.evaluate("""fixture.oneboxHtml=(target)=>`<a href="${target}">${target}</a>`;
           dragTo('.sfp-read-later', location.origin + '/u/bob');""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===2")
         time.sleep(.4)
         check('a 200 with the bare-anchor fallback counts as a failed preview', """(() => {
-          const item=document.querySelector('.sfp-rl-item');
-          return item.dataset.url==='/u/bob' && !!item.querySelector('.sfp-rl-fallback') &&
+          const item=document.querySelector('.sfp-rl-item[data-url="/u/bob"]');
+          return !!item && !!item.querySelector('.sfp-rl-fallback') &&
             !item.querySelector('.sfp-rl-card');
         })()""")
         cdp.evaluate("""fixture.oneboxHtml=null;
@@ -726,22 +779,22 @@ try:
         wait_for("document.querySelectorAll('.sfp-rl-item').length===2")
         time.sleep(.4)
         check('a 403 downgrades preview availability for the rest of the page', """(() => {
-          const items = [...document.querySelectorAll('.sfp-rl-item')];
-          return !!items[0].querySelector('.sfp-rl-fallback') &&
-            items[0].dataset.url==='/c/dev/3';
+          const item = document.querySelector('.sfp-rl-item[data-url="/c/dev/3"]');
+          return !!item && !!item.querySelector('.sfp-rl-fallback');
         })()""")
         cdp.evaluate("""fixture.oneboxStatus=200;
           dragTo('.sfp-read-later', location.origin + '/about');""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===3")
         time.sleep(.4)
         check('preview requests stop entirely after the downgrade', """(() => {
-          // alice/bob/dave 各一次，/c/dev/3 拿到 403 后翻成不可用，/about 一次都不发。
-          return fixture.oneboxRequests.length===4 &&
+          // alice 两次（删了再加）、bob、dave、/c/dev/3；403 之后 /about 一次都不发。
+          const about = document.querySelector('.sfp-rl-item[data-url="/about"]');
+          return fixture.oneboxRequests.length===5 &&
             fixture.oneboxRequests.at(-1).endsWith('/c/dev/3') &&
-            !!document.querySelectorAll('.sfp-rl-item')[0].querySelector('.sfp-rl-fallback');
+            !!about && !!about.querySelector('.sfp-rl-fallback');
         })()""")
         cdp.evaluate("""localStorage.setItem('fixture_expect_count', String(document.querySelectorAll('.sfp-rl-item').length));
-          localStorage.setItem('fixture_expect_url', [...document.querySelectorAll('.sfp-rl-item')][0].dataset.url);""")
+          localStorage.setItem('fixture_expect_url', [...document.querySelectorAll('.sfp-rl-item')].at(-1).dataset.url);""")
         cdp.call('Page.navigate', {'url': f'http://127.0.0.1:{server.server_port}/'})
         cdp.event('Page.loadEventFired')
         cdp.evaluate(source)
@@ -749,7 +802,7 @@ try:
         check('items survive a page reload and restore in order', """(() => {
           const items=[...document.querySelectorAll('.sfp-rl-item')];
           return String(items.length)===localStorage.getItem('fixture_expect_count') &&
-            items[0].dataset.url===localStorage.getItem('fixture_expect_url');
+            items.at(-1).dataset.url===localStorage.getItem('fixture_expect_url');
         })()""")
         cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
           localStorage.removeItem('sfp_read_later_height_v1');

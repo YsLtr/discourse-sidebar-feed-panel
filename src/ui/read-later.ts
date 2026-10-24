@@ -198,8 +198,6 @@ export function createReadLaterView({
     const wrapper = document.createElement("div");
     wrapper.className = "sfp-rl-item";
     wrapper.dataset.url = item.url;
-    // 删除是「拖出区域」：没有按钮，只能靠悬停提示告知（零布局成本）。
-    wrapper.title = t("readLaterDragOut");
 
     if (item.kind === "topic" && item.topic) {
       const element = renderer.createTopicItem(item.topic, false, {
@@ -293,6 +291,13 @@ export function createReadLaterView({
     if (!section || !list) return;
     const current = items();
 
+    // 页内预览状态只对「当前还在列表里」的 URL 有意义：条目被移除后
+    // 再加回来应当重新取一次预览，而不是被上次的 requested/failed 挡住。
+    const live = new Set(current.map((item) => item.url));
+    for (const url of requestedUrls) if (!live.has(url)) requestedUrls.delete(url);
+    for (const url of failedUrls) if (!live.has(url)) failedUrls.delete(url);
+    previewQueue = previewQueue.filter((url) => live.has(url));
+
     // 先清空：空态时若直接 return，旧的条目节点会留在隐藏的容器里。
     list.replaceChildren();
     if (current.length === 0) {
@@ -306,9 +311,12 @@ export function createReadLaterView({
     section.hidden = false;
     if (divider) divider.hidden = false;
     section.setAttribute("aria-label", t("readLaterTitle"));
-    // `items()` 已经是最新在前，DOM 顺序就是视觉顺序；贴底由 `.sfp-rl-list`
-    // 的 `margin-top: auto` 完成，不再用 JS 改 scrollTop（那会让内容乱跳）。
-    for (const item of current) list.append(renderItem(item));
+    // 存储是「新 → 旧」，视觉是「旧在上、新在下」：DOM 顺序 = 从上到下的
+    // 视觉顺序，所以倒着 append。贴底与滚动原点都交给 `.sfp-rl-scroll` 的
+    // `column-reverse`，这里一个字都不碰 scrollTop。
+    for (let index = current.length - 1; index >= 0; index--) {
+      list.append(renderItem(current[index]));
+    }
 
     applyHeight();
     onLayoutChange();
@@ -319,19 +327,22 @@ export function createReadLaterView({
     if (!overlay) return;
     overlay.hidden = !visible;
     overlay.classList.toggle("sfp-rl-drop-active", dropActive);
-    overlayText(dropActive);
+    overlayText();
   }
 
-  function overlayText(active: boolean) {
+  function overlayText() {
     const label = overlay?.firstElementChild;
-    if (label) label.textContent = t(active ? "readLaterDropRelease" : "readLaterDropHint");
+    if (!label) return;
+    label.textContent = t(
+      dropActive ? "readLaterDropRelease" : "readLaterDropHint",
+    );
   }
 
   function setDropActive(active: boolean) {
     if (dropActive === active) return;
     dropActive = active;
     overlay?.classList.toggle("sfp-rl-drop-active", active);
-    overlayText(active);
+    overlayText();
   }
 
   /** 内部排序的插入位置提示：只加边框，不动布局，避免拖动时列表抖动。 */
@@ -557,9 +568,10 @@ export function createReadLaterView({
       beginDrag();
     });
 
+    // 容器只负责「让区域出现」；「已经对准落点」必须由区域自己判定。
+    // 用容器判定会在拖拽刚离开起点时就亮起来——起点本来就在容器里。
     scope.listen(container, "dragover", (event) => {
       if (internalUrl) {
-        // 内部搬动：只认区域本身，给出插入位置提示。
         if (!section?.contains(event.target as Node)) return;
         event.preventDefault();
         if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
@@ -571,8 +583,30 @@ export function createReadLaterView({
       // 一律拦下：链接丢进面板不应触发页面导航。
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-      setDropActive(true);
     });
+
+    if (section) {
+      const zone = section;
+      scope.listen(zone, "dragenter", (event) => {
+        if (internalUrl) return;
+        event.preventDefault();
+        setDropActive(true);
+      });
+      scope.listen(zone, "dragover", (event) => {
+        if (internalUrl) return;
+        event.preventDefault();
+        setDropActive(true);
+      });
+      scope.listen(zone, "dragleave", (event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && zone.contains(next)) return;
+        setDropActive(false);
+        if (internalUrl) {
+          leftSection = true;
+          setInsertMark(null);
+        }
+      });
+    }
 
     scope.listen(container, "dragleave", (event) => {
       const next = event.relatedTarget;
@@ -590,13 +624,17 @@ export function createReadLaterView({
       event.stopPropagation();
       if (internalUrl) {
         const url = internalUrl;
-        const from = items().findIndex((item) => item.url === url);
+        const nodes = [...(list?.querySelectorAll<HTMLElement>(".sfp-rl-item") ?? [])];
+        const from = nodes.findIndex((node) => node.dataset.url === url);
         const to = insertionIndexAt(event.clientY);
         internalHandled = true;
         setInsertMark(null);
         // 先移除自己再插入，所以目标下标要按移除后的数组修正。
         const target = to > from ? to - 1 : to;
-        if (from >= 0 && target !== from) moveItem(url, target);
+        // 插入下标是视觉顺序（旧在上），存储是「新 → 旧」，换回存储下标。
+        if (from >= 0 && target !== from) {
+          moveItem(url, nodes.length - 1 - target);
+        }
         endDrag();
         return;
       }

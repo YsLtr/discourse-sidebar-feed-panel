@@ -66,8 +66,7 @@ const I18N: Record<string, Record<string, string>> = {
     requestFailed: "请求失败",
     readLaterTitle: "稍后再读",
     readLaterDropHint: "拖进加入稍后再读",
-    readLaterDropRelease: "松开后加入稍后再读",
-    readLaterDragOut: "拖出即删除",
+    readLaterDropRelease: "松开加入稍后再读",
     linkPreview: "链接预览",
   },
   en: {
@@ -137,7 +136,6 @@ const I18N: Record<string, Record<string, string>> = {
     readLaterTitle: "Read later",
     readLaterDropHint: "Drag into Read later",
     readLaterDropRelease: "Release to add to Read later",
-    readLaterDragOut: "Drag out to remove",
     linkPreview: "Link preview",
   },
 };

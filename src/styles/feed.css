@@ -1228,9 +1228,14 @@
 .sfp-rl-scroll {
   flex: 1 1 auto;
   min-height: 0;
-  /* 必须是 flex 容器：`.sfp-rl-list` 的 `margin-top: auto` 只在 flex 里吸底。 */
+  /*
+   * `column-reverse` 是这个区域唯一的贴底手段，也是它「从下往上算」的来源：
+   * 主轴起点在底部，内容不足时自动靠底，滚动原点也在底部——改高度只是让
+   * 上方多露出内容，内容本身一步都不动。用 `column` + `margin-top: auto`
+   * 会在「放得下」与「放不下」之间换一次对齐方式，拖分隔线时内容就跳。
+   */
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -1253,10 +1258,11 @@
 .sfp-rl-scroll::-webkit-scrollbar-track {
   background-color: transparent;
 }
+/* 列表自身保持正序：DOM 顺序就是从上到下的视觉顺序。 */
 .sfp-rl-list {
   display: flex;
   flex-direction: column;
-  margin-top: auto;
+  flex: 0 0 auto;
 }
 .sfp-rl-item {
   position: relative;
