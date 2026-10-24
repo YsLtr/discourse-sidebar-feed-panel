@@ -78,14 +78,15 @@ describe("readLaterFallbackTitle", () => {
 });
 
 describe("createReadLaterStore", () => {
-  it("appends new items and moves duplicates to the end", () => {
+  it("keeps the newest entry first and moves duplicates to the front", () => {
     const storage = fakeStorage();
     const store = createReadLaterStore({ storage, origin: ORIGIN });
     store.add(item("/a"));
     store.add(item("/b"));
-    store.add(item("/a", { title: "again" }));
     expect(store.items().map((entry) => entry.url)).toEqual(["/b", "/a"]);
-    expect(store.items()[1].title).toBe("again");
+    store.add(item("/a", { title: "again" }));
+    expect(store.items().map((entry) => entry.url)).toEqual(["/a", "/b"]);
+    expect(store.items()[0].title).toBe("again");
   });
 
   it("drops the oldest entry past the limit", () => {
@@ -94,7 +95,26 @@ describe("createReadLaterStore", () => {
     store.add(item("/a"));
     store.add(item("/b"));
     store.add(item("/c"));
-    expect(store.items().map((entry) => entry.url)).toEqual(["/b", "/c"]);
+    expect(store.items().map((entry) => entry.url)).toEqual(["/c", "/b"]);
+  });
+
+  it("reorders items and persists the new order", () => {
+    const storage = fakeStorage();
+    const store = createReadLaterStore({ storage, origin: ORIGIN });
+    store.add(item("/a"));
+    store.add(item("/b"));
+    store.add(item("/c"));
+    expect(store.items().map((entry) => entry.url)).toEqual(["/c", "/b", "/a"]);
+    store.move("/a", 0);
+    expect(store.items().map((entry) => entry.url)).toEqual(["/a", "/c", "/b"]);
+    expect(
+      createReadLaterStore({ storage, origin: ORIGIN }).items().map((entry) => entry.url),
+    ).toEqual(["/a", "/c", "/b"]);
+    // 越界下标被钳住，未知 url 不动。
+    store.move("/b", 99);
+    expect(store.items().map((entry) => entry.url)).toEqual(["/a", "/c", "/b"]);
+    store.move("/nope", 0);
+    expect(store.items().map((entry) => entry.url)).toEqual(["/a", "/c", "/b"]);
   });
 
   it("removes items and persists the rest", () => {
@@ -109,7 +129,7 @@ describe("createReadLaterStore", () => {
   });
 
   it("drops corrupt payloads and unknown versions", () => {
-    for (const raw of ["not json", "{}", '{"version":2,"items":[]}', '{"version":1}']) {
+    for (const raw of ["not json", "{}", '{"version":3,"items":[]}', '{"version":1}']) {
       const store = createReadLaterStore({
         storage: fakeStorage({ [READ_LATER_STORAGE_KEY]: raw }),
         origin: ORIGIN,
@@ -118,9 +138,24 @@ describe("createReadLaterStore", () => {
     }
   });
 
-  it("drops entries that are cross-origin or malformed", () => {
+  it("reads v1 payloads oldest-first and flips them to newest-first", () => {
     const payload = JSON.stringify({
       version: 1,
+      items: [
+        { url: "/old", kind: "link", addedAt: 1 },
+        { url: "/new", kind: "link", addedAt: 2 },
+      ],
+    });
+    const store = createReadLaterStore({
+      storage: fakeStorage({ [READ_LATER_STORAGE_KEY]: payload }),
+      origin: ORIGIN,
+    });
+    expect(store.items().map((entry) => entry.url)).toEqual(["/new", "/old"]);
+  });
+
+  it("drops entries that are cross-origin or malformed", () => {
+    const payload = JSON.stringify({
+      version: 2,
       items: [
         { url: "/keep", title: "keep", kind: "link", addedAt: 1 },
         { url: "https://elsewhere.example/x", title: "x", kind: "link", addedAt: 1 },
@@ -193,7 +228,7 @@ describe("extractPreview", () => {
   it("reads the topic onebox card", () => {
     const preview = extractPreview(
       makeRoot({
-        aside: {},
+        "aside, .onebox": {},
         ".quote-title__text-content a": { text: "  A   title  " },
         blockquote: { text: "first post excerpt" },
         ".badge-category__name": { text: "Dev" },
@@ -210,13 +245,18 @@ describe("extractPreview", () => {
 
   it("reads the image and resolves it against the origin", () => {
     const preview = extractPreview(
-      makeRoot({ aside: {}, img: { src: "/uploads/a.png" }, a: { text: "T" } }),
+      makeRoot({
+        "aside, .onebox": {},
+        img: { src: "/uploads/a.png" },
+        a: { text: "T" },
+      }),
       ORIGIN,
     );
     expect(preview.imageUrl).toBe(`${ORIGIN}/uploads/a.png`);
   });
 
-  it("falls back to the plain anchor form and rejects javascript images", () => {
+  it("rejects the bare-anchor fallback even though it arrives as 200", () => {
+    // `lib/oneboxer.rb:328` 的兜底：`<a href='url'>url</a>`。编辑器同样把它当失败。
     const preview = extractPreview(
       makeRoot({
         a: { text: "https://forum.example/about" },
@@ -224,13 +264,16 @@ describe("extractPreview", () => {
       }),
       ORIGIN,
     );
-    expect(preview.imageUrl).toBeUndefined();
-    expect(preview.title).toBe("https://forum.example/about");
+    expect(preview).toEqual({});
   });
 
   it("truncates long excerpts", () => {
     const preview = extractPreview(
-      makeRoot({ aside: {}, a: { text: "T" }, blockquote: { text: "x".repeat(400) } }),
+      makeRoot({
+        "aside, .onebox": {},
+        a: { text: "T" },
+        blockquote: { text: "x".repeat(400) },
+      }),
       ORIGIN,
     );
     expect(preview.excerpt?.length).toBe(200);

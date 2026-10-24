@@ -249,6 +249,11 @@ export function createFeedController({
     reloadItems: () => readLaterStore.reload(),
     onExternalItems: () => void syncReadLater(),
     removeItem: (url) => removeReadLaterItem(url),
+    moveItem: (url, toIndex) => {
+      const next = readLaterStore.move(url, toIndex);
+      readLaterView.refresh();
+      return next;
+    },
     onAdd: (link, title) => addReadLaterLink(link, title),
     markRead: (url) => markReadLaterItem(url),
     fetchOnebox: (url, signal) => fetchOneboxPreview(url, signal),
@@ -327,31 +332,39 @@ export function createFeedController({
 
   /**
    * 主列表刷新后校正已保存的话题：统计、标题、首个 poster。
-   * 只有整轮请求都成功时才把「响应里没有」当成话题异常，
-   * 网络失败/中止不标记，避免把临时故障记成删除。
+   * **主列表里已经有的话题不再发请求**，直接拿常驻窗口里的那份；
+   * 只有主列表没有的才走 `topic_ids`。只有整轮请求都成功时才把
+   * 「响应里没有」当成话题异常，网络失败/中止不标记，避免把临时故障记成删除。
    */
   async function syncReadLater() {
     if (disposed) return;
-    const ids = [
+    const residentById = new Map<number, Topic>();
+    for (const item of readLaterStore.items()) {
+      if (!item.topicId || residentById.has(item.topicId)) continue;
+      const known = resident.topics.find((topic) => topic.id === item.topicId);
+      if (known) residentById.set(item.topicId, known);
+    }
+    const missing = [
       ...new Set(
         readLaterStore
           .items()
           .map((item) => item.topicId)
-          .filter((id): id is number => Number.isFinite(id)),
+          .filter((id): id is number => Number.isFinite(id))
+          .filter((id) => !residentById.has(id)),
       ),
     ];
-    if (ids.length === 0) {
-      readLaterView.refresh();
-      return;
-    }
 
-    const topics = new Map<number, Topic>();
+    const topics = new Map<number, Topic>(residentById);
     const users = new Map<number, TopicUser>();
+    let complete = true;
     try {
-      for (let index = 0; index < ids.length; index += READ_LATER_SYNC_CHUNK) {
-        const chunk = ids.slice(index, index + READ_LATER_SYNC_CHUNK);
+      for (let index = 0; index < missing.length; index += READ_LATER_SYNC_CHUNK) {
+        const chunk = missing.slice(index, index + READ_LATER_SYNC_CHUNK);
         const data = await fetchFeedTopicsByIds(chunk, requests.signal);
-        if (!data) continue;
+        if (!data) {
+          complete = false;
+          continue;
+        }
         for (const topic of data.topic_list?.topics || []) {
           topics.set(topic.id, topic);
         }
@@ -367,6 +380,8 @@ export function createFeedController({
       if (!item.topicId) return item;
       const fresh = topics.get(item.topicId);
       if (!fresh) {
+        // 没请求过（主列表里也没有、这轮也没问到）就无从判断，不要标记。
+        if (!complete || residentById.has(item.topicId)) return item;
         const topic: Topic = { ...(item.topic || { id: item.topicId }) };
         if (!markUnavailable(topic)) return item;
         changed = true;

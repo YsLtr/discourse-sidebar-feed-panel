@@ -8,7 +8,11 @@ import type { Topic, TopicUser } from "./feed/types";
 
 export const READ_LATER_STORAGE_KEY = "sfp_read_later_v1";
 export const READ_LATER_HEIGHT_STORAGE_KEY = "sfp_read_later_height_v1";
-export const READ_LATER_VERSION = 1;
+/**
+ * 2 = 最新条目排在最前（`items[0]` 是最新加入的）。
+ * v1 存的是加入顺序（旧 → 新），读取时整体反转一次，索引与视觉顺序从此一致。
+ */
+export const READ_LATER_VERSION = 2;
 
 export interface ReadLaterPreview {
   title?: string;
@@ -201,13 +205,17 @@ export function createReadLaterStore({
     }
     const file = parsed as { version?: number; items?: unknown };
     if (!file || typeof file !== "object") return [];
-    if (file.version !== READ_LATER_VERSION || !Array.isArray(file.items)) return [];
+    const legacy = file.version === 1;
+    if (!legacy && file.version !== READ_LATER_VERSION) return [];
+    if (!Array.isArray(file.items)) return [];
     const result: ReadLaterItem[] = [];
     for (const entry of file.items) {
       const item = normalizeItem(entry, origin);
       if (item) result.push(item);
     }
-    return result.slice(-limit);
+    // v1 是「旧 → 新」，v2 是「新 → 旧」。
+    if (legacy) result.reverse();
+    return result.slice(0, limit);
   }
 
   function readHeight(): number | null {
@@ -233,7 +241,7 @@ export function createReadLaterStore({
       return next;
     } catch (error) {
       // 配额或隐私模式：丢最旧的一半重试一次，仍失败就只保留内存态。
-      const trimmed = next.slice(Math.floor(next.length / 2));
+      const trimmed = next.slice(0, Math.ceil(next.length / 2));
       try {
         write(trimmed);
         return trimmed;
@@ -266,8 +274,20 @@ export function createReadLaterStore({
         addedAt: item.addedAt ?? now(),
       };
       const kept = items.filter((existing) => existing.url !== entry.url);
-      kept.push(entry);
-      items = writeItems(kept.slice(-limit)) as ReadLaterItem[];
+      // 最新的排最前：数组索引与「从上到下」的视觉顺序一致。
+      kept.unshift(entry);
+      items = writeItems(kept.slice(0, limit)) as ReadLaterItem[];
+      return items;
+    },
+    /** 把某条移到 `toIndex`（结果数组里的下标），用于拖动排序。 */
+    move(url: string, toIndex: number) {
+      const from = items.findIndex((item) => item.url === url);
+      if (from < 0) return items;
+      const next = items.slice();
+      const [moved] = next.splice(from, 1);
+      const target = Math.max(0, Math.min(toIndex, next.length));
+      next.splice(target, 0, moved);
+      items = writeItems(next) as ReadLaterItem[];
       return items;
     },
     remove(url: string) {
@@ -275,7 +295,7 @@ export function createReadLaterStore({
       return items;
     },
     update(next: readonly ReadLaterItem[]) {
-      items = writeItems(next.slice(-limit)) as ReadLaterItem[];
+      items = writeItems(next.slice(0, limit)) as ReadLaterItem[];
       return items;
     },
     reload() {
@@ -293,12 +313,19 @@ function cleanText(value: string | null | undefined) {
 /**
  * 从 `/onebox` 返回的片段里抽字段。只读不写，也不保存 HTML。
  * `origin` 用于把相对图片地址解析成绝对地址（DOMParser 的 baseURI 不可靠）。
+ *
+ * **200 不等于成功**：`Oneboxer.local_onebox` 在本地模板拿不到内容时返回
+ * `<a href='url'>url</a>`（`lib/oneboxer.rb:328`），控制器只判 `preview.blank?`，
+ * 所以这种兜底也是 200。编辑器把它当作失败（`prosemirror/extensions/onebox.js:694`
+ * 的正则），提示「无法加载预览」。我们照同一条线判：拿不到 onebox 容器就算失败。
  */
 export function extractPreview(
   root: ParentNode,
   origin: string,
 ): ReadLaterPreview {
-  const box = root.querySelector("aside") || root.querySelector("a");
+  // 本站模板给 `aside.onebox` / `aside.quote`，外站给 `div.onebox`；
+  // 只有纯 `<a href="url">url</a>` 兜底时两个都命中不了。
+  const box = root.querySelector("aside, .onebox");
   if (!box) return {};
 
   const image = box.querySelector("img");

@@ -65,8 +65,9 @@ const I18N: Record<string, Record<string, string>> = {
     noMore: "— 已经到底了 —",
     requestFailed: "请求失败",
     readLaterTitle: "稍后再读",
-    readLaterDropHint: "松开加入稍后再读",
-    readLaterRemove: "从稍后再读移除",
+    readLaterDropHint: "拖进加入稍后再读",
+    readLaterDropRelease: "松开后加入稍后再读",
+    readLaterDragOut: "拖出即删除",
     linkPreview: "链接预览",
   },
   en: {
@@ -134,8 +135,9 @@ const I18N: Record<string, Record<string, string>> = {
     noMore: "No more topics",
     requestFailed: "Request failed",
     readLaterTitle: "Read later",
-    readLaterDropHint: "Drop to add to Read later",
-    readLaterRemove: "Remove from Read later",
+    readLaterDropHint: "Drag into Read later",
+    readLaterDropRelease: "Release to add to Read later",
+    readLaterDragOut: "Drag out to remove",
     linkPreview: "Link preview",
   },
 };

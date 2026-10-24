@@ -254,7 +254,7 @@ export function createTopicRenderer({
     item.innerHTML = `
       <div class="sfp-topic-header">
         ${avatarHtml}
-        <div class="sfp-topic-meta-col">
+        <div class="sfp-topic-meta-col"${userProfileUrl ? ` data-user-profile-url="${escapeAttr(userProfileUrl)}" data-user-profile-link="true"` : ""}>
           <div class="sfp-topic-user-info">
             ${displayName}
             ${usernameHtml}
