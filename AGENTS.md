@@ -4,7 +4,7 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 **Project root**: `C:\Users\28676\builds\discourse\userscript`
 **Branch / remote**: `main` / `https://github.com/YsLtr/discourse-sidebar-feed-panel.git`
-**User request**: 创建新分支设计「稍后再读」，随后按裁定实现，按真站反馈逐条修，最后合并进主分支并升版 3.3.0。
+**User request**: 创建新分支设计「稍后再读」，随后按裁定实现，按真站反馈逐条修，最后合并进主分支并升版 3.3.0；随后适配话题关注度（跟踪/关注显示新回复数）。
 
 ## 本轮完成的工作
 
@@ -14,6 +14,8 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - **两轮真站反馈修正**（`08501a4`、`91c8ce0`、`49b3766`）：共 13 处，见下。
 - **第三轮真站反馈修正**（`c84537b`）：8 处，见下。行为细节以 [docs/feed/02-稍后再读.md](docs/feed/02-稍后再读.md) 为契约，不再在本文复述。
 - **第四轮真站反馈修正**（`be3d4da`）：5 处，见下。
+- **话题关注度适配**（`3.4.0`）：`notification_level >= 2`（跟踪/关注/关注第一帖）且 `unread_posts` 大于 0 时，时间后的未读圆点换成新回复数徽章（`>99` 显示 `99+`，`title` 为「N 条新回复」）。判定在 [src/feed/read-state.ts](src/feed/read-state.ts) 的 `_unreadReplyCount`，与 Discourse `Unread#unread_posts`、`topic-footer-buttons.gjs:98` 的 `>= TRACKING` 一致：静音/常规级别服务端恒给 0，从未打开过的话题同样给 0，这两种情况仍显示圆点。字段直接来自 `latest.json` 的 `notification_level`（`listable_topic_serializer.rb:24,96`），无新增请求、无新设置项。三条刷新链（手动/自动/静默）都会重新拉 topic 数据，计数随之更新；message-bus 的 `/latest` payload 不含计数，只当触发信号。`#d-menu-portals > div > div > ul` 是 Discourse 原生话题菜单，与本脚本无关。
+
 
 ## 真站反馈修掉的问题
 
@@ -61,8 +63,8 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 - 第五、六轮真站反馈（`d463df2`…`3a89c61`，共 6 个提交）：列表恢复正序、预览页内缓存、重复拖入幂等并移到最新、onebox 失败回退 OG、条目高取最近分隔线那条、隐形命中区与把手命中条，细节见契约 [docs/feed/02-稍后再读.md](docs/feed/02-稍后再读.md)。
 - `feat/read-later` 已快进合并进 `main`（`3a89c61`）；`main` 领先 `origin/main` 37 个提交。
-- 版本升到 **3.3.0**：`npm version 3.3.0 --no-git-tag-version`，`package.json` 与 `package-lock.json` 同步；根目录 3.0.0 迁移快照保持不变。
-- 完整校验全绿：typecheck 0、14 文件 / 88 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **108 项**。
+- 版本升到 **3.4.0**：`npm version 3.4.0 --no-git-tag-version`，`package.json` 与 `package-lock.json` 同步；根目录 3.0.0 迁移快照保持不变。
+- 完整校验全绿：typecheck 0、14 文件 / 90 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **111 项**。
 - **本机注意**：`npm test` 的 Vite 配置加载会 `exec("net use")`，在受限文件沙箱下报 `spawn EPERM`；需要 danger-full-access 才跑通，不是代码问题。
 
 ## 未决问题
@@ -72,7 +74,8 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - **删除与排序只有拖动**：没有按钮，也没有键盘等价操作；触摸设备上等于无法删除。
 - **分隔线只有 3 px 高**，鼠标命中区偏窄；这是「不遮挡两侧内容」的直接代价。
 - **侧边栏高度变化不会自动重新钳制**：只在渲染、窗口 `resize`、头部重建时重算。真站上 `#d-sidebar` 高度是否随滚动/头部折叠变化未实测；若会变，需要 `ResizeObserver`。
-- **未 push**：`main` 上 3.3.0 的发布尚未授权，37 个本地提交只在本地。
+- **话题关注度的真站核对**：`notification_level` 只在登录用户且 `user_data` 存在时才序列化；未登录或 `latest.json` 未带该字段时 `_unreadReplyCount` 返回 0，继续显示圆点。真站需确认跟踪/关注话题确实带出 `notification_level >= 2` 且 `unread_posts > 0`。
+- **未 push**：`main` 上 3.4.0 的发布尚未授权，本地提交只在本地。
 - **`perf/` 产物不可复算**（已记入 `docs/discourse/04-消息总线与主线程成本.md` §八）：原始 trace 与四个分析工具从未入库。
 - **`docs/` 的链接与索引无自动化校验**：新增或改名主题文件后须人工核对 `docs/INDEX.md` 与各级 `README.md` 的相对层级（子目录互链为 `../<部分>/<文件>.md`）。
 - **`CONTEXT.md` 未纳入新术语**：`Read Later Section`、`Preview Card`、`Preview Availability` 只在 `docs/feed/02-稍后再读.md` 的术语小节。
@@ -81,4 +84,4 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 真站再核对（拖入四个位置、拖昵称/用户名、拖出删除、拖动排序、拖分隔线看内容是否稳定、两标签页同步、`/onebox` 的登录与 429、语言切换），再决定是否 push。
 
-Updated: 2026-10-25 14:20 中国标准时间 +0800
+Updated: 2026-10-25 14:45 中国标准时间 +0800

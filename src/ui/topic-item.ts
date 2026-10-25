@@ -2,6 +2,7 @@ import {
   _hasUnreadMarker,
   _isTopicRead,
   _topicListUrl,
+  _unreadReplyCount,
 } from "../feed/read-state";
 import type { Topic, TopicTag, TopicUser } from "../feed/types";
 import type { createI18n } from "../i18n";
@@ -102,9 +103,14 @@ export function createTopicRenderer({
     const timeStr = formatRelativeTime(
       topic.bumped_at || topic.last_posted_at || topic.created_at,
     );
+    const replies = _unreadReplyCount(topic);
+    if (replies) {
+      const label = escapeAttr(t("newReplies", { count: replies }));
+      return `${timeStr}<span class="sfp-unread-count" title="${label}">${replies > 99 ? "99+" : replies}</span>`;
+    }
     const unreadDotClass = _hasUnreadMarker(topic)
       ? "sfp-unread-dot"
-      : "sfp-unread-dot sfp-unread-dot--hidden";
+      : "sfp-unread-dot sfp-unread-hidden";
     const unreadDotHtml = `<span class="${unreadDotClass}" aria-hidden="true"></span>`;
     return `${timeStr}${unreadDotHtml}`;
   }
@@ -310,8 +316,8 @@ export function createTopicRenderer({
     markRead(item: HTMLElement) {
       item.classList.add("sfp-read");
       item
-        .querySelector(".sfp-unread-dot")
-        ?.classList.add("sfp-unread-dot--hidden");
+        .querySelectorAll(".sfp-unread-dot, .sfp-unread-count")
+        .forEach((marker) => marker.classList.add("sfp-unread-hidden"));
     },
   };
 }

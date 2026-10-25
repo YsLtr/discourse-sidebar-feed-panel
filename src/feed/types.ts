@@ -17,6 +17,8 @@ export interface TopicReadState {
   new_posts?: number;
   unseen?: boolean;
   is_seen?: boolean;
+  /** Discourse NotificationLevels：0 静音 / 1 常规 / 2 跟踪 / 3 关注 / 4 关注第一帖。 */
+  notification_level?: number;
 }
 
 export interface CategoryPathEntry {

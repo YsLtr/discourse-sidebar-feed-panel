@@ -44,6 +44,22 @@ export function _hasUnreadMarker(topic: TopicReadState) {
   return !_isTopicRead(topic);
 }
 
+// Discourse NotificationLevels.TRACKING。关注第一帖（4）也按跟踪处理，
+// 与 Discourse 自身 `notification_level >= TRACKING` 的判定一致。
+const TRACKING_LEVEL = 2;
+
+/**
+ * 跟踪/关注的话题用「新回复数」顶替未读圆点。
+ *
+ * 服务端只对跟踪以上级别算 `unread_posts`（静音/常规恒为 0），且从未打开过的
+ * 话题 `last_read_post_number` 为空，同样为 0——那种情况继续走圆点。
+ */
+export function _unreadReplyCount(topic: TopicReadState) {
+  if (!(Number(topic.notification_level) >= TRACKING_LEVEL)) return 0;
+  const count = Number(topic.unread_posts) || Number(topic.new_posts) || 0;
+  return count > 0 ? count : 0;
+}
+
 export function _applyReadMarker(topic: TopicReadState) {
   topic.unread_posts = 0;
   topic.new_posts = 0;

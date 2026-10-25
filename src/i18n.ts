@@ -61,6 +61,7 @@ const I18N: Record<string, Record<string, string>> = {
     topicUnavailableTip:
       "此话题已从服务器列表中消失，可能被取消公开、隐藏或删除。点击可自行确认实际情况。",
     closedTitle: "此话题已被关闭；不再接受新回复",
+    newReplies: "{count} 条新回复",
     loadMore: "加载更多",
     noMore: "— 已经到底了 —",
     requestFailed: "请求失败",
@@ -130,6 +131,7 @@ const I18N: Record<string, Record<string, string>> = {
     topicUnavailableTip:
       "This topic disappeared from the server list; it may be unlisted, hidden, or deleted. Click to check what happened.",
     closedTitle: "This topic is closed; it no longer accepts replies",
+    newReplies: "{count} new replies",
     loadMore: "Load more",
     noMore: "No more topics",
     requestFailed: "Request failed",

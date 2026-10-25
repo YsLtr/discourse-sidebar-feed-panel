@@ -73,6 +73,9 @@ for (const target of [window, document]) {
 }
 fixture.head = Array.from({length:30}, (_,i) => fixture.topic(300-i));
 fixture.head[1].fancy_title = 'Translated &#8220;Alpha&#8221;';
+// 跟踪中的话题：同一位置显示新回复数（280 不被其他断言引用）。
+// 不写 last_read_post_number，否则它会变成“已读”，破坏下面的只读筛选夹具。
+Object.assign(fixture.head[20], {notification_level:2, unread_posts:3});
 window.GM_getValue = (key, fallback) => store.has(key) ? structuredClone(store.get(key)) : fallback;
 window.GM_setValue = (key, value) => { fixture.writes.push({key,value});store.set(key, structuredClone(value)); };
 window.GM_deleteValue = key => store.delete(key);
@@ -125,7 +128,8 @@ window.fetch = async (path, options) => {
   else {
     const ids=url.searchParams.get('topic_ids');
     const page=Number(url.searchParams.get('page')||0);
-    const topics=ids ? ids.split(',').map(id=>fixture.topic(Number(id))).filter(topic => !(fixture.missingTopicIds || []).includes(topic.id)) : page ? (fixture.pageTopics?.(page) || Array.from({length:30},(_,i)=>fixture.topic(200-i))) : fixture.head;
+    // topic_ids 取的是服务端当前状态，所以优先复用 head 里的那条（含已读/跟踪字段）。
+    const topics=ids ? ids.split(',').map(id=>fixture.head.find(t=>String(t.id)===id) || fixture.topic(Number(id))).filter(topic => !(fixture.missingTopicIds || []).includes(topic.id)) : page ? (fixture.pageTopics?.(page) || Array.from({length:30},(_,i)=>fixture.topic(200-i))) : fixture.head;
     data={topic_list:{topics:structuredClone(topics),more_topics_url:'/latest.json?page=8'},users:[{id:1,username:'alice',name:'Alice',avatar_template:''}]};
   }
   if(fixture.pause && url.pathname.includes('latest.json')) await new Promise(resolve => fixture.pending.push(resolve));

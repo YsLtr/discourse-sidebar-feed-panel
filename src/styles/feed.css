@@ -840,7 +840,21 @@
   opacity: 0.75;
   vertical-align: middle;
 }
-.sfp-topic-item .sfp-unread-dot.sfp-unread-dot--hidden {
+/* 跟踪/关注的话题：同一个位置换成新回复数。行高与时间文字一致，不撑高头部。 */
+.sfp-topic-item .sfp-unread-count {
+  flex: 0 0 auto;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--tertiary-med-or-tertiary, var(--tertiary));
+  color: var(--secondary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.sfp-topic-item .sfp-unread-hidden {
   visibility: hidden;
 }
 

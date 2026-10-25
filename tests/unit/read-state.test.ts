@@ -3,6 +3,7 @@ import {
   _isTopicRead,
   _topicListUrl,
   _applyReadMarker,
+  _unreadReplyCount,
 } from "../../src/feed/read-state";
 import type { TopicReadState } from "../../src/feed/types";
 
@@ -51,5 +52,36 @@ describe("shared read-state and navigation rules", () => {
       is_seen: true,
     });
     expect(_isTopicRead(topic)).toBe(true);
+  });
+});
+
+describe("unread marker for tracked topics", () => {
+  it("only tracking and watching levels replace the dot with a reply count", () => {
+    const base = { id: 1, unread_posts: 3, last_read_post_number: 1 };
+    expect(_unreadReplyCount({ ...base, notification_level: 1 })).toBe(0);
+    expect(_unreadReplyCount({ ...base, notification_level: 0 })).toBe(0);
+    expect(_unreadReplyCount({ ...base, notification_level: 2 })).toBe(3);
+    expect(_unreadReplyCount({ ...base, notification_level: 3 })).toBe(3);
+    expect(_unreadReplyCount({ ...base, notification_level: 4 })).toBe(3);
+  });
+  it("falls back to the dot when the payload has no count or no level", () => {
+    expect(_unreadReplyCount({ id: 1, unread_posts: 3 })).toBe(0);
+    expect(_unreadReplyCount({ id: 1, notification_level: 2 })).toBe(0);
+    expect(
+      _unreadReplyCount({
+        id: 1,
+        notification_level: 2,
+        unread_posts: 0,
+        new_posts: 2,
+      }),
+    ).toBe(2);
+    expect(
+      _unreadReplyCount({
+        id: 1,
+        notification_level: 2,
+        unread_posts: 0,
+        new_posts: 0,
+      }),
+    ).toBe(0);
   });
 });

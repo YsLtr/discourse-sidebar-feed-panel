@@ -94,6 +94,12 @@ try:
         })()""")
         check('the tag style cache of the current page locale is adopted without a /tags request', """!!document.querySelector('.sfp-tag[style]') &&
           !document.querySelector('iframe[src="/tags"]')""")
+        check('a tracked topic shows its new reply count where the dot would be', """(() => {
+          const item=document.querySelector('[data-topic-id="280"]');
+          const count=item.querySelector('.sfp-unread-count');
+          return !!count && count.textContent==='3' && !item.querySelector('.sfp-unread-dot') &&
+            !!count.getAttribute('title');
+        })()""")
         cdp.evaluate("""fixture.writes.length=0;
           document.querySelector('.sfp-resizer').dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,clientX:300}));
           for(let x=310;x<=450;x+=10) document.dispatchEvent(new MouseEvent('mousemove',{clientX:x}));""")
@@ -120,9 +126,10 @@ try:
           return dot===dotBefore && getComputedStyle(dot).visibility==='hidden' &&
             Math.abs(firstItem.querySelector('.sfp-topic-time').getBoundingClientRect().x-timeBefore)<0.1;
         })()""")
-        cdp.evaluate("document.querySelector('.sfp-refresh-btn').click()")
+        cdp.evaluate("fixture.head[20].unread_posts=7;document.querySelector('.sfp-refresh-btn').click()")
         wait_for("document.querySelector('.sfp-refresh-btn').getAttribute('aria-busy')!=='true'")
         check('refresh preserves locally read state', "getComputedStyle(document.querySelector('[data-topic-id=\"300\"] .sfp-unread-dot')).visibility==='hidden'")
+        check('the reply count follows the refreshed payload', "document.querySelector('[data-topic-id=\"280\"] .sfp-unread-count')?.textContent==='7'")
         cdp.evaluate("document.querySelector('.sfp-load-more').click()")
         wait_for("document.querySelectorAll('.sfp-topic-item').length===60")
         check('pagination follows local page depth', "fixture.requests.some(r=>r.path==='/latest.json?order=activity&page=1') && !fixture.requests.some(r=>r.path.includes('page=8'))")
@@ -265,6 +272,10 @@ try:
               document.querySelector('[data-filter="all"]').click();""")
             wait_for("!!document.querySelector('[data-topic-id=\"4000\"]')")
             check('filter changes in the same message turn cannot strand a queued silent refresh', "fixture.requests.length===1 && fixture.requests[0].path.includes('topic_ids=4000')")
+            cdp.evaluate("""fixture.requests.length=0;fixture.head[20].unread_posts=4;
+              fixture.publish('/latest',{message_type:'latest',topic_id:280,payload:{bumped_at:new Date().toISOString(),category_id:2,archetype:'regular'}});""")
+            wait_for("document.querySelector('[data-topic-id=\"280\"] .sfp-unread-count')?.textContent==='4'")
+            check('a silent refresh re-reads the reply count of a tracked topic', "fixture.requests.some(r=>r.path.includes('topic_ids=280'))")
             cdp.evaluate("fixture.requests.length=0;document.documentElement.lang='en'")
             wait_for("document.querySelector('.sfp-tab-bar [data-tab=\"all\"]')?.textContent.includes('All') && document.querySelectorAll('.sfp-topic-item').length===30")
             check('a page locale change without a reload rebuilds the panel in place', """(() => {
@@ -1007,7 +1018,7 @@ try:
           const item=document.querySelector('.sfp-rl-item');
           return item.dataset.url==='/t/294' && !!item.querySelector('.sfp-topic-item');
         })()""")
-        check('an unread saved topic shows the unread marker before it is opened', """!!document.querySelector('.sfp-rl-item .sfp-unread-dot:not(.sfp-unread-dot--hidden)')""")
+        check('an unread saved topic shows the unread marker before it is opened', """!!document.querySelector('.sfp-rl-item .sfp-unread-dot:not(.sfp-unread-hidden)')""")
         cdp.evaluate("document.querySelector('.sfp-rl-item .sfp-topic-item').click()")
         wait_for("!!document.querySelector('.sfp-rl-item .sfp-topic-item.sfp-read')")
         check('opening a saved topic keeps it in the list and persists the read marker', """(() => {
