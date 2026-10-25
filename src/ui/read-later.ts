@@ -283,23 +283,11 @@ export function createReadLaterView({
       wrapper.append(element);
     } else {
       wrapper.append(cardElement(item));
-      // 话题先等 latest：拿不到快照才由 settleTopicPreviews() 发 /onebox，
-      // 不在渲染时同时发两路请求。
+      // 话题只等 latest：拿不到快照就停在降级卡片（或由控制器标成话题异常），
+      // 绝不退到 /onebox——预览会把「不存在/看不到」渲染成一张像模像样的卡片。
       if (item.kind === "link") schedulePreview(item);
     }
     return wrapper;
-  }
-
-  /**
-   * latest 同步结束后调用一次：仍然没有快照的话题才退到 `/onebox` 预览。
-   * 话题不在渲染时排预览，正是为了先让 latest 有机会把快照补上。
-   */
-  function settleTopicPreviews() {
-    if (getScope().signal.aborted) return;
-    for (const item of items()) {
-      if (item.kind !== "topic" || knownTopic(item)) continue;
-      schedulePreview(item);
-    }
   }
 
   /**
@@ -839,7 +827,5 @@ export function createReadLaterView({
     refresh: () => render(),
     /** 页内快照缓存命中：控制器在「重新加入」时直接复用，不再请求 latest。 */
     cachedTopic: (url: string) => topicCache.get(url),
-    /** latest 同步结束（成功或失败）后调用：没拿到快照的话题才退到 /onebox。 */
-    settleTopicPreviews,
   };
 }

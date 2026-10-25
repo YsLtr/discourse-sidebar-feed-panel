@@ -369,7 +369,6 @@ export function createFeedController({
    */
   async function syncReadLater() {
     if (disposed) return;
-    const signal = requests.signal;
     const residentById = new Map<number, Topic>();
     for (const item of readLaterStore.items()) {
       if (!item.topicId || residentById.has(item.topicId)) continue;
@@ -392,7 +391,7 @@ export function createFeedController({
     try {
       for (let index = 0; index < missing.length; index += READ_LATER_SYNC_CHUNK) {
         const chunk = missing.slice(index, index + READ_LATER_SYNC_CHUNK);
-        const data = await fetchFeedTopicsByIds(chunk, signal);
+        const data = await fetchFeedTopicsByIds(chunk, requests.signal);
         if (!data) {
           complete = false;
           continue;
@@ -403,9 +402,6 @@ export function createFeedController({
         for (const user of data.users || []) users.set(user.id, user);
       }
     } catch (e) {
-      // latest 请求失败（不是被新一轮请求作废）：这些话题拿不到快照，
-      // 交给视图退到 /onebox 预览。
-      if (!signal.aborted) readLaterView.settleTopicPreviews();
       return;
     }
     if (disposed) return;
@@ -435,9 +431,6 @@ export function createFeedController({
     });
     if (changed) readLaterStore.update(next as ReadLaterItem[]);
     readLaterView.refresh();
-    // 这一轮没补上快照的话题（请求成功但不在响应里）已在上面标成异常；
-    // 其余没拿到的才退到预览。
-    readLaterView.settleTopicPreviews();
   }
 
   /**

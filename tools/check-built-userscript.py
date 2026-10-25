@@ -896,32 +896,31 @@ try:
           return asked===topicRequestsBefore &&
             !fixture.oneboxRequests.some(u=>u.endsWith('/t/9010'));
         })()""")
-        # latest 请求失败才退到 onebox。
+        # latest 拿不到快照（请求失败或 200 但列表里没有）都不回退预览。
         cdp.evaluate("""window.topicOneboxBefore=fixture.oneboxRequests.length;
           fixture.failNext=true;
           dragTo('.sfp-read-later', location.origin + '/t/9011');""")
-        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9011\"] .sfp-rl-card')")
-        check('a topic whose latest fetch fails falls back to the onebox preview', """(() => {
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9011\"]')")
+        time.sleep(.45)
+        check('a topic whose latest fetch fails never falls back to a preview', """(() => {
           const item=document.querySelector('.sfp-rl-item[data-url="/t/9011"]');
-          return fixture.oneboxRequests.length===topicOneboxBefore+1 &&
-            fixture.oneboxRequests.at(-1).endsWith('/t/9011') &&
-            !!item?.querySelector('.sfp-rl-card') && !item.querySelector('.sfp-topic-item');
+          return fixture.oneboxRequests.length===topicOneboxBefore &&
+            !!item?.querySelector('.sfp-rl-fallback') && !item.querySelector('.sfp-rl-card');
         })()""")
-        # 回退拿到的卡片进页内预览缓存：删掉再加回来（latest 仍失败）不再请求。
-        cdp.evaluate("""removeRlItem('/t/9011');
-          window.topicOneboxBefore2=fixture.oneboxRequests.length;""")
-        wait_for("!document.querySelector('.sfp-rl-item[data-url=\"/t/9011\"]')")
-        cdp.evaluate("""fixture.failNext=true;
-          dragTo('.sfp-read-later', location.origin + '/t/9011');""")
-        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9011\"] .sfp-rl-card')")
-        time.sleep(.35)
-        check('a topic preview fetched after the latest failure is cached for the page', """(() => {
-          const item=document.querySelector('.sfp-rl-item[data-url="/t/9011"]');
-          return fixture.oneboxRequests.length===topicOneboxBefore2 &&
-            !!item?.querySelector('.sfp-rl-card');
-        })()""")
+        # 200 但话题不在响应里：标成话题异常，同样一次预览请求都不发。
         cdp.evaluate("""fixture.failNext=false;
-          removeRlItem('/t/9011'); removeRlItem('/t/9010');""")
+          fixture.missingTopicIds=[9012];
+          window.missingOneboxBefore=fixture.oneboxRequests.length;
+          dragTo('.sfp-read-later', location.origin + '/t/9012');""")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9012\"] .sfp-topic-unavailable')")
+        time.sleep(.45)
+        check('a topic missing from the latest response is marked unavailable, not previewed', """(() => {
+          const item=document.querySelector('.sfp-rl-item[data-url="/t/9012"]');
+          return fixture.oneboxRequests.length===missingOneboxBefore &&
+            !!item?.querySelector('.sfp-topic-unavailable') && !item.querySelector('.sfp-rl-card');
+        })()""")
+        cdp.evaluate("""fixture.missingTopicIds=[];
+          removeRlItem('/t/9012'); removeRlItem('/t/9011'); removeRlItem('/t/9010');""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===2")
         # onebox 失败 → 读目标页 head 的 OG 标签兜底。
         cdp.evaluate("""fixture.pageOg={title:'OG Title',description:'OG description text',image:'/uploads/og.png'};
@@ -981,11 +980,11 @@ try:
         wait_for("document.querySelectorAll('.sfp-rl-item').length===3")
         time.sleep(.4)
         check('preview requests stop entirely after the downgrade', """(() => {
-          // alice、/t/9011（latest 失败后回退）、erin、bob 两次（失败后重试）、
-          // dave、/c/dev/3；403 之后 /about 一次都不发。/t/299 与 /t/9010 由
-          // latest 拿到快照，不该发预览请求。
+          // alice、erin、bob 两次（失败后重试）、dave、/c/dev/3；403 之后
+          // /about 一次都不发。/t/299、/t/9010、/t/9011、/t/9012 都是话题，
+          // 话题从不发预览请求。
           const about = document.querySelector('.sfp-rl-item[data-url="/about"]');
-          return fixture.oneboxRequests.length===7 &&
+          return fixture.oneboxRequests.length===6 &&
             fixture.oneboxRequests.at(-1).endsWith('/c/dev/3') &&
             !!about && !!about.querySelector('.sfp-rl-fallback');
         })()""")
