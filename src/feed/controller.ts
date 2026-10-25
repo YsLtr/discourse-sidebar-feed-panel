@@ -309,22 +309,31 @@ export function createFeedController({
   }
 
   function addReadLaterLink(link: ParsedReadLaterLink, title: string) {
-    // 主列表里已经有这个话题时直接复制快照，省掉一次补全请求。
+    // 主列表里已经有这个话题时直接复制快照；否则用页内快照缓存
+    // （删掉再加回来直接复用），两处都没有才请求 latest。
     const known = link.topicId
       ? resident.topics.find((topic) => topic.id === link.topicId)
       : undefined;
     const posterId = known?.posters?.[0]?.user_id;
+    const cached = known ? undefined : readLaterView.cachedTopic(link.url);
     readLaterStore.add({
       url: link.url,
       kind: link.kind,
       topicId: link.topicId,
-      title: title || (known && selectTopicTitle(known)) || readLaterFallbackTitle(link.url),
-      topic: known,
-      user: posterId === undefined ? undefined : resident.users[posterId],
+      title:
+        title ||
+        (known ? selectTopicTitle(known) : cached?.title) ||
+        readLaterFallbackTitle(link.url),
+      topic: known || cached?.topic,
+      user: known
+        ? posterId === undefined
+          ? undefined
+          : resident.users[posterId]
+        : cached?.user,
     });
     readLaterView.refresh();
-    // 快照已经复制过来了，这一次不必再取；下一次主列表刷新会统一校正。
-    if (!known) void syncReadLater();
+    // 快照已经拿到了，这一次不必再取；下一次主列表刷新会统一校正。
+    if (!known && !cached) void syncReadLater();
   }
 
   /**
@@ -360,6 +369,7 @@ export function createFeedController({
    */
   async function syncReadLater() {
     if (disposed) return;
+    const signal = requests.signal;
     const residentById = new Map<number, Topic>();
     for (const item of readLaterStore.items()) {
       if (!item.topicId || residentById.has(item.topicId)) continue;
@@ -382,7 +392,7 @@ export function createFeedController({
     try {
       for (let index = 0; index < missing.length; index += READ_LATER_SYNC_CHUNK) {
         const chunk = missing.slice(index, index + READ_LATER_SYNC_CHUNK);
-        const data = await fetchFeedTopicsByIds(chunk, requests.signal);
+        const data = await fetchFeedTopicsByIds(chunk, signal);
         if (!data) {
           complete = false;
           continue;
@@ -393,6 +403,9 @@ export function createFeedController({
         for (const user of data.users || []) users.set(user.id, user);
       }
     } catch (e) {
+      // latest 请求失败（不是被新一轮请求作废）：这些话题拿不到快照，
+      // 交给视图退到 /onebox 预览。
+      if (!signal.aborted) readLaterView.settleTopicPreviews();
       return;
     }
     if (disposed) return;
@@ -422,6 +435,9 @@ export function createFeedController({
     });
     if (changed) readLaterStore.update(next as ReadLaterItem[]);
     readLaterView.refresh();
+    // 这一轮没补上快照的话题（请求成功但不在响应里）已在上面标成异常；
+    // 其余没拿到的才退到预览。
+    readLaterView.settleTopicPreviews();
   }
 
   /**

@@ -89,6 +89,15 @@ export function createReadLaterView({
    * 再加回来不该再发一次 `/onebox`。只缓存成功结果——失败不缓存，重加即重试。
    */
   const previewCache = new Map<string, ReadLaterPreview>();
+  /**
+   * 页内话题快照缓存：条目被拖出删除后 `item.topic` 随记录一起消失，
+   * 再加回来直接复用，不再请求一次 latest。与 `previewCache` 同属页内状态，
+   * 刷新即失效；每次渲染到带快照的条目时顺手更新。
+   */
+  const topicCache = new Map<
+    string,
+    { topic: Topic; user?: TopicUser; title: string }
+  >();
   let previewQueue: string[] = [];
   let previewBusy = false;
 
@@ -243,15 +252,29 @@ export function createReadLaterView({
     return fallback;
   }
 
+  /**
+   * 话题快照：条目自带的优先，其次用页内缓存。渲染到自带快照时顺手写进缓存，
+   * 这样删除再加回来（控制器经 `cachedTopic()` 取）不必再问一次服务端。
+   */
+  function knownTopic(item: ReadLaterItem) {
+    if (item.topic) {
+      const snapshot = { topic: item.topic, user: item.user, title: item.title };
+      topicCache.set(item.url, snapshot);
+      return snapshot;
+    }
+    return topicCache.get(item.url) || null;
+  }
+
   function renderItem(item: ReadLaterItem) {
     const wrapper = document.createElement("div");
     wrapper.className = "sfp-rl-item";
     wrapper.dataset.url = item.url;
 
-    if (item.kind === "topic" && item.topic) {
-      const element = renderer.createTopicItem(item.topic, false, {
+    const snapshot = item.kind === "topic" ? knownTopic(item) : null;
+    if (snapshot) {
+      const element = renderer.createTopicItem(snapshot.topic, false, {
         href: item.url,
-        user: item.user,
+        user: snapshot.user,
         onActivate: () => {
           markRead(item.url);
           renderer.markRead(element);
@@ -260,9 +283,23 @@ export function createReadLaterView({
       wrapper.append(element);
     } else {
       wrapper.append(cardElement(item));
-      schedulePreview(item);
+      // 话题先等 latest：拿不到快照才由 settleTopicPreviews() 发 /onebox，
+      // 不在渲染时同时发两路请求。
+      if (item.kind === "link") schedulePreview(item);
     }
     return wrapper;
+  }
+
+  /**
+   * latest 同步结束后调用一次：仍然没有快照的话题才退到 `/onebox` 预览。
+   * 话题不在渲染时排预览，正是为了先让 latest 有机会把快照补上。
+   */
+  function settleTopicPreviews() {
+    if (getScope().signal.aborted) return;
+    for (const item of items()) {
+      if (item.kind !== "topic" || knownTopic(item)) continue;
+      schedulePreview(item);
+    }
   }
 
   /**
@@ -800,5 +837,9 @@ export function createReadLaterView({
     },
     /** 主列表刷新后重渲染（话题快照已由控制器更新）。 */
     refresh: () => render(),
+    /** 页内快照缓存命中：控制器在「重新加入」时直接复用，不再请求 latest。 */
+    cachedTopic: (url: string) => topicCache.get(url),
+    /** latest 同步结束（成功或失败）后调用：没拿到快照的话题才退到 /onebox。 */
+    settleTopicPreviews,
   };
 }

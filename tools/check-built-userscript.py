@@ -873,6 +873,56 @@ try:
             fixture.oneboxRequests.length===requestsBeforeRedrag &&
             !!item && !!item.querySelector('.sfp-rl-card');
         })()""")
+        # 话题先取 latest，拿不到快照才退到 /onebox：成功时不并发预览请求。
+        # 9010 不在主列表里，所以必须靠 topic_ids 补快照。
+        cdp.evaluate("""dragTo('.sfp-read-later', location.origin + '/t/9010');""")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9010\"] .sfp-topic-item')")
+        time.sleep(.35)
+        check('a topic resolved by latest never fires a onebox preview', """(() => {
+          const item=document.querySelector('.sfp-rl-item[data-url="/t/9010"]');
+          return fixture.requests.some(r=>r.path.includes('topic_ids=9010')) &&
+            !fixture.oneboxRequests.some(u=>u.endsWith('/t/9010')) &&
+            !!item?.querySelector('.sfp-topic-item') && !item.querySelector('.sfp-rl-card');
+        })()""")
+        # 页内快照缓存：删掉再加回来不再请求 latest，直接渲染话题条目。
+        cdp.evaluate("""window.topicRequestsBefore=fixture.requests.filter(r=>r.path.includes('topic_ids')).length;
+          removeRlItem('/t/9010');""")
+        wait_for("!document.querySelector('.sfp-rl-item[data-url=\"/t/9010\"]')")
+        cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/t/9010')")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9010\"] .sfp-topic-item')")
+        time.sleep(.3)
+        check('re-adding a removed topic reuses the page snapshot cache', """(() => {
+          const asked=fixture.requests.filter(r=>r.path.includes('topic_ids')).length;
+          return asked===topicRequestsBefore &&
+            !fixture.oneboxRequests.some(u=>u.endsWith('/t/9010'));
+        })()""")
+        # latest 请求失败才退到 onebox。
+        cdp.evaluate("""window.topicOneboxBefore=fixture.oneboxRequests.length;
+          fixture.failNext=true;
+          dragTo('.sfp-read-later', location.origin + '/t/9011');""")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9011\"] .sfp-rl-card')")
+        check('a topic whose latest fetch fails falls back to the onebox preview', """(() => {
+          const item=document.querySelector('.sfp-rl-item[data-url="/t/9011"]');
+          return fixture.oneboxRequests.length===topicOneboxBefore+1 &&
+            fixture.oneboxRequests.at(-1).endsWith('/t/9011') &&
+            !!item?.querySelector('.sfp-rl-card') && !item.querySelector('.sfp-topic-item');
+        })()""")
+        # 回退拿到的卡片进页内预览缓存：删掉再加回来（latest 仍失败）不再请求。
+        cdp.evaluate("""removeRlItem('/t/9011');
+          window.topicOneboxBefore2=fixture.oneboxRequests.length;""")
+        wait_for("!document.querySelector('.sfp-rl-item[data-url=\"/t/9011\"]')")
+        cdp.evaluate("""fixture.failNext=true;
+          dragTo('.sfp-read-later', location.origin + '/t/9011');""")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9011\"] .sfp-rl-card')")
+        time.sleep(.35)
+        check('a topic preview fetched after the latest failure is cached for the page', """(() => {
+          const item=document.querySelector('.sfp-rl-item[data-url="/t/9011"]');
+          return fixture.oneboxRequests.length===topicOneboxBefore2 &&
+            !!item?.querySelector('.sfp-rl-card');
+        })()""")
+        cdp.evaluate("""fixture.failNext=false;
+          removeRlItem('/t/9011'); removeRlItem('/t/9010');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===2")
         # onebox 失败 → 读目标页 head 的 OG 标签兜底。
         cdp.evaluate("""fixture.pageOg={title:'OG Title',description:'OG description text',image:'/uploads/og.png'};
           fixture.oneboxHtml=()=>'<a href="#">nothing</a>';
@@ -931,10 +981,11 @@ try:
         wait_for("document.querySelectorAll('.sfp-rl-item').length===3")
         time.sleep(.4)
         check('preview requests stop entirely after the downgrade', """(() => {
-          // alice 两次（删了再加）、bob 两次（失败后重试）、erin、/c/dev/3；
-          // 403 之后 /about 一次都不发。
+          // alice、/t/9011（latest 失败后回退）、erin、bob 两次（失败后重试）、
+          // dave、/c/dev/3；403 之后 /about 一次都不发。/t/299 与 /t/9010 由
+          // latest 拿到快照，不该发预览请求。
           const about = document.querySelector('.sfp-rl-item[data-url="/about"]');
-          return fixture.oneboxRequests.length===6 &&
+          return fixture.oneboxRequests.length===7 &&
             fixture.oneboxRequests.at(-1).endsWith('/c/dev/3') &&
             !!about && !!about.querySelector('.sfp-rl-fallback');
         })()""")
