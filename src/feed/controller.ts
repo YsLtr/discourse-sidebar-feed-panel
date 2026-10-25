@@ -407,13 +407,14 @@ export function createFeedController({
 
   /**
    * 主列表刷新后校正已保存的话题：统计、标题、首个 poster。
-   * **主列表里已经有的话题不再发请求**，直接拿常驻窗口里的那份；其余先按批走
-   * `topic_ids`，仍然拿不到的一条条按 id 取 `/t/<id>.json`。
+   * **主列表里已经有的话题不再发请求**，直接拿常驻窗口里的那份；其余按批走
+   * `topic_ids`，仍然拿不到的一条条按 id 取 `/t/<id>.json`，再不行才退到
+   * 带 `category_id` 的 `/onebox`。
    *
-   * 后者是必要的：`/latest.json?topic_ids=` 会剔掉静音分类里的话题
+   * 后两步是必要的：`/latest.json?topic_ids=` 会剔掉静音分类里的话题
    * （`TopicQuery#remove_muted_categories`），而未列出/私密话题同样不在列表里。
    * 用户把它拖进稍后再读就是要看到它，不能因为「列表接口不给」就显示异常。
-   * 只有 `/t/<id>.json` 明确回 404/403 才标异常，网络失败与中止都不标记。
+   * 三步都拿不到才标异常，网络失败与中止都不标记。
    */
   async function syncReadLater() {
     if (disposed) return;
