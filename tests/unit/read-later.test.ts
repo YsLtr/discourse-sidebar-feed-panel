@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createReadLaterStore,
+  extractOpenGraph,
   extractPreview,
   parseReadLaterLink,
   readLaterFallbackTitle,
@@ -78,16 +79,17 @@ describe("readLaterFallbackTitle", () => {
 });
 
 describe("createReadLaterStore", () => {
-  it("keeps the newest entry first and ignores a duplicate", () => {
+  it("keeps the newest entry first and moves a duplicate to the front", () => {
     const storage = fakeStorage();
     const store = createReadLaterStore({ storage, origin: ORIGIN });
-    store.add(item("/a"));
+    store.add(item("/a", { preview: { title: "A preview" } }));
     store.add(item("/b"));
     expect(store.items().map((entry) => entry.url)).toEqual(["/b", "/a"]);
-    // 已在列表里：不移动、不覆盖（覆盖会丢掉 preview/topic 快照）。
+    // 再拖一次 = 移到最新位置；新记录没带 preview，必须保留旧的。
     store.add(item("/a", { title: "again" }));
-    expect(store.items().map((entry) => entry.url)).toEqual(["/b", "/a"]);
-    expect(store.items()[1].title).toBe("/a");
+    expect(store.items().map((entry) => entry.url)).toEqual(["/a", "/b"]);
+    expect(store.items()[0].title).toBe("again");
+    expect(store.items()[0].preview?.title).toBe("A preview");
   });
 
   it("drops the oldest entry past the limit", () => {
@@ -205,14 +207,15 @@ describe("createReadLaterStore", () => {
   });
 });
 
+// 用最小的假节点树代替 DOMParser：所有节点共用一张选择器表，
+// 这样 `box.querySelector("img")` 与 `root.querySelector("aside")` 都能命中。
+type Stub = {
+  textContent: string;
+  getAttribute(name: string): string | null;
+  querySelector(selector: string): Stub | null;
+};
+
 describe("extractPreview", () => {
-  // 用最小的假节点树代替 DOMParser：所有节点共用一张选择器表，
-  // 这样 `box.querySelector("img")` 与 `root.querySelector("aside")` 都能命中。
-  type Stub = {
-    textContent: string;
-    getAttribute(name: string): string | null;
-    querySelector(selector: string): Stub | null;
-  };
   function makeRoot(table: Record<string, { text?: string; src?: string }>) {
     const nodes = new Map<string, Stub>();
     const lookup = (selector: string) => nodes.get(selector) ?? null;
@@ -283,5 +286,57 @@ describe("extractPreview", () => {
 
   it("returns nothing when the payload has no usable card", () => {
     expect(extractPreview(makeRoot({}), ORIGIN)).toEqual({});
+  });
+});
+
+describe("extractOpenGraph", () => {
+  // 同样用假节点树：`extractOpenGraph` 只查 `meta[property=...]` 与 `title`。
+  function head(table: Record<string, { content?: string; text?: string }>) {
+    const nodes = new Map<string, Stub>();
+    const lookup = (selector: string) => nodes.get(selector) ?? null;
+    for (const [selector, spec] of Object.entries(table)) {
+      nodes.set(selector, {
+        textContent: spec.text ?? "",
+        getAttribute: (name) => (name === "content" ? (spec.content ?? null) : null),
+        querySelector: lookup,
+      });
+    }
+    return { querySelector: lookup } as unknown as ParentNode;
+  }
+
+  it("reads title, description and image from Open Graph tags", () => {
+    const preview = extractOpenGraph(
+      head({
+        'meta[property="og:title"]': { content: "OG Title" },
+        'meta[property="og:description"]': { content: "OG description" },
+        'meta[property="og:image"]': { content: "/uploads/og.png" },
+      }),
+      ORIGIN,
+    );
+    expect(preview.title).toBe("OG Title");
+    expect(preview.excerpt).toBe("OG description");
+    expect(preview.imageUrl).toBe(`${ORIGIN}/uploads/og.png`);
+  });
+
+  it("falls back to the title element and truncates a long description", () => {
+    const preview = extractOpenGraph(
+      head({
+        title: { text: "Plain Title" },
+        'meta[property="og:description"]': { content: "x".repeat(300) },
+      }),
+      ORIGIN,
+    );
+    expect(preview.title).toBe("Plain Title");
+    expect(preview.excerpt?.length).toBe(200);
+  });
+
+  it("drops non-http images and returns nothing when there is no metadata", () => {
+    expect(
+      extractOpenGraph(
+        head({ 'meta[property="og:image"]': { content: "javascript:alert(1)" } }),
+        ORIGIN,
+      ),
+    ).toEqual({});
+    expect(extractOpenGraph(head({}), ORIGIN)).toEqual({});
   });
 });

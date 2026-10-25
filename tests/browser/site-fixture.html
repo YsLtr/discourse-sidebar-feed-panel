@@ -88,6 +88,8 @@ window.Discourse = {SiteSettings:{default_locale:'zh_CN'},__container__:{lookup:
 fixture.currentUser = null;
 fixture.oneboxRequests = [];
 fixture.oneboxStatus = 200;
+fixture.headRequests = [];
+fixture.pageOg = null;
 window.require = () => ({default:{routeTo:path => history.pushState({},'',path)}});
 window.fetch = async (path, options) => {
   const url = new URL(path,location.origin);
@@ -99,6 +101,17 @@ window.fetch = async (path, options) => {
     const target = url.searchParams.get('url') || '';
     const html = fixture.oneboxHtml ? fixture.oneboxHtml(target) : `<aside class="onebox"><article class="onebox-body"><img src="/uploads/preview.png" class="thumbnail"><h3><a href="${target}">Preview title</a></h3><p>Preview excerpt</p></article></aside>`;
     return new Response(html,{headers:{'Content-Type':'text/html'}});
+  }
+  // onebox 失败后的 OG 回退：返回一个只有 head 的页面。
+  if(!/\.json$/.test(url.pathname) && fixture.pageOg) {
+    fixture.headRequests.push(url.pathname);
+    const og = fixture.pageOg;
+    const head = `<html><head><title>${og.title || ''} - Site</title>` +
+      (og.title ? `<meta property="og:title" content="${og.title}">` : '') +
+      (og.description ? `<meta property="og:description" content="${og.description}">` : '') +
+      (og.image ? `<meta property="og:image" content="${og.image}">` : '') +
+      `</head><body><div id="main-outlet">page body</div></body></html>`;
+    return new Response(head,{headers:{'Content-Type':'text/html'}});
   }
   if(fixture.failNext && url.pathname.includes('latest.json')) { fixture.failNext=false;return new Response('temporary failure',{status:503}); }
   let data;

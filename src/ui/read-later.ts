@@ -9,6 +9,7 @@ import type { createI18n } from "../i18n";
 import type { createDiscourseBridge } from "../platform/discourse";
 import type { Lifetime } from "../platform/lifetime";
 import {
+  extractOpenGraph,
   extractPreview,
   parseReadLaterLink,
   type ParsedReadLaterLink,
@@ -41,6 +42,11 @@ interface ReadLaterViewDependencies {
     url: string,
     signal: AbortSignal,
   ): Promise<{ status: number; html: string }>;
+  /** onebox 失败后的回退：目标页的 `<head>` 片段。 */
+  fetchPageHead(
+    url: string,
+    signal: AbortSignal,
+  ): Promise<{ status: number; head: string }>;
   getFeedScroll(): HTMLElement | null;
   onLayoutChange(): void;
   getScope(): Lifetime;
@@ -61,6 +67,7 @@ export function createReadLaterView({
   onAdd,
   markRead,
   fetchOnebox,
+  fetchPageHead,
   getFeedScroll,
   onLayoutChange,
   getScope,
@@ -148,10 +155,10 @@ export function createReadLaterView({
             ),
           );
         } else {
-          failedUrls.add(url);
+          await fallbackToOpenGraph(url);
         }
       } else {
-        failedUrls.add(url);
+        await fallbackToOpenGraph(url);
       }
       previewBusy = false;
       render();
@@ -159,6 +166,36 @@ export function createReadLaterView({
         getScope().timeout(() => pumpPreviewQueue(), READ_LATER_ONBOX_GAP_MS);
       }
     })();
+  }
+
+  /**
+   * `/onebox` 拿不到可用卡片时，退一步读目标页自己的 OG 标签。
+   * 成功则缓存并替换卡片；失败才记进 `failedUrls`（失败不缓存，重加即重试）。
+   */
+  async function fallbackToOpenGraph(url: string) {
+    let head = "";
+    let status = 0;
+    try {
+      const result = await fetchPageHead(url, getScope().signal);
+      status = result.status;
+      head = result.head;
+    } catch {
+      status = 0;
+    }
+    if (status >= 200 && status < 300 && head) {
+      const preview = extractOpenGraph(
+        new DOMParser().parseFromString(head, "text/html"),
+        location.origin,
+      );
+      if (preview.title || preview.excerpt || preview.imageUrl) {
+        previewCache.set(url, preview);
+        updateItems(
+          items().map((item) => (item.url === url ? { ...item, preview } : item)),
+        );
+        return;
+      }
+    }
+    failedUrls.add(url);
   }
 
   function schedulePreview(item: ReadLaterItem) {

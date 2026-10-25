@@ -758,22 +758,44 @@ try:
             fixture.oneboxRequests.filter(u=>u.endsWith('/u/alice')).length===1 &&
             !!item && !!item.querySelector('.sfp-rl-card');
         })()""")
-        # 直接重新拖入已在列表里的链接：幂等 no-op，不重排、不丢预览、不再请求。
+        # 直接重新拖入已在列表里的链接：移到最新位置，保留预览，不再请求。
+        cdp.evaluate("""dragTo('.sfp-read-later', location.origin + '/t/299');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===2")
         cdp.evaluate("""window.rlUrls=() => [...document.querySelectorAll('.sfp-rl-item')].map(i=>i.dataset.url);
           window.orderBeforeRedrag=rlUrls();
           window.requestsBeforeRedrag=fixture.oneboxRequests.length;
           dragTo('.sfp-read-later', location.origin + '/u/alice');""")
         time.sleep(.35)
-        check('re-dragging an existing link changes nothing', """(() => {
+        check('re-dragging an existing link moves it to the newest position', """(() => {
           const item=document.querySelector('.sfp-rl-item[data-url="/u/alice"]');
-          return JSON.stringify(rlUrls())===JSON.stringify(orderBeforeRedrag) &&
+          const order=rlUrls();
+          return order[0]==='/u/alice' && order[1]==='/t/299' &&
+            orderBeforeRedrag[0]==='/t/299' &&
+            order.length===orderBeforeRedrag.length &&
             fixture.oneboxRequests.length===requestsBeforeRedrag &&
             !!item && !!item.querySelector('.sfp-rl-card');
         })()""")
+        # onebox 失败 → 读目标页 head 的 OG 标签兜底。
+        cdp.evaluate("""fixture.pageOg={title:'OG Title',description:'OG description text',image:'/uploads/og.png'};
+          fixture.oneboxHtml=()=>'<a href="#">nothing</a>';
+          dragTo('.sfp-read-later', location.origin + '/u/erin');""")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/u/erin\"] .sfp-rl-card')")
+        check('a failed onebox falls back to the page Open Graph tags', """(() => {
+          const item=document.querySelector('.sfp-rl-item[data-url="/u/erin"]');
+          const card=item.querySelector('.sfp-rl-card');
+          return fixture.headRequests.includes('/u/erin') &&
+            card.querySelector('.sfp-rl-card-title').textContent==='OG Title' &&
+            card.querySelector('.sfp-rl-card-excerpt').textContent==='OG description text' &&
+            card.querySelector('.sfp-rl-card-image').getAttribute('src')===location.origin + '/uploads/og.png';
+        })()""")
+        cdp.evaluate("""fixture.pageOg=null;
+          fixture.oneboxHtml=null;
+          removeRlItem('/u/erin');""")
+        wait_for("!document.querySelector('.sfp-rl-item[data-url=\"/u/erin\"]')")
         # 200 也可能是失败：`<a href="url">url</a>` 兜底照样是 200，必须按失败处理。
         cdp.evaluate("""fixture.oneboxHtml=(target)=>`<a href="${target}">${target}</a>`;
           dragTo('.sfp-read-later', location.origin + '/u/bob');""")
-        wait_for("document.querySelectorAll('.sfp-rl-item').length===2")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===3")
         time.sleep(.4)
         check('a 200 with the bare-anchor fallback counts as a failed preview', """(() => {
           const item=document.querySelector('.sfp-rl-item[data-url="/u/bob"]');
@@ -783,7 +805,7 @@ try:
         # 失败不进缓存：删掉再加回来要重新试一次，而不是永远卡在降级卡片。
         cdp.evaluate("""window.bobBefore=fixture.oneboxRequests.filter(u=>u.endsWith('/u/bob')).length;
           removeRlItem('/u/bob');""")
-        wait_for("document.querySelectorAll('.sfp-rl-item').length===1")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===2")
         cdp.evaluate("dragTo('.sfp-read-later', location.origin + '/u/bob')")
         wait_for("fixture.oneboxRequests.filter(u=>u.endsWith('/u/bob')).length>bobBefore")
         check('a failed preview is retried after the entry is re-added', """(() => {
@@ -811,9 +833,10 @@ try:
         wait_for("document.querySelectorAll('.sfp-rl-item').length===3")
         time.sleep(.4)
         check('preview requests stop entirely after the downgrade', """(() => {
-          // alice 两次（删了再加）、bob、dave、/c/dev/3；403 之后 /about 一次都不发。
+          // alice 两次（删了再加）、bob 两次（失败后重试）、erin、/c/dev/3；
+          // 403 之后 /about 一次都不发。
           const about = document.querySelector('.sfp-rl-item[data-url="/about"]');
-          return fixture.oneboxRequests.length===5 &&
+          return fixture.oneboxRequests.length===6 &&
             fixture.oneboxRequests.at(-1).endsWith('/c/dev/3') &&
             !!about && !!about.querySelector('.sfp-rl-fallback');
         })()""")

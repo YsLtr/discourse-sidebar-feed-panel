@@ -269,17 +269,22 @@ export function createReadLaterStore({
       }
     },
     /**
-     * 加入一条。已经存在的 URL 是**幂等 no-op**：不移动位置、不覆盖已有记录。
-     * 覆盖会顺手丢掉 `preview`/`topic` 快照，而「已在列表里」本身就是全部信息——
-     * 拖进来第二次不该改变任何东西。
+     * 加入一条。已经存在的 URL 移到最新位置（用户再拖一次就是「再要一次」），
+     * 但**合并**而不是覆盖：新记录缺 `preview`/`topic`/`user` 时保留旧值。
+     * 覆盖会顺手把预览和话题快照抹掉，而这次拖动并不携带它们。
      */
     add(item: Omit<ReadLaterItem, "addedAt"> & { addedAt?: number }) {
-      if (items.some((existing) => existing.url === item.url)) return items;
+      const existing = items.find((entry) => entry.url === item.url);
       const entry: ReadLaterItem = {
+        ...existing,
         ...item,
         addedAt: item.addedAt ?? now(),
+        preview: item.preview ?? existing?.preview,
+        topic: item.topic ?? existing?.topic,
+        user: item.user ?? existing?.user,
       };
-      items = writeItems([entry, ...items].slice(0, limit)) as ReadLaterItem[];
+      const rest = items.filter((other) => other.url !== item.url);
+      items = writeItems([entry, ...rest].slice(0, limit)) as ReadLaterItem[];
       return items;
     },
     /** 把某条移到 `toIndex`（结果数组里的下标），用于拖动排序。 */
@@ -364,5 +369,42 @@ export function extractPreview(
   if (!preview.title && !preview.excerpt && !preview.imageUrl && !preview.badge) {
     return {};
   }
+  return preview;
+}
+
+/**
+ * `/onebox` 失败后的回退：读目标页自己的 OG 标签。
+ *
+ * 只在同站链接上用——Discourse 的 `<head>` 由服务端渲染，`og:title`、
+ * `og:description`、`og:image` 都在里面（`meta-tag-updater.js` 只是在前端
+ * 路由切换时更新它们）。实测 linux.do：head 约 53 KB、整页约 795 KB，
+ * 只解析 head 约 1 ms，所以真正的代价是那一次网络请求，不是解析。
+ */
+export function extractOpenGraph(
+  root: ParentNode,
+  origin: string,
+): ReadLaterPreview {
+  const meta = (property: string) => {
+    const node = root.querySelector(`meta[property="${property}"]`);
+    return cleanText(node?.getAttribute("content"));
+  };
+
+  const rawImage = meta("og:image");
+  let imageUrl: string | undefined;
+  if (rawImage) {
+    try {
+      const absolute = new URL(rawImage, `${origin}/`).href;
+      if (/^https?:\/\//i.test(absolute)) imageUrl = absolute;
+    } catch {
+      imageUrl = undefined;
+    }
+  }
+
+  const preview: ReadLaterPreview = {
+    title: meta("og:title") || cleanText(root.querySelector("title")?.textContent) || undefined,
+    excerpt: truncateText(meta("og:description"), READ_LATER_EXCERPT_MAX) || undefined,
+    imageUrl,
+  };
+  if (!preview.title && !preview.excerpt && !preview.imageUrl) return {};
   return preview;
 }
