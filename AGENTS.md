@@ -3,8 +3,8 @@
 The userscript replaces a selected area of a Discourse forum with a compact, locally-filtered topic feed panel, hosted from the userscript metadata of a single built file. `CONTEXT.md` holds the domain terms; `docs/INDEX.md` indexes the durable contracts under `docs/`; this file records only the current session.
 
 **Project root**: `C:\Users\28676\builds\discourse\userscript`
-**Branch / remote**: `feat/read-later` / `https://github.com/YsLtr/discourse-sidebar-feed-panel.git`
-**User request**: 创建新分支设计「稍后再读」，随后按裁定实现，并按真站反馈逐条修。
+**Branch / remote**: `main` / `https://github.com/YsLtr/discourse-sidebar-feed-panel.git`
+**User request**: 创建新分支设计「稍后再读」，随后按裁定实现，按真站反馈逐条修，最后合并进主分支并升版 3.3.0。
 
 ## 本轮完成的工作
 
@@ -59,9 +59,10 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 ## 当前仓库状况
 
-- HEAD 为 `be3d4da`，位于 `feat/read-later`；工作区干净。
-- `package.json` 仍是 3.2.0。
-- 完整校验全绿：typecheck 0、14 文件 / 85 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **98 项**。
+- 第五、六轮真站反馈（`d463df2`…`3a89c61`，共 6 个提交）：列表恢复正序、预览页内缓存、重复拖入幂等并移到最新、onebox 失败回退 OG、条目高取最近分隔线那条、隐形命中区与把手命中条，细节见契约 [docs/feed/02-稍后再读.md](docs/feed/02-稍后再读.md)。
+- `feat/read-later` 已快进合并进 `main`（`3a89c61`）；`main` 领先 `origin/main` 37 个提交。
+- 版本升到 **3.3.0**：`npm version 3.3.0 --no-git-tag-version`，`package.json` 与 `package-lock.json` 同步；根目录 3.0.0 迁移快照保持不变。
+- 完整校验全绿：typecheck 0、14 文件 / 88 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **108 项**。
 - **本机注意**：`npm test` 的 Vite 配置加载会 `exec("net use")`，在受限文件沙箱下报 `spawn EPERM`；需要 danger-full-access 才跑通，不是代码问题。
 
 ## 未决问题
@@ -71,7 +72,7 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - **删除与排序只有拖动**：没有按钮，也没有键盘等价操作；触摸设备上等于无法删除。
 - **分隔线只有 3 px 高**，鼠标命中区偏窄；这是「不遮挡两侧内容」的直接代价。
 - **侧边栏高度变化不会自动重新钳制**：只在渲染、窗口 `resize`、头部重建时重算。真站上 `#d-sidebar` 高度是否随滚动/头部折叠变化未实测；若会变，需要 `ResizeObserver`。
-- **未 push**：`main` 上 3.2.0 的发布仍未授权；本分支未推送到远端。
+- **未 push**：`main` 上 3.3.0 的发布尚未授权，37 个本地提交只在本地。
 - **`perf/` 产物不可复算**（已记入 `docs/discourse/04-消息总线与主线程成本.md` §八）：原始 trace 与四个分析工具从未入库。
 - **`docs/` 的链接与索引无自动化校验**：新增或改名主题文件后须人工核对 `docs/INDEX.md` 与各级 `README.md` 的相对层级（子目录互链为 `../<部分>/<文件>.md`）。
 - **`CONTEXT.md` 未纳入新术语**：`Read Later Section`、`Preview Card`、`Preview Availability` 只在 `docs/feed/02-稍后再读.md` 的术语小节。
@@ -80,4 +81,4 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 真站再核对（拖入四个位置、拖昵称/用户名、拖出删除、拖动排序、拖分隔线看内容是否稳定、两标签页同步、`/onebox` 的登录与 429、语言切换），再决定是否 push。
 
-Updated: 2026-10-25 01:20 中国标准时间 +0800
+Updated: 2026-10-25 14:20 中国标准时间 +0800

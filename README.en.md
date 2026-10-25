@@ -92,6 +92,7 @@ The topic list supports:
 - Clicking a topic title to open the topic.
 - Loading older topics by scrolling near the bottom or clicking Load more.
 - Resizing the sidebar by dragging its edge. Width is saved per site.
+- A Read Later section sits at the bottom of the sidebar: drop a topic, link or poster into it to save, drag an entry out to delete, and drag entries to reorder.
 
 ## Settings
 
