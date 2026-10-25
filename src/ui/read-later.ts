@@ -265,11 +265,17 @@ export function createReadLaterView({
     return wrapper;
   }
 
-  function firstItemHeight(root: HTMLElement | null) {
+  /**
+   * 「一个条目高」。主区域取最顶上那条，稍后再读取最底下那条：
+   * 两边的条目高度并不一致（预览卡片、话题条目、有无摘要都不同），
+   * 用各自最靠近分隔线的那条，才不会算出一个两边都对不上的数。
+   */
+  function itemHeight(root: HTMLElement | null, edge: "top" | "bottom") {
     if (!root) return null;
-    const element = root.querySelector<HTMLElement>(
+    const nodes = root.querySelectorAll<HTMLElement>(
       ".sfp-rl-item, .sfp-topic-item",
     );
+    const element = edge === "top" ? nodes[0] : nodes[nodes.length - 1];
     const height = element?.offsetHeight || 0;
     return height > 0 ? height : null;
   }
@@ -288,8 +294,8 @@ export function createReadLaterView({
     if (available <= 0) return null;
     return {
       available,
-      mainMin: firstItemHeight(scroll) ?? READ_LATER_ITEM_FALLBACK_HEIGHT,
-      laterMin: firstItemHeight(list) ?? READ_LATER_MIN_SECTION_HEIGHT,
+      mainMin: itemHeight(scroll, "top") ?? READ_LATER_ITEM_FALLBACK_HEIGHT,
+      laterMin: itemHeight(list, "bottom") ?? READ_LATER_MIN_SECTION_HEIGHT,
     };
   }
 
@@ -311,9 +317,10 @@ export function createReadLaterView({
     dividerLocked = false;
     divider.removeAttribute("aria-disabled");
     const saved = savedHeight();
+    // 没拖过就是「一个条目高」，与条目数量无关：加第二条不自动长高，
+    // 想看更多就自己拖分隔线。
     const autoHeight =
-      (firstItemHeight(list) ?? READ_LATER_ITEM_FALLBACK_HEIGHT) *
-      Math.min(items().length || 1, 2);
+      itemHeight(list, "bottom") ?? READ_LATER_ITEM_FALLBACK_HEIGHT;
     const desired = saved ?? autoHeight;
     const height = Math.min(Math.max(desired, laterMin), available - mainMin);
     divider.setAttribute("aria-valuemin", String(Math.round(laterMin)));
@@ -721,6 +728,13 @@ export function createReadLaterView({
     divider.setAttribute("aria-label", t("readLaterTitle"));
     divider.tabIndex = 0;
     divider.hidden = true;
+    // 3 px 的线太细，命中判定靠两个不可见的小圆（中心与右端）。圆是分隔线的
+    // 子节点，pointerdown 冒泡回分隔线，拖拽逻辑一行都不用改。
+    for (const spot of ["center", "end"]) {
+      const grip = document.createElement("div");
+      grip.className = `sfp-rl-grip sfp-rl-grip-${spot}`;
+      divider.append(grip);
+    }
 
     section = document.createElement("section");
     section.className = "sfp-read-later";

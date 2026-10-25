@@ -313,6 +313,12 @@ export function createFeedHost({
     if (!resizerEl.parentElement) {
       sidebar.appendChild(resizerEl);
     }
+    // 5 px 太细：中间挂一条不可见的宽条扩大判定面积，mousedown 冒泡回把手。
+    if (!resizerEl.querySelector(":scope > .sfp-resizer-grip")) {
+      const grip = document.createElement("div");
+      grip.className = "sfp-resizer-grip";
+      resizerEl.appendChild(grip);
+    }
 
     resizerEl.addEventListener("mousedown", (e) => {
       if (isResizing) return;

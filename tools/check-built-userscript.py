@@ -145,6 +145,19 @@ try:
         cdp.evaluate("document.querySelector('#d-sidebar').replaceWith(Object.assign(document.createElement('aside'),{id:'d-sidebar',className:'sidebar-container'}))")
         wait_for("document.querySelectorAll('.sfp-topic-item').length===30 && !!document.querySelector('#d-sidebar .sfp-resizer')")
         check('host replacement remounts once without duplicate subscriptions', "document.querySelectorAll('.sfp-feed-container').length===1 && [...fixture.subscriptions.values()].every(s=>s.size===1)")
+        check('the width handle carries an invisible 3x-wide grip in its middle', """(() => {
+          // 5 px 的把手太细：中间挂一条不可见的宽条，宽 15 px（3 倍）、高 25%。
+          const handle=document.querySelector('.sfp-resizer');
+          const grip=handle.querySelector('.sfp-resizer-grip');
+          if (!grip) return false;
+          const h=handle.getBoundingClientRect(), g=grip.getBoundingClientRect();
+          const style=getComputedStyle(grip);
+          return Math.abs(g.width - h.width*3) <= 1 &&
+            Math.abs(g.height - h.height/4) <= 1 &&
+            Math.abs((g.top+g.bottom)/2 - (h.top+h.bottom)/2) <= 1 &&
+            style.backgroundColor==='rgba(0, 0, 0, 0)' &&
+            style.cursor==='ew-resize';
+        })()""")
         cdp.evaluate("fixture.pause=true;document.querySelector('.sfp-refresh-btn').click()")
         wait_for('fixture.pending.length===1')
         cdp.evaluate("document.querySelector('.sfp-toggle-btn').click();fixture.release()")
@@ -358,8 +371,7 @@ try:
             !item.querySelector('.sfp-rl-card') &&
             fixture.oneboxRequests.length===0;
         })()""")
-        cdp.evaluate("""window.rlItemHeight=document.querySelector('.sfp-rl-item').offsetHeight;
-          window.rlSection=document.querySelector('.sfp-read-later');
+        cdp.evaluate("""window.rlSection=document.querySelector('.sfp-read-later');
           window.rlDivider=document.querySelector('.sfp-rl-divider');""")
         check('the divider is a sibling of the section, not part of it', """rlDivider.parentElement===rlSection.parentElement &&
           rlDivider.nextElementSibling===rlSection && !rlSection.contains(rlDivider)""")
@@ -376,10 +388,26 @@ try:
           const list=document.querySelector('.sfp-rl-list').getBoundingClientRect();
           return Math.abs(list.bottom-scroll.bottom)<=1;
         })()""")
-        check('height grows from one item to two and then stops', """(() => {
-          const count = document.querySelectorAll('.sfp-rl-item').length;
-          const height = rlSection.offsetHeight;
-          return count===3 && Math.abs(height - rlItemHeight*2) <= 2;
+        check('the divider hit area is two invisible circles, not just the 3 px line', """(() => {
+          // 线本身只有 3 px；命中判定靠中心与右端两个不可见小圆，上下各多出 5.5 px。
+          const grips=[...rlDivider.querySelectorAll('.sfp-rl-grip')];
+          if (grips.length!==2) return false;
+          const line=rlDivider.getBoundingClientRect();
+          const center=grips[0].getBoundingClientRect();
+          const end=grips[1].getBoundingClientRect();
+          return grips.every(g => {
+            const r=g.getBoundingClientRect(), style=getComputedStyle(g);
+            return r.height>line.height && r.width>line.height*2 &&
+              style.backgroundColor==='rgba(0, 0, 0, 0)' && style.borderRadius==='50%';
+          }) &&
+            Math.abs((center.left+center.right)/2 - (line.left+line.right)/2) <= 1 &&
+            Math.abs((end.left+end.right)/2 - line.right) <= 1;
+        })()""")
+        check('the height stays at one item no matter how many entries there are', """(() => {
+          // 加第二条不自动长高：没拖过分隔线就是「一个条目高」，取最底下那条。
+          const nodes = document.querySelectorAll('.sfp-rl-item');
+          const bottom = nodes[nodes.length-1].offsetHeight;
+          return nodes.length===3 && Math.abs(rlSection.offsetHeight - bottom) <= 2;
         })()""")
         cdp.evaluate("""window.beforeDividerDrag=(() => {
             const scroll=document.querySelector('.sfp-rl-scroll');
@@ -396,6 +424,17 @@ try:
           const saved = Number(localStorage.getItem('sfp_read_later_height_v1'));
           return saved > 0 && Math.abs(rlSection.offsetHeight - saved) <= 2;
         })()""")
+        cdp.evaluate("""window.gripBefore=rlSection.offsetHeight;
+          window.gripDrag=(() => {
+            // 从右端的小圆上按下：pointerdown 冒泡回分隔线，拖拽逻辑一行都不用改。
+            const grip=document.querySelector('.sfp-rl-grip-end');
+            const r=grip.getBoundingClientRect(), y=r.top+r.height/2;
+            grip.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,button:0,clientX:r.left+r.width/2,clientY:y}));
+            document.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientY:y-40}));
+            document.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,clientY:y-40}));
+            return {before:gripBefore, after:rlSection.offsetHeight};
+          })()""")
+        check('the divider can be dragged from its invisible grip', "gripDrag.after > gripDrag.before + 10")
         check('dragging the divider resizes the region without moving the content', """(() => {
           // 内容从下往上算：底边固定、滚动原点在底部，所以高度变了条目也不动。
           const first=document.querySelector('.sfp-rl-item').getBoundingClientRect();
@@ -899,6 +938,24 @@ try:
           window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:null}));""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===0")
         check('a cross-tab storage event re-reads the list and hides the empty section', """document.querySelector('.sfp-read-later').hidden""")
+        # 「一个条目高」取最底下那条：先拖入话题（高条目），再拖入链接（矮条目、落在上方），
+        # 区域高度应当跟着底部那条走，而不是顶部那条。
+        cdp.evaluate("""localStorage.removeItem('sfp_read_later_height_v1');
+          window.dragTo=(selector, uri) => {
+            const dt = new DataTransfer();
+            dt.setData('text/uri-list', uri);
+            document.querySelector(selector).dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dt}));
+          };
+          dragTo('.sfp-read-later', location.origin + '/t/293');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===1")
+        cdp.evaluate("""dragTo('.sfp-read-later', location.origin + '/u/gina');""")
+        wait_for("document.querySelectorAll('.sfp-rl-item').length===2")
+        check('one item height comes from the bottom-most entry', """(() => {
+          const nodes=[...document.querySelectorAll('.sfp-rl-item')];
+          const top=nodes[0].offsetHeight, bottom=nodes[nodes.length-1].offsetHeight;
+          return nodes.length===2 && top!==bottom &&
+            Math.abs(document.querySelector('.sfp-read-later').offsetHeight - bottom) <= 2;
+        })()""")
         cdp.evaluate("""localStorage.setItem('sfp_read_later_v1', JSON.stringify({version:2,items:[
             {url:'/t/294',title:'From another tab',kind:'topic',topicId:294,addedAt:5}
           ]}));

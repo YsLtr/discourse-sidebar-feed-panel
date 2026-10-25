@@ -96,6 +96,19 @@
 .sfp-resizer.sfp-resizing {
   background: var(--tertiary);
 }
+/*
+ * 5 px 的宽度把手同样太细。中间加一条不可见的宽条：宽 15 px（3 倍把手宽）、
+ * 高 25%（侧边栏高度的 1/4）。它比把手宽，所以两侧各多出 5 px 判定面积。
+ */
+.sfp-resizer-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 15px;
+  height: 25%;
+  transform: translate(-50%, -50%);
+  cursor: ew-resize;
+}
 
 /* ===== Feed Header ===== */
 .sfp-feed-header {
@@ -1204,6 +1217,7 @@
   display: none;
 }
 .sfp-rl-divider {
+  position: relative;
   flex: 0 0 auto;
   /* 自动外边距把「分隔线 + 区域」一起压到容器底部；主滚动区撑满时为 0。 */
   margin-top: auto;
@@ -1214,6 +1228,25 @@
   cursor: ns-resize;
   transition: background 0.2s;
 }
+/*
+ * 3 px 的线本身太细。命中面积靠两个不可见的小圆撑开：一个在中心、一个在右端。
+ * 它们比线高，所以上下各多出 5.5 px；圆形而非整条，是为了尽量少挡住两侧条目。
+ */
+.sfp-rl-grip {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  cursor: ns-resize;
+}
+.sfp-rl-grip-center {
+  left: 50%;
+}
+.sfp-rl-grip-end {
+  left: 100%;
+}
 .sfp-rl-divider[hidden] {
   display: none;
 }
@@ -1223,6 +1256,9 @@
   background: var(--tertiary);
 }
 .sfp-rl-divider[aria-disabled="true"] {
+  cursor: default;
+}
+.sfp-rl-divider[aria-disabled="true"] .sfp-rl-grip {
   cursor: default;
 }
 .sfp-rl-scroll {
