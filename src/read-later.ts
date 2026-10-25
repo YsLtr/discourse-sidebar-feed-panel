@@ -1,5 +1,5 @@
 import { READ_LATER_EXCERPT_MAX, READ_LATER_LIMIT } from "./constants";
-import type { Topic, TopicUser } from "./feed/types";
+import type { Topic, TopicTag, TopicUser } from "./feed/types";
 
 /**
  * 稍后再读的纯数据层：链接解析、持久化与预览字段抽取。
@@ -346,6 +346,98 @@ export function mergeTopicSnapshot(
 
 function cleanText(value: string | null | undefined) {
   return collapse(value);
+}
+
+function textOf(value: unknown) {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+function numOf(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/**
+ * `/t/<id>.json`（TopicView）→ 列表项用的紧凑快照。
+ *
+ * 稍后再读里的话题可能落在静音分类、未列出或私密范围：`/latest.json?topic_ids=`
+ * 永远拿不回来（`TopicQuery#remove_muted_categories` 在 `topic_ids` 过滤之后
+ * 又剔了一遍，见 `lib/topic_query.rb:1029`），而用户既然把它拖进来就是要看到它，
+ * 所以这一条按 id 直接取。
+ *
+ * TopicView 比列表项多得多（整段 `post_stream`），这里只挑渲染用得到的字段，
+ * 不保存原始 JSON。视图里没有 `bumped_at`/`posters`/`unread_posts`：
+ * 时间退到 `last_posted_at`（渲染器本来就这么兜底），首个 poster 从
+ * `details.created_by` 重建，未读计数不猜——拿不到就继续显示圆点。
+ */
+export function topicFromView(
+  value: unknown,
+): { topic: Topic; user?: TopicUser } | null {
+  if (!value || typeof value !== "object") return null;
+  const view = value as {
+    id?: unknown;
+    slug?: unknown;
+    title?: unknown;
+    fancy_title?: unknown;
+    category_id?: unknown;
+    archetype?: unknown;
+    closed?: unknown;
+    pinned?: unknown;
+    pinned_globally?: unknown;
+    created_at?: unknown;
+    last_posted_at?: unknown;
+    views?: unknown;
+    posts_count?: unknown;
+    like_count?: unknown;
+    last_read_post_number?: unknown;
+    highest_post_number?: unknown;
+    tags?: unknown;
+    details?: { created_by?: Record<string, unknown> };
+    post_stream?: { posts?: Array<Record<string, unknown>> };
+  };
+  const id = numOf(view.id);
+  if (!id || id <= 0) return null;
+
+  const createdBy = view.details?.created_by;
+  const firstPost = view.post_stream?.posts?.[0];
+  const rawUser = createdBy || firstPost;
+  const userId = numOf(createdBy?.id ?? firstPost?.user_id);
+  const user: TopicUser | undefined =
+    userId === undefined
+      ? undefined
+      : {
+          id: userId,
+          username: textOf(rawUser?.username),
+          name: textOf(rawUser?.name),
+          avatar_template: textOf(rawUser?.avatar_template),
+        };
+
+  const topic: Topic = {
+    id,
+    slug: textOf(view.slug),
+    title: textOf(view.title),
+    fancy_title: textOf(view.fancy_title),
+    category_id: numOf(view.category_id),
+    archetype: textOf(view.archetype),
+    created_at: textOf(view.created_at),
+    last_posted_at: textOf(view.last_posted_at),
+    views: numOf(view.views),
+    posts_count: numOf(view.posts_count),
+    like_count: numOf(view.like_count),
+    last_read_post_number: numOf(view.last_read_post_number) ?? null,
+    highest_post_number: numOf(view.highest_post_number),
+    closed: view.closed === true || undefined,
+    pinned: view.pinned === true || undefined,
+    pinned_globally: view.pinned_globally === true || undefined,
+    tags: Array.isArray(view.tags)
+      ? (view.tags as Array<string | TopicTag>).filter(
+          (tag) => typeof tag === "string" || (!!tag && typeof tag === "object"),
+        )
+      : undefined,
+    // 让既有的合并逻辑能从 posters 找回首个 poster，不必为这条路径另写一套。
+    posters: user ? [{ user_id: user.id }] : undefined,
+  };
+  return { topic, user };
 }
 
 /**

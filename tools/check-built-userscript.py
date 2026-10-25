@@ -896,30 +896,34 @@ try:
           return asked===topicRequestsBefore &&
             !fixture.oneboxRequests.some(u=>u.endsWith('/t/9010'));
         })()""")
-        # latest 拿不到快照（请求失败或 200 但列表里没有）都不回退预览。
+        # latest 整批失败也不发预览：按 id 取 TopicView 照样能补上快照。
         cdp.evaluate("""window.topicOneboxBefore=fixture.oneboxRequests.length;
           fixture.failNext=true;
           dragTo('.sfp-read-later', location.origin + '/t/9011');""")
-        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9011\"]')")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9011\"] .sfp-topic-item')")
         time.sleep(.45)
-        check('a topic whose latest fetch fails never falls back to a preview', """(() => {
+        check('a topic whose latest fetch fails is still resolved per id, never previewed', """(() => {
           const item=document.querySelector('.sfp-rl-item[data-url="/t/9011"]');
           return fixture.oneboxRequests.length===topicOneboxBefore &&
-            !!item?.querySelector('.sfp-rl-fallback') && !item.querySelector('.sfp-rl-card');
+            fixture.requests.some(r=>r.path==='/t/9011.json') &&
+            !!item?.querySelector('.sfp-topic-item') && !item.querySelector('.sfp-rl-card');
         })()""")
-        # 200 但话题不在响应里：标成话题异常，同样一次预览请求都不发。
+        # 200 但列表里没有、按 id 又回 404：标成话题异常，同样不发预览。
         cdp.evaluate("""fixture.failNext=false;
           fixture.missingTopicIds=[9012];
+          fixture.goneTopicIds=[9012];
           window.missingOneboxBefore=fixture.oneboxRequests.length;
           dragTo('.sfp-read-later', location.origin + '/t/9012');""")
         wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9012\"] .sfp-topic-unavailable')")
         time.sleep(.45)
-        check('a topic missing from the latest response is marked unavailable, not previewed', """(() => {
+        check('a topic missing everywhere is marked unavailable, not previewed', """(() => {
           const item=document.querySelector('.sfp-rl-item[data-url="/t/9012"]');
           return fixture.oneboxRequests.length===missingOneboxBefore &&
+            fixture.requests.some(r=>r.path==='/t/9012.json') &&
             !!item?.querySelector('.sfp-topic-unavailable') && !item.querySelector('.sfp-rl-card');
         })()""")
         cdp.evaluate("""fixture.missingTopicIds=[];
+          fixture.goneTopicIds=[];
           removeRlItem('/t/9012'); removeRlItem('/t/9011'); removeRlItem('/t/9010');""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===2")
         # onebox 失败 → 读目标页 head 的 OG 标签兜底。
@@ -1021,6 +1025,7 @@ try:
           return asked.length===0;
         })()""")
         cdp.evaluate("""fixture.missingTopicIds=[9001];
+          fixture.goneTopicIds=[9001];
           fixture.requests.length=0;
           localStorage.setItem('sfp_read_later_v1', JSON.stringify({version:2,items:[
             {url:'/t/296',title:'kept',kind:'topic',topicId:296,addedAt:2},
@@ -1037,12 +1042,39 @@ try:
         check('a saved topic missing from the response is marked unavailable', """(() => {
           const missing=document.querySelector('.sfp-rl-item[data-url="/t/9001"]');
           const kept=document.querySelector('.sfp-rl-item[data-url="/t/296"]');
-          return !!missing?.querySelector('.sfp-topic-unavailable') &&
+          // 列表接口拿不到时先按 id 取 TopicView；404 才是「真的没有」。
+          return fixture.requests.some(r=>r.path==='/t/9001.json') &&
+            !!missing?.querySelector('.sfp-topic-unavailable') &&
             !!kept && !kept.querySelector('.sfp-topic-unavailable');
+        })()""")
+        # 静音分类里的话题：/latest.json?topic_ids= 永远回空，但按 id 能取到。
+        # 用户把它拖进来就是要看到它，不能显示成异常。
+        cdp.evaluate("""fixture.missingTopicIds=[9002];
+          fixture.goneTopicIds=[9001];
+          fixture.requests.length=0;
+          localStorage.setItem('sfp_read_later_v1', JSON.stringify({version:2,items:[
+            {url:'/t/9002',title:'muted',kind:'topic',topicId:9002,addedAt:2}
+          ]}));
+          window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:'x'}));""")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9002\"] .sfp-topic-item')")
+        check('a topic the list API hides is still fetched per id and rendered', """(() => {
+          const item=document.querySelector('.sfp-rl-item[data-url="/t/9002"]');
+          const topic=item?.querySelector('.sfp-topic-item');
+          return fixture.requests.some(r=>r.path==='/t/9002.json') &&
+            !!topic && topic.dataset.topicId==='9002' &&
+            !item.querySelector('.sfp-topic-unavailable') &&
+            !item.querySelector('.sfp-rl-card');
+        })()""")
+        check('the per-id topic snapshot fills in title, stats and poster', """(() => {
+          const item=document.querySelector('.sfp-rl-item[data-url="/t/9002"]');
+          return item.querySelector('.sfp-topic-title-line').textContent.includes('Topic 9002') &&
+            !!item.querySelector('.sfp-topic-avatar') &&
+            item.querySelector('.sfp-topic-stat').textContent.includes('3');
         })()""")
         # 刷新会触发两次同步请求；等它们都落地，否则同步写回会覆盖测试的删除。
         time.sleep(.6)
         cdp.evaluate("""fixture.missingTopicIds=[];
+          fixture.goneTopicIds=[];
           localStorage.removeItem('sfp_read_later_v1');
           window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:null}));""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===0")

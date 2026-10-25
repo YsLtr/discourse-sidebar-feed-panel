@@ -8,6 +8,7 @@ import {
   readLaterFallbackTitle,
   READ_LATER_HEIGHT_STORAGE_KEY,
   READ_LATER_STORAGE_KEY,
+  topicFromView,
   type ReadLaterItem,
   type ReadLaterStorage,
 } from "../../src/read-later";
@@ -371,3 +372,88 @@ describe("extractOpenGraph", () => {
     expect(extractOpenGraph(head({}), ORIGIN)).toEqual({});
   });
 });
+
+describe("topicFromView", () => {
+  // `/t/<id>.json` 的真实形状（linux.do 实测）：没有 posters/bumped_at/
+  // unread_posts，创建者与首楼在 details.created_by / post_stream.posts[0]。
+  const view = {
+    id: 3071354,
+    slug: "topic",
+    title: "想问个问题",
+    fancy_title: "想问个问题",
+    category_id: 45,
+    archetype: "regular",
+    closed: true,
+    created_at: "2026-10-25T02:36:36.084Z",
+    last_posted_at: "2026-10-25T02:36:36.221Z",
+    views: 45,
+    posts_count: 1,
+    like_count: 1,
+    last_read_post_number: 1,
+    highest_post_number: 1,
+    tags: [{ id: 1461, name: "纯水", slug: "1461-tag" }],
+    details: {
+      notification_level: 1,
+      created_by: {
+        id: 301746,
+        username: "NTU17",
+        name: "一只不会飞的猪",
+        avatar_template: "/user_avatar/linux.do/ntu17/{size}/2237123_2.png",
+      },
+    },
+    post_stream: { posts: [{ user_id: 301746, username: "NTU17" }] },
+  };
+
+  it("builds a list-item snapshot and its first poster", () => {
+    const parsed = topicFromView(view);
+    expect(parsed?.topic).toMatchObject({
+      id: 3071354,
+      slug: "topic",
+      title: "想问个问题",
+      category_id: 45,
+      closed: true,
+      views: 45,
+      posts_count: 1,
+      like_count: 1,
+      last_read_post_number: 1,
+      highest_post_number: 1,
+      posters: [{ user_id: 301746 }],
+    });
+    expect(parsed?.user).toEqual({
+      id: 301746,
+      username: "NTU17",
+      name: "一只不会飞的猪",
+      avatar_template: "/user_avatar/linux.do/ntu17/{size}/2237123_2.png",
+    });
+    // 视图里没有 bumped_at，交给渲染器退到 last_posted_at；计数不猜。
+    expect(parsed?.topic.bumped_at).toBeUndefined();
+    expect(parsed?.topic.unread_posts).toBeUndefined();
+    expect(parsed?.topic.notification_level).toBeUndefined();
+  });
+
+  it("falls back to the first post when details are missing", () => {
+    const parsed = topicFromView({
+      id: 7,
+      post_stream: {
+        posts: [
+          {
+            user_id: 5,
+            username: "bob",
+            avatar_template: "/user_avatar/x/bob/{size}/1.png",
+          },
+        ],
+      },
+    });
+    expect(parsed?.user).toMatchObject({ id: 5, username: "bob" });
+    expect(parsed?.topic.posters).toEqual([{ user_id: 5 }]);
+  });
+
+  it("rejects payloads without a usable id", () => {
+    // 404 的响应体是 `{errors, error_type}`，不该被当成话题。
+    expect(topicFromView({ errors: ["not found"] })).toBeNull();
+    expect(topicFromView({ id: 0 })).toBeNull();
+    expect(topicFromView({ id: "abc" })).toBeNull();
+    expect(topicFromView(null)).toBeNull();
+  });
+});
+

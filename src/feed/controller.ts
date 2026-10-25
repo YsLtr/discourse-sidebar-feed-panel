@@ -11,6 +11,7 @@ import {
   mergeTopicSnapshot,
   readLaterFallbackTitle,
   resolveReadLaterStorage,
+  topicFromView,
   type ParsedReadLaterLink,
   type ReadLaterItem,
 } from "../read-later";
@@ -103,6 +104,7 @@ export function createFeedController({
   });
   const fetchFeedTopics = api.page;
   const fetchFeedTopicsByIds = api.byIds;
+  const fetchTopicView = api.topicView;
   const RouteWatcher = createRouteWatcher({
     onRouteChange: () => {
       if (prefs.feedModeEnabled) _syncIncomingHeadAction();
@@ -363,9 +365,13 @@ export function createFeedController({
 
   /**
    * 主列表刷新后校正已保存的话题：统计、标题、首个 poster。
-   * **主列表里已经有的话题不再发请求**，直接拿常驻窗口里的那份；
-   * 只有主列表没有的才走 `topic_ids`。只有整轮请求都成功时才把
-   * 「响应里没有」当成话题异常，网络失败/中止不标记，避免把临时故障记成删除。
+   * **主列表里已经有的话题不再发请求**，直接拿常驻窗口里的那份；其余先按批走
+   * `topic_ids`，仍然拿不到的一条条按 id 取 `/t/<id>.json`。
+   *
+   * 后者是必要的：`/latest.json?topic_ids=` 会剔掉静音分类里的话题
+   * （`TopicQuery#remove_muted_categories`），而未列出/私密话题同样不在列表里。
+   * 用户把它拖进稍后再读就是要看到它，不能因为「列表接口不给」就显示异常。
+   * 只有 `/t/<id>.json` 明确回 404/403 才标异常，网络失败与中止都不标记。
    */
   async function syncReadLater() {
     if (disposed) return;
@@ -387,22 +393,35 @@ export function createFeedController({
 
     const topics = new Map<number, Topic>(residentById);
     const users = new Map<number, TopicUser>();
-    let complete = true;
-    try {
-      for (let index = 0; index < missing.length; index += READ_LATER_SYNC_CHUNK) {
-        const chunk = missing.slice(index, index + READ_LATER_SYNC_CHUNK);
+    /** `/t/<id>.json` 明确说不存在：只有这些才标异常。 */
+    const gone = new Set<number>();
+    for (let index = 0; index < missing.length; index += READ_LATER_SYNC_CHUNK) {
+      const chunk = missing.slice(index, index + READ_LATER_SYNC_CHUNK);
+      try {
         const data = await fetchFeedTopicsByIds(chunk, requests.signal);
-        if (!data) {
-          complete = false;
-          continue;
-        }
-        for (const topic of data.topic_list?.topics || []) {
+        for (const topic of data?.topic_list?.topics || []) {
           topics.set(topic.id, topic);
         }
-        for (const user of data.users || []) users.set(user.id, user);
+        for (const user of data?.users || []) users.set(user.id, user);
+      } catch (e) {
+        // 整批失败不影响下面按 id 兜底；被新一轮请求作废就收工。
+        if (requests.signal.aborted) return;
       }
-    } catch (e) {
-      return;
+    }
+    for (const id of missing) {
+      if (topics.has(id) || disposed) continue;
+      try {
+        const result = await fetchTopicView(id, requests.signal);
+        const parsed = result.json ? topicFromView(result.json) : null;
+        if (parsed) {
+          topics.set(id, parsed.topic);
+          if (parsed.user) users.set(parsed.user.id, parsed.user);
+        } else if (result.status === 403 || result.status === 404) {
+          gone.add(id);
+        }
+      } catch (e) {
+        if (requests.signal.aborted) return;
+      }
     }
     if (disposed) return;
 
@@ -411,8 +430,7 @@ export function createFeedController({
       if (!item.topicId) return item;
       const fresh = topics.get(item.topicId);
       if (!fresh) {
-        // 没请求过（主列表里也没有、这轮也没问到）就无从判断，不要标记。
-        if (!complete || residentById.has(item.topicId)) return item;
+        if (!gone.has(item.topicId)) return item;
         const topic: Topic = { ...(item.topic || { id: item.topicId }) };
         if (!markUnavailable(topic)) return item;
         changed = true;

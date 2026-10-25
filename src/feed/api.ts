@@ -59,5 +59,19 @@ export function createFeedApi({
         ? request(`/latest.json?topic_ids=${unique.join(",")}`, signal)
         : Promise.resolve(null);
     },
+    /**
+     * 单个话题的 TopicView（`/t/<id>.json`）。给 `/latest.json?topic_ids=`
+     * 拿不回来的话题用：静音分类、未列出、私密都会在那里被剔掉。
+     * 不回 `ok` 就抛错——调用方要按状态码区分「不存在」与「网络失败」。
+     */
+    async topicView(id: number, signal: AbortSignal = getSignal()) {
+      const response = await fetch(`/t/${id}.json`, {
+        headers: { "X-CSRF-Token": getCsrfToken() },
+        signal,
+      });
+      if (!response.ok) return { status: response.status, json: null };
+      const json = await response.json().catch(() => null);
+      return { status: response.status, json };
+    },
   };
 }

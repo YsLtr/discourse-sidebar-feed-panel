@@ -119,6 +119,22 @@ window.fetch = async (path, options) => {
     return new Response(head,{headers:{'Content-Type':'text/html'}});
   }
   if(fixture.failNext && url.pathname.includes('latest.json')) { fixture.failNext=false;return new Response('temporary failure',{status:503}); }
+  // 单话题 TopicView：/latest.json?topic_ids= 拿不回来时（静音分类、未列出）
+  // 脚本会逐条按 id 取；goneTopicIds 里的 id 回 404，模拟真的不存在。
+  const viewMatch = /^\/t\/(\d+)\.json$/.exec(url.pathname);
+  if(viewMatch) {
+    const id = Number(viewMatch[1]);
+    if((fixture.goneTopicIds || []).includes(id)) {
+      return new Response(JSON.stringify({errors:['not found']}),{status:404,headers:{'Content-Type':'application/json'}});
+    }
+    const base = Object.assign({}, fixture.head.find(t=>t.id===id) || fixture.topic(id));
+    // TopicView 与列表项形状不同：没有 posters，创建者放在 details.created_by。
+    delete base.posters;
+    base.slug = 'topic';
+    base.details = {created_by:{id:1,username:'alice',name:'Alice',avatar_template:'/user_avatar/fixture/alice/{size}/1.png'},notification_level:1};
+    base.post_stream = {posts:[{user_id:1,username:'alice',name:'Alice',avatar_template:'/user_avatar/fixture/alice/{size}/1.png'}]};
+    return new Response(JSON.stringify(base),{headers:{'Content-Type':'application/json'}});
+  }
   let data;
   if(url.pathname==='/site.json') data={
     categories:[{id:1,name:'Parent',slug:'parent',topic_count:10},{id:2,name:'Child',slug:'child',parent_category_id:1}],
