@@ -1,6 +1,6 @@
 {
   "name": "discourse-sidebar-feed-panel",
-  "version": "3.4.5",
+  "version": "3.4.6",
   "private": true,
   "type": "module",
   "description": "Discourse native sidebar topic feed userscript",

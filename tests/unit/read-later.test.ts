@@ -303,6 +303,26 @@ describe("extractPreview", () => {
     expect(preview).toEqual({});
   });
 
+  it("falls back to the full name when a user card has no bio", () => {
+    // 真站用户卡片（`lib/onebox/templates/discourse_user_onebox.mustache`）：
+    // 简介才是 `<p>`，姓名在 `<span class="full-name">`，没写简介时摘要槽只剩姓名。
+    const preview = extractPreview(
+      makeRoot({
+        "aside, .onebox": {},
+        img: { src: "/user_avatar/forum.example/x/1_2.png" },
+        ".onebox-body h3 a": { text: "@Cunningham520" },
+        ".full-name": { text: " Reverse1999 " },
+      }),
+      ORIGIN,
+    );
+    expect(preview).toEqual({
+      title: "@Cunningham520",
+      excerpt: "Reverse1999",
+      imageUrl: `${ORIGIN}/user_avatar/forum.example/x/1_2.png`,
+      badge: undefined,
+    });
+  });
+
   it("truncates long excerpts", () => {
     const preview = extractPreview(
       makeRoot({

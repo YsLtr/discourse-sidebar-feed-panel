@@ -474,9 +474,12 @@ export function extractPreview(
     box.querySelector(".quote-title__text-content a") ||
     box.querySelector(".onebox-body h3 a") ||
     box.querySelector("a");
+  // 用户卡片没有简介时（`lib/onebox/templates/discourse_user_onebox.mustache:26`），
+  // 摘要槽只剩 `span.full-name`；有简介的用户仍显示简介，姓名让位。
   const excerptEl =
     box.querySelector("blockquote") ||
     box.querySelector(".onebox-body p") ||
+    box.querySelector(".full-name") ||
     box.querySelector(".description p");
   const badgeEl = box.querySelector(".badge-category__name");
 
