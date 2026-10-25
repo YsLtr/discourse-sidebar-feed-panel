@@ -126,6 +126,12 @@ try:
           return dot===dotBefore && getComputedStyle(dot).visibility==='hidden' &&
             Math.abs(firstItem.querySelector('.sfp-topic-time').getBoundingClientRect().x-timeBefore)<0.1;
         })()""")
+        cdp.evaluate("document.querySelector('[data-topic-id=\"280\"]').dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0}))")
+        check('opening a tracked topic keeps its server reply count', """(() => {
+          const item=document.querySelector('[data-topic-id="280"]');
+          return item.classList.contains('sfp-read') &&
+            item.querySelector('.sfp-unread-count')?.textContent==='3';
+        })()""")
         cdp.evaluate("fixture.head[20].unread_posts=7;document.querySelector('.sfp-refresh-btn').click()")
         wait_for("document.querySelector('.sfp-refresh-btn').getAttribute('aria-busy')!=='true'")
         check('refresh preserves locally read state', "getComputedStyle(document.querySelector('[data-topic-id=\"300\"] .sfp-unread-dot')).visibility==='hidden'")

@@ -36,22 +36,25 @@ describe("shared read-state and navigation rules", () => {
       "/t/topic/1",
     );
   });
-  it("applies the same local read marker used during refresh merging", () => {
+  it("advances local read progress without erasing the server reply count", () => {
     const topic: TopicReadState = {
       id: 1,
       highest_post_number: 8,
       unseen: true,
+      notification_level: 2,
       unread_posts: 3,
+      new_posts: 2,
     };
     _applyReadMarker(topic);
     expect(topic).toMatchObject({
       last_read_post_number: 8,
       unseen: false,
-      unread_posts: 0,
-      new_posts: 0,
       is_seen: true,
+      unread_posts: 3,
+      new_posts: 2,
     });
     expect(_isTopicRead(topic)).toBe(true);
+    expect(_unreadReplyCount(topic)).toBe(3);
   });
 });
 

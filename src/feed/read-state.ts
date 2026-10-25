@@ -60,9 +60,15 @@ export function _unreadReplyCount(topic: TopicReadState) {
   return count > 0 ? count : 0;
 }
 
+/**
+ * 本地标记已读：只推进阅读进度，**不动服务端给的新回复数**。
+ *
+ * 计数是服务端的真相（`Unread#unread_posts`），本地没有读完的证据。清零会让
+ * 徽章在下一次整表重渲染时凭空消失，而服务端仍认为有 N 条未读；下一次刷新
+ * 拿回来的数字又会跳回来，中途还错着。所以这里只改进度与「新」标记，
+ * 数字原样留给刷新覆盖。
+ */
 export function _applyReadMarker(topic: TopicReadState) {
-  topic.unread_posts = 0;
-  topic.new_posts = 0;
   topic.unseen = false;
   topic.is_seen = true;
   if (topic.highest_post_number) {

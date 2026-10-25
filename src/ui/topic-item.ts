@@ -315,9 +315,10 @@ export function createTopicRenderer({
     createTopicItem,
     markRead(item: HTMLElement) {
       item.classList.add("sfp-read");
+      // 只藏圆点。新回复数是服务端的数，本地没有「读完了」的证据，不能跟着抹掉。
       item
-        .querySelectorAll(".sfp-unread-dot, .sfp-unread-count")
-        .forEach((marker) => marker.classList.add("sfp-unread-hidden"));
+        .querySelector(".sfp-unread-dot")
+        ?.classList.add("sfp-unread-hidden");
     },
   };
 }
