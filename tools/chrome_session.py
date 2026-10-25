@@ -12,6 +12,23 @@ from pathlib import Path
 def default_chrome():
     return os.environ.get('CHROME_BIN') or shutil.which('google-chrome') or shutil.which('chromium') or 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 
+def wait_for_devtools_port(profile, timeout=15):
+    """Chrome creates DevToolsActivePort before it is readable: on Windows the file
+    exists while still locked or empty, so a plain exists()+read races."""
+    port_file = Path(profile) / 'DevToolsActivePort'
+    deadline = time.monotonic() + timeout
+    last = None
+    while True:
+        try:
+            lines = port_file.read_text().splitlines()
+            if lines:
+                return int(lines[0])
+        except (OSError, ValueError) as error:
+            last = error
+        if time.monotonic() > deadline:
+            raise RuntimeError(f'Chrome did not start ({port_file}): {last}')
+        time.sleep(.05)
+
 class CDP:
     def __init__(self, url):
         self.ws=websocket.create_connection(url, timeout=12, suppress_origin=True)
@@ -68,13 +85,7 @@ class ChromeSession:
                 f'--user-data-dir={self.profile}', '--window-size=1100,850', 'about:blank',
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-            port_file = self.profile / 'DevToolsActivePort'
-            deadline = time.monotonic() + 15
-            while not port_file.exists():
-                if time.monotonic() > deadline:
-                    raise RuntimeError('Chrome did not start')
-                time.sleep(.05)
-            port = int(port_file.read_text().splitlines()[0])
+            port = wait_for_devtools_port(self.profile)
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             targets = json.load(opener.open(f'http://127.0.0.1:{port}/json'))
             self.cdp = CDP(next(t['webSocketDebuggerUrl'] for t in targets if t['type'] == 'page'))

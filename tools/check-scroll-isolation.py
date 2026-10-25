@@ -18,7 +18,7 @@ import tempfile
 import time
 import urllib.request
 
-from chrome_session import CDP, default_chrome
+from chrome_session import CDP, default_chrome, wait_for_devtools_port
 
 ROOT = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser()
@@ -84,13 +84,7 @@ try:
         '--disable-extensions','--remote-debugging-port=0',f'--user-data-dir={profile}',
         '--window-size=1000,800','about:blank'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-    port_file=profile/'DevToolsActivePort'
-    deadline=time.monotonic()+15
-    while not port_file.exists():
-        if time.monotonic()>deadline:
-            raise RuntimeError('Chrome did not start')
-        time.sleep(.05)
-    port=int(port_file.read_text().splitlines()[0])
+    port=wait_for_devtools_port(profile)
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
     targets=json.load(opener.open(f'http://127.0.0.1:{port}/json'))
     cdp=CDP(next(t['webSocketDebuggerUrl'] for t in targets if t['type']=='page'))
