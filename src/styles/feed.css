@@ -98,15 +98,17 @@
 }
 /*
  * 5 px 的宽度把手同样太细。中间加一条不可见的宽条：宽 15 px（3 倍把手宽）、
- * 高 25%（侧边栏高度的 1/4）。它比把手宽，所以两侧各多出 5 px 判定面积。
+ * 高 25%（侧边栏高度的 1/4）。整条**留在侧边栏内**：把手右边在侧边栏外 2 px，
+ * 而侧边栏是 `overflow-x: hidden`，伸出去的部分点不到；把右边缘对齐侧边栏
+ * 边界（也就是那条宽度分割线）之后，15 px 全部可命中，还顺手与分割线相切。
  */
 .sfp-resizer-grip {
   position: absolute;
   top: 50%;
-  left: 50%;
+  right: 2px;
   width: 15px;
   height: 25%;
-  transform: translate(-50%, -50%);
+  transform: translateY(-50%);
   cursor: ew-resize;
 }
 
@@ -1218,6 +1220,9 @@
 }
 .sfp-rl-divider {
   position: relative;
+  /* 区域是 `position: relative` 且有背景，DOM 上又在分隔线之后，默认会盖住
+     圆伸进区域的那一半（点击被背景吃掉）。抬到区域之上，圆才两侧都能命中。 */
+  z-index: 2;
   flex: 0 0 auto;
   /* 自动外边距把「分隔线 + 区域」一起压到容器底部；主滚动区撑满时为 0。 */
   margin-top: auto;
@@ -1230,14 +1235,16 @@
 }
 /*
  * 3 px 的线本身太细。命中面积靠两个不可见的小圆撑开：一个在中心、一个在右端。
- * 它们比线高，所以上下各多出 5.5 px；圆形而非整条，是为了尽量少挡住两侧条目。
+ * 直径是线高的 5 倍（15 px），所以上下各多出 6 px；圆形而非整条，是为了尽量
+ * 少挡住两侧条目。圆都**不越过右边界**：侧边栏有 `overflow-x: hidden`，
+ * 越界的部分会被裁掉、也就点不到。
  */
 .sfp-rl-grip {
   position: absolute;
   top: 50%;
-  width: 14px;
-  height: 14px;
-  margin: -7px 0 0 -7px;
+  width: 15px;
+  height: 15px;
+  margin: -7.5px 0 0 -7.5px;
   border-radius: 50%;
   cursor: ns-resize;
 }
@@ -1245,7 +1252,10 @@
   left: 50%;
 }
 .sfp-rl-grip-end {
-  left: 100%;
+  /* 右边与侧边栏的宽度分割线相切：圆心不再压在线尾，而是整个圆贴在里面。 */
+  left: auto;
+  right: 0;
+  margin-left: 0;
 }
 .sfp-rl-divider[hidden] {
   display: none;

@@ -158,6 +158,18 @@ try:
             style.backgroundColor==='rgba(0, 0, 0, 0)' &&
             style.cursor==='ew-resize';
         })()""")
+        check('the width grip stays inside the sidebar so the whole strip is hittable', """(() => {
+          // 侧边栏是 `overflow-x: hidden`：越出右边界的部分会被裁掉、点不到。
+          // 把右边缘对齐侧边栏边界（那条宽度分割线）之后，整条 15 px 都可命中。
+          const sidebar=document.querySelector('#d-sidebar');
+          const grip=sidebar.querySelector('.sfp-resizer-grip');
+          const s=sidebar.getBoundingClientRect(), g=grip.getBoundingClientRect();
+          if (g.right > s.right + 0.5) return false;
+          const midY=g.top+g.height/2;
+          const own=el => el===grip || grip.contains(el);
+          return own(document.elementFromPoint(g.left+2, midY)) &&
+            own(document.elementFromPoint(g.right-2, midY));
+        })()""")
         cdp.evaluate("fixture.pause=true;document.querySelector('.sfp-refresh-btn').click()")
         wait_for('fixture.pending.length===1')
         cdp.evaluate("document.querySelector('.sfp-toggle-btn').click();fixture.release()")
@@ -389,7 +401,7 @@ try:
           return Math.abs(list.bottom-scroll.bottom)<=1;
         })()""")
         check('the divider hit area is two invisible circles, not just the 3 px line', """(() => {
-          // 线本身只有 3 px；命中判定靠中心与右端两个不可见小圆，上下各多出 5.5 px。
+          // 线本身只有 3 px；命中判定靠中心与右端两个不可见小圆，直径是线高的 5 倍。
           const grips=[...rlDivider.querySelectorAll('.sfp-rl-grip')];
           if (grips.length!==2) return false;
           const line=rlDivider.getBoundingClientRect();
@@ -397,11 +409,26 @@ try:
           const end=grips[1].getBoundingClientRect();
           return grips.every(g => {
             const r=g.getBoundingClientRect(), style=getComputedStyle(g);
-            return r.height>line.height && r.width>line.height*2 &&
+            return Math.abs(r.width - line.height*5) <= 1 &&
+              Math.abs(r.height - line.height*5) <= 1 &&
               style.backgroundColor==='rgba(0, 0, 0, 0)' && style.borderRadius==='50%';
           }) &&
             Math.abs((center.left+center.right)/2 - (line.left+line.right)/2) <= 1 &&
-            Math.abs((end.left+end.right)/2 - line.right) <= 1;
+            // 右端的圆整个贴在边界内：右边与宽度分割线相切，不越界（越界会被裁掉）。
+            Math.abs(end.right - line.right) <= 1;
+        })()""")
+        check('both divider grips can be hit above and below the line', """(() => {
+          // 圆的上下两半分别在主区域与稍后再读区域里：区域有背景且 DOM 在后，
+          // 分隔线必须抬到区域之上，否则下半截的点击会被区域吃掉。
+          const hits=[...rlDivider.querySelectorAll('.sfp-rl-grip')].map(g => {
+            const r=g.getBoundingClientRect();
+            const cx=r.left+r.width/2;
+            const above=document.elementFromPoint(cx, r.top+2);
+            const below=document.elementFromPoint(cx, r.bottom-2);
+            const own=el => el===g || g.contains(el) || el?.contains(g);
+            return own(above) && own(below);
+          });
+          return hits.every(Boolean) && !rlSection.hidden;
         })()""")
         check('the height stays at one item no matter how many entries there are', """(() => {
           // 加第二条不自动长高：没拖过分隔线就是「一个条目高」，取最底下那条。
