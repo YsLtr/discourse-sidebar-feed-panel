@@ -160,8 +160,7 @@ export function createReadLaterView({
           preview.title ||
           preview.name ||
           preview.excerpt ||
-          preview.imageUrl ||
-          preview.badge
+          preview.imageUrl
         ) {
           previewCache.set(url, preview);
           updateItems(
@@ -236,21 +235,18 @@ export function createReadLaterView({
       item.url;
     const href = toAbsoluteSiteUrl(item.url);
 
-    if (preview.imageUrl || preview.excerpt || preview.badge || preview.name) {
+    if (preview.imageUrl || preview.excerpt || preview.name) {
       const card = document.createElement("a");
       card.className = "sfp-rl-card";
       card.href = href;
       const imageHtml = preview.imageUrl
         ? `<img class="sfp-rl-card-image" src="${escapeAttr(preview.imageUrl)}" alt="" loading="lazy">`
         : `<span class="sfp-rl-fallback-icon">${_svgIcon("link")}</span>`;
-      const badgeHtml = preview.badge
-        ? `<span class="sfp-rl-card-badge">${escapeHtml(preview.badge)}</span>`
-        : "";
       // 用户卡片的全名排在标题前、与标题同一行（§四.2），样式同话题条目的姓名。
       const nameHtml = preview.name
         ? `<span class="sfp-rl-card-name" dir="auto">${escapeHtml(preview.name)}</span>`
         : "";
-      card.innerHTML = `${imageHtml}<span class="sfp-rl-card-body"><span class="sfp-rl-card-title-row">${nameHtml}<span class="sfp-rl-card-title" dir="auto">${escapeHtml(title)}</span></span>${preview.excerpt ? `<span class="sfp-rl-card-excerpt" dir="auto">${escapeHtml(preview.excerpt)}</span>` : ""}${badgeHtml}</span>`;
+      card.innerHTML = `${imageHtml}<span class="sfp-rl-card-body"><span class="sfp-rl-card-title-row">${nameHtml}<span class="sfp-rl-card-title" dir="auto">${escapeHtml(title)}</span></span>${preview.excerpt ? `<span class="sfp-rl-card-excerpt" dir="auto">${escapeHtml(preview.excerpt)}</span>` : ""}</span>`;
       return card;
     }
 

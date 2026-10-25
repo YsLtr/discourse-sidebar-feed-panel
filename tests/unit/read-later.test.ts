@@ -267,14 +267,32 @@ describe("extractPreview", () => {
         "aside, .onebox": {},
         ".quote-title__text-content a": { text: "  A   title  " },
         blockquote: { text: "first post excerpt" },
-        ".badge-category__name": { text: "Dev" },
       }),
       ORIGIN,
     );
     expect(preview).toEqual({
       title: "A title",
       excerpt: "first post excerpt",
-      badge: "Dev",
+      imageUrl: undefined,
+    });
+  });
+
+  it("reads a category card without repeating its name as a badge", () => {
+    // 分类卡片的标题就是分类名（`discourse_category_onebox.mustache:6-11`），
+    // 所以 `.badge-category__name` 不取，否则同一行会显示两遍。
+    const preview = extractPreview(
+      makeRoot({
+        "aside, .onebox": {},
+        ".onebox-body h3 a": { text: "运营反馈" },
+        ".badge-category__name": { text: "运营反馈" },
+        ".description p": { text: "有关此网站、其组织、运作方式以及如何改进的讨论。" },
+      }),
+      ORIGIN,
+    );
+    expect(preview).toEqual({
+      title: "运营反馈",
+      name: undefined,
+      excerpt: "有关此网站、其组织、运作方式以及如何改进的讨论。",
       imageUrl: undefined,
     });
   });
@@ -320,7 +338,6 @@ describe("extractPreview", () => {
       name: "Reverse1999",
       excerpt: undefined,
       imageUrl: `${ORIGIN}/user_avatar/forum.example/x/1_2.png`,
-      badge: undefined,
     });
   });
 

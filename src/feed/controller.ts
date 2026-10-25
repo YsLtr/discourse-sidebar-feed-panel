@@ -324,7 +324,7 @@ export function createFeedController({
         new DOMParser().parseFromString(result.html, "text/html"),
         location.origin,
       );
-      return preview.title || preview.excerpt || preview.imageUrl || preview.badge
+      return preview.title || preview.name || preview.excerpt || preview.imageUrl
         ? preview
         : null;
     } catch {

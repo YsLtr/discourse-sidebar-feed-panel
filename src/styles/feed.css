@@ -1417,14 +1417,6 @@
   overflow: hidden;
   word-break: break-word;
 }
-.sfp-rl-card-badge {
-  align-self: flex-start;
-  font-size: 11px;
-  padding: 0 5px;
-  border-radius: 3px;
-  background: var(--primary-low);
-  color: var(--primary-medium);
-}
 .sfp-rl-fallback {
   display: flex;
   gap: 8px;

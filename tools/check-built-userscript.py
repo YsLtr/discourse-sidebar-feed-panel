@@ -877,6 +877,26 @@ try:
         })()""")
         cdp.evaluate("""fixture.oneboxHtml=null; removeRlItem('/u/dana');""")
         wait_for("!document.querySelector('.sfp-rl-item[data-url=\"/u/dana\"]')")
+        # 分类卡片：标题就是分类名（`discourse_category_onebox.mustache:6-11`），
+        # 不能把 `.badge-category__name` 再显示一遍。
+        cdp.evaluate("""fixture.oneboxHtml=(target)=>`<aside class="onebox category-onebox">
+            <article class="onebox-body category-onebox-body">
+              <h3><a class="badge-category__wrapper" href="${target}"><span class="badge-category__name">运营反馈</span></a></h3>
+              <div><span class="description"><p>有关此网站、其组织、运作方式以及如何改进的讨论。</p></span></div>
+            </article>
+          </aside>`;
+          dragTo('.sfp-read-later', location.origin + '/c/feedback/2');""")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/c/feedback/2\"] .sfp-rl-card')")
+        check('a category card shows its name once, never as a separate badge', """(() => {
+          const card=document.querySelector('.sfp-rl-item[data-url="/c/feedback/2"] .sfp-rl-card');
+          const title=card.querySelector('.sfp-rl-card-title');
+          return title?.textContent==='运营反馈' &&
+            !card.querySelector('.sfp-rl-card-badge') &&
+            !card.querySelector('.sfp-rl-card-name') &&
+            (card.textContent.match(/运营反馈/g)||[]).length===1;
+        })()""")
+        cdp.evaluate("""fixture.oneboxHtml=null; removeRlItem('/c/feedback/2');""")
+        wait_for("!document.querySelector('.sfp-rl-item[data-url=\"/c/feedback/2\"]')")
         # 直接重新拖入已在列表里的链接：移到最新位置，保留预览，不再请求。
         cdp.evaluate("""dragTo('.sfp-read-later', location.origin + '/t/299');""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===2")

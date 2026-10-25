@@ -20,7 +20,6 @@ export interface ReadLaterPreview {
   name?: string;
   excerpt?: string;
   imageUrl?: string;
-  badge?: string;
 }
 
 export interface ReadLaterItem {
@@ -123,9 +122,6 @@ function validPreview(value: unknown): ReadLaterPreview | undefined {
   }
   if (typeof preview.excerpt === "string" && preview.excerpt) {
     result.excerpt = preview.excerpt;
-  }
-  if (typeof preview.badge === "string" && preview.badge) {
-    result.badge = preview.badge;
   }
   // 图片地址在写入时已解析成绝对地址；这里再挡一次 javascript:/data:。
   if (typeof preview.imageUrl === "string" && /^https?:\/\//i.test(preview.imageUrl)) {
@@ -484,11 +480,14 @@ export function extractPreview(
   // 姓名单独存一个字段：渲染时排在标题前、与标题同一行，样式同话题条目的姓名；
   // 摘要槽留给简介，不兼收姓名。
   const nameEl = box.querySelector(".full-name");
+  // 分类卡片没有单独的摘要容器以外的东西可要；`.badge-category__name` 不取——
+  // 分类卡片的标题就是它（`discourse_category_onebox.mustache:6-11` 的
+  // `h3 > a.badge-category__wrapper > span.badge-category__name`），取出来只是把
+  // 标题再显示一遍。
   const excerptEl =
     box.querySelector("blockquote") ||
     box.querySelector(".onebox-body p") ||
     box.querySelector(".description p");
-  const badgeEl = box.querySelector(".badge-category__name");
 
   const title = cleanText(titleEl?.textContent);
   const name = cleanText(nameEl?.textContent);
@@ -500,15 +499,8 @@ export function extractPreview(
       truncateText(cleanText(excerptEl?.textContent), READ_LATER_EXCERPT_MAX) ||
       undefined,
     imageUrl,
-    badge: cleanText(badgeEl?.textContent) || undefined,
   };
-  if (
-    !preview.title &&
-    !preview.name &&
-    !preview.excerpt &&
-    !preview.imageUrl &&
-    !preview.badge
-  ) {
+  if (!preview.title && !preview.name && !preview.excerpt && !preview.imageUrl) {
     return {};
   }
   return preview;
