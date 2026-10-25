@@ -109,6 +109,8 @@ export function createFeedHost({
 }: HostDependencies) {
   let toggleBtn: HTMLButtonElement | null = null;
   let resizerEl: HTMLElement | null = null;
+  let resizerGripEl: HTMLElement | null = null;
+  let gripSyncQueued = false;
   let isResizing = false;
   let originalSidebarWidthBeforeFeed: number | null = null;
   let widthAnimationTimer: number | null = null;
@@ -295,6 +297,38 @@ export function createFeedHost({
     clearSidebarWidthVariable();
   }
 
+  /**
+   * 宽度把手的命中区挂在 `body` 上、`position: fixed`，横跨侧边栏边界。
+   *
+   * 为什么不挂在把手里面：侧边栏是 `overflow-x: hidden`，而把手本身在
+   * `right: -2px`——挂在里面的话，伸到边界外的那一截会被裁掉，看得见摸不着。
+   * 只有离开侧边栏的裁剪上下文，外面那一半才点得到。
+   */
+  function syncResizerGrip() {
+    const sidebar = getSidebarElement();
+    const grip = resizerGripEl;
+    if (!sidebar || !grip) return;
+    const rect = sidebar.getBoundingClientRect();
+    if (rect.height <= 0) {
+      grip.hidden = true;
+      return;
+    }
+    grip.hidden = false;
+    grip.style.left = `${rect.right}px`;
+    grip.style.top = `${rect.top + rect.height / 2}px`;
+    grip.style.height = `${rect.height / 4}px`;
+  }
+
+  /** 滚动/resize 会连续触发，合并到下一帧再量一次。 */
+  function queueGripSync() {
+    if (gripSyncQueued) return;
+    gripSyncQueued = true;
+    requestAnimationFrame(() => {
+      gripSyncQueued = false;
+      syncResizerGrip();
+    });
+  }
+
   function setupResizer() {
     const sidebar = getSidebarElement();
     if (!sidebar) return;
@@ -313,63 +347,80 @@ export function createFeedHost({
     if (!resizerEl.parentElement) {
       sidebar.appendChild(resizerEl);
     }
-    // 5 px 太细：中间挂一条不可见的宽条扩大判定面积，mousedown 冒泡回把手。
-    if (!resizerEl.querySelector(":scope > .sfp-resizer-grip")) {
-      const grip = document.createElement("div");
-      grip.className = "sfp-resizer-grip";
-      resizerEl.appendChild(grip);
+
+    if (!resizerGripEl || !resizerGripEl.isConnected) {
+      resizerGripEl = document.createElement("div");
+      resizerGripEl.className = "sfp-resizer-grip";
+      resizerGripEl.addEventListener("mousedown", beginResize);
+      document.body.appendChild(resizerGripEl);
+      // 侧边栏会随滚动/窗口尺寸改变位置与高度，命中区必须跟着走。
+      getScope().listen(window, "scroll", queueGripSync, {
+        passive: true,
+        capture: true,
+      });
+      getScope().listen(window, "resize", queueGripSync);
     }
+    syncResizerGrip();
 
-    resizerEl.addEventListener("mousedown", (e) => {
-      if (isResizing) return;
-      e.preventDefault();
-      e.stopPropagation();
-      isResizing = true;
-      const startX = e.clientX;
-      const startWidth = sidebar.offsetWidth;
-      let finalWidth = getWidth();
-      resizerEl?.classList.add("sfp-resizing");
-      getSidebarWidthTransitionElements(sidebar).forEach((el) =>
-        el.classList.remove("sfp-width-animating"),
+    resizerEl.addEventListener("mousedown", beginResize);
+  }
+
+  function beginResize(e: MouseEvent) {
+    const sidebar = getSidebarElement();
+    if (!sidebar || isResizing) return;
+    e.preventDefault();
+    e.stopPropagation();
+    isResizing = true;
+    const startX = e.clientX;
+    const startWidth = sidebar.offsetWidth;
+    let finalWidth = getWidth();
+    resizerEl?.classList.add("sfp-resizing");
+    getSidebarWidthTransitionElements(sidebar).forEach((el) =>
+      el.classList.remove("sfp-width-animating"),
+    );
+    document.body.style.cursor = "ew-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const delta = e.clientX - startX;
+      const newWidth = Math.min(
+        MAX_WIDTH,
+        Math.max(getMinSidebarWidth(), startWidth + delta),
       );
-      document.body.style.cursor = "ew-resize";
-      document.body.style.userSelect = "none";
+      applySidebarWidth(newWidth);
+      finalWidth = newWidth;
+      syncResizerGrip();
+    };
 
-      const onMouseMove = (e: MouseEvent) => {
-        if (!isResizing) return;
-        const delta = e.clientX - startX;
-        const newWidth = Math.min(
-          MAX_WIDTH,
-          Math.max(getMinSidebarWidth(), startWidth + delta),
-        );
-        applySidebarWidth(newWidth);
-        finalWidth = newWidth;
-      };
+    const onMouseUp = () => {
+      onWidth(finalWidth);
+      cleanup();
+      forget();
+      syncResizerGrip();
+    };
 
-      const onMouseUp = () => {
-        onWidth(finalWidth);
-        cleanup();
-        forget();
-      };
-
-      const removeMove = getScope().listen(document, "mousemove", onMouseMove);
-      const removeUp = getScope().listen(document, "mouseup", onMouseUp);
-      const cleanup = () => {
-        isResizing = false;
-        resizerEl?.classList.remove("sfp-resizing");
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        removeMove();
-        removeUp();
-      };
-      const forget = getScope().defer(cleanup);
-    });
+    const removeMove = getScope().listen(document, "mousemove", onMouseMove);
+    const removeUp = getScope().listen(document, "mouseup", onMouseUp);
+    const cleanup = () => {
+      isResizing = false;
+      resizerEl?.classList.remove("sfp-resizing");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      removeMove();
+      removeUp();
+    };
+    const forget = getScope().defer(cleanup);
   }
 
   function removeResizer() {
     if (resizerEl) {
       resizerEl.remove();
       resizerEl = null;
+    }
+    if (resizerGripEl) {
+      resizerGripEl.remove();
+      resizerGripEl = null;
     }
 
     const sidebar = getSidebarElement();

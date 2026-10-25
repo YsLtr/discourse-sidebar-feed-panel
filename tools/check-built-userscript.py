@@ -146,9 +146,9 @@ try:
         wait_for("document.querySelectorAll('.sfp-topic-item').length===30 && !!document.querySelector('#d-sidebar .sfp-resizer')")
         check('host replacement remounts once without duplicate subscriptions', "document.querySelectorAll('.sfp-feed-container').length===1 && [...fixture.subscriptions.values()].every(s=>s.size===1)")
         check('the width handle carries an invisible 3x-wide grip in its middle', """(() => {
-          // 5 px 的把手太细：中间挂一条不可见的宽条，宽 15 px（3 倍）、高 25%。
+          // 5 px 的把手太细：另挂一条不可见的宽条，宽 15 px（3 倍）、高 25%。
           const handle=document.querySelector('.sfp-resizer');
-          const grip=handle.querySelector('.sfp-resizer-grip');
+          const grip=document.querySelector('.sfp-resizer-grip');
           if (!grip) return false;
           const h=handle.getBoundingClientRect(), g=grip.getBoundingClientRect();
           const style=getComputedStyle(grip);
@@ -158,15 +158,17 @@ try:
             style.backgroundColor==='rgba(0, 0, 0, 0)' &&
             style.cursor==='ew-resize';
         })()""")
-        check('the width grip stays inside the sidebar so the whole strip is hittable', """(() => {
-          // 侧边栏是 `overflow-x: hidden`：越出右边界的部分会被裁掉、点不到。
-          // 把右边缘对齐侧边栏边界（那条宽度分割线）之后，整条 15 px 都可命中。
+        check('the width grip straddles the sidebar edge so the outer half is hittable', """(() => {
+          // 侧边栏是 `overflow-x: hidden`：挂在它里面的东西，越出边界的部分会被
+          // 裁掉、点不到。命中条挂在 body 上、position: fixed，才横跨边界。
           const sidebar=document.querySelector('#d-sidebar');
-          const grip=sidebar.querySelector('.sfp-resizer-grip');
+          const grip=document.querySelector('.sfp-resizer-grip');
+          if (!grip || grip.parentElement!==document.body) return false;
           const s=sidebar.getBoundingClientRect(), g=grip.getBoundingClientRect();
-          if (g.right > s.right + 0.5) return false;
+          if (!(g.left < s.right && g.right > s.right)) return false;
           const midY=g.top+g.height/2;
           const own=el => el===grip || grip.contains(el);
+          // 边界内、边界外各取一点，都必须命中它。
           return own(document.elementFromPoint(g.left+2, midY)) &&
             own(document.elementFromPoint(g.right-2, midY));
         })()""")
@@ -401,7 +403,7 @@ try:
           return Math.abs(list.bottom-scroll.bottom)<=1;
         })()""")
         check('the divider hit area is two invisible circles, not just the 3 px line', """(() => {
-          // 线本身只有 3 px；命中判定靠中心与右端两个不可见小圆，直径是线高的 5 倍。
+          // 线本身只有 3 px；命中判定靠中心与右端两个不可见小圆，直径是线高的 10 倍。
           const grips=[...rlDivider.querySelectorAll('.sfp-rl-grip')];
           if (grips.length!==2) return false;
           const line=rlDivider.getBoundingClientRect();
@@ -409,8 +411,8 @@ try:
           const end=grips[1].getBoundingClientRect();
           return grips.every(g => {
             const r=g.getBoundingClientRect(), style=getComputedStyle(g);
-            return Math.abs(r.width - line.height*5) <= 1 &&
-              Math.abs(r.height - line.height*5) <= 1 &&
+            return Math.abs(r.width - line.height*10) <= 1 &&
+              Math.abs(r.height - line.height*10) <= 1 &&
               style.backgroundColor==='rgba(0, 0, 0, 0)' && style.borderRadius==='50%';
           }) &&
             Math.abs((center.left+center.right)/2 - (line.left+line.right)/2) <= 1 &&
