@@ -314,6 +314,36 @@ export function createReadLaterStore({
   };
 }
 
+/**
+ * 用一轮**已经取到**的话题覆盖条目快照：不发请求，也不动预览。
+ * 响应里没有的话题原样保留（静默刷新没取到的内容无从更新）；
+ * 一条都没命中时返回 `null`，让调用方跳过写入与重渲染。
+ */
+export function mergeTopicSnapshot(
+  items: readonly ReadLaterItem[],
+  topics: readonly Topic[],
+  users: readonly TopicUser[],
+  selectTitle: (topic: Topic) => string,
+): ReadLaterItem[] | null {
+  if (!items.length || !topics.length) return null;
+  const byId = new Map(topics.map((topic) => [topic.id, topic]));
+  const userById = new Map(users.map((user) => [user.id, user]));
+  let changed = false;
+  const next = items.map((item) => {
+    const fresh = item.topicId === undefined ? undefined : byId.get(item.topicId);
+    if (!fresh) return item;
+    changed = true;
+    const posterId = fresh.posters?.[0]?.user_id;
+    return {
+      ...item,
+      topic: fresh,
+      user: (posterId === undefined ? undefined : userById.get(posterId)) || item.user,
+      title: selectTitle(fresh) || item.title,
+    };
+  });
+  return changed ? next : null;
+}
+
 function cleanText(value: string | null | undefined) {
   return collapse(value);
 }

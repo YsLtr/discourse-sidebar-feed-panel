@@ -3,6 +3,7 @@ import {
   createReadLaterStore,
   extractOpenGraph,
   extractPreview,
+  mergeTopicSnapshot,
   parseReadLaterLink,
   readLaterFallbackTitle,
   READ_LATER_HEIGHT_STORAGE_KEY,
@@ -10,6 +11,7 @@ import {
   type ReadLaterItem,
   type ReadLaterStorage,
 } from "../../src/read-later";
+import type { Topic } from "../../src/feed/types";
 
 const ORIGIN = "https://forum.example";
 
@@ -207,8 +209,37 @@ describe("createReadLaterStore", () => {
   });
 });
 
-// 用最小的假节点树代替 DOMParser：所有节点共用一张选择器表，
-// 这样 `box.querySelector("img")` 与 `root.querySelector("aside")` 都能命中。
+describe("mergeTopicSnapshot", () => {
+  const title = (topic: Topic) => topic.fancy_title || topic.title || "";
+
+  it("overwrites only the topics present in the response", () => {
+    const items = [
+      item("/t/a/1", { kind: "topic", topicId: 1, topic: { id: 1, title: "old" } }),
+      item("/t/b/2", { kind: "topic", topicId: 2, topic: { id: 2, title: "keep" } }),
+    ];
+    const next = mergeTopicSnapshot(
+      items,
+      [{ id: 1, title: "new", unread_posts: 3, posters: [{ user_id: 7 }] }],
+      [{ id: 7, username: "poster" }],
+      title,
+    );
+    expect(next).not.toBeNull();
+    expect(next?.[0].title).toBe("new");
+    expect(next?.[0].topic?.unread_posts).toBe(3);
+    expect(next?.[0].user?.username).toBe("poster");
+    // 这一轮没取到的话题保持原样，连对象引用都不换。
+    expect(next?.[1]).toBe(items[1]);
+  });
+
+  it("returns null when nothing matched or the batch is empty", () => {
+    const items = [item("/t/a/1", { kind: "topic", topicId: 1 })];
+    expect(mergeTopicSnapshot(items, [{ id: 9 }], [], title)).toBeNull();
+    expect(mergeTopicSnapshot(items, [], [], title)).toBeNull();
+    expect(mergeTopicSnapshot([], [{ id: 1 }], [], title)).toBeNull();
+  });
+});
+
+// 用最小的假节点树代替 DOMParser：所有节点共用一张选择器表，// 这样 `box.querySelector("img")` 与 `root.querySelector("aside")` 都能命中。
 type Stub = {
   textContent: string;
   getAttribute(name: string): string | null;

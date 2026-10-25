@@ -8,6 +8,7 @@ import type { ValueStore } from "../preferences";
 import { Preferences } from "../preferences";
 import {
   createReadLaterStore,
+  mergeTopicSnapshot,
   readLaterFallbackTitle,
   resolveReadLaterStorage,
   type ParsedReadLaterLink,
@@ -420,6 +421,25 @@ export function createFeedController({
       };
     });
     if (changed) readLaterStore.update(next as ReadLaterItem[]);
+    readLaterView.refresh();
+  }
+
+  /**
+   * 用这一轮刚取到的话题覆盖条目快照，**不发请求**。
+   * 静默刷新只取 incoming 那几个 id，没取到的条目保持原样。
+   */
+  function applyReadLaterSnapshot(
+    topics: readonly Topic[],
+    users: readonly TopicUser[] = [],
+  ) {
+    const next = mergeTopicSnapshot(
+      readLaterStore.items(),
+      topics,
+      users,
+      selectTopicTitle,
+    );
+    if (!next) return;
+    readLaterStore.update(next);
     readLaterView.refresh();
   }
   const controls = createControls({
@@ -1695,6 +1715,8 @@ export function createFeedController({
         return;
       if (!data?.topic_list?.topics) return;
       _processUsers(data);
+      // 增量刷新不重拉整页，但这一批数据就是最新的：顺手校正命中的条目。
+      applyReadLaterSnapshot(data.topic_list.topics, data.users);
 
       _mergeAndRenderTopics(data.topic_list.topics, {
         mode: "prepend",
