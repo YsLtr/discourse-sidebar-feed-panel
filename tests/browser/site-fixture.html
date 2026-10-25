@@ -104,6 +104,18 @@ window.fetch = async (path, options) => {
     if(fixture.oneboxDelay) await new Promise(resolve => setTimeout(resolve, fixture.oneboxDelay));
     if(fixture.oneboxStatus !== 200) return new Response('nope',{status:fixture.oneboxStatus});
     const target = url.searchParams.get('url') || '';
+    // 话题 onebox 照抄 `Oneboxer.local_topic`（lib/oneboxer.rb:365-386）：
+    // 只有 `category_id` 与目标话题同分类时才走当前用户的 guardian；否则退成
+    // 匿名 guardian，登录可见的站点一律拿回纯 `<a>` 兜底。不存在的话题永远兜底。
+    const targetTopic = /\/t\/(?:[^/]+\/)?(\d+)$/.exec(target);
+    if(targetTopic) {
+      const id = Number(targetTopic[1]);
+      const category = Number(url.searchParams.get('category_id'));
+      const known = !(fixture.goneTopicIds || []).includes(id) &&
+        Number.isFinite(category) && category === (fixture.head.find(t=>t.id===id) || fixture.topic(id)).category_id;
+      if(!known) return new Response(`<a href='${target}'>${target}</a>`,{headers:{'Content-Type':'text/html'}});
+      return new Response(`<aside class='quote' data-post="1" data-topic="${id}"><div class='title'><div class="quote-title__text-content"><a href="${target}">Topic ${id}</a> <a class='badge-category__wrapper' href='/c/x/${category}'><span class='badge-category__name'>Cat ${category}</span></a></div></div><blockquote>Topic ${id} first post</blockquote></aside>`,{headers:{'Content-Type':'text/html'}});
+    }
     const html = fixture.oneboxHtml ? fixture.oneboxHtml(target) : `<aside class="onebox"><article class="onebox-body"><img src="/uploads/preview.png" class="thumbnail"><h3><a href="${target}">Preview title</a></h3><p>Preview excerpt</p></article></aside>`;
     return new Response(html,{headers:{'Content-Type':'text/html'}});
   }
@@ -126,6 +138,10 @@ window.fetch = async (path, options) => {
     const id = Number(viewMatch[1]);
     if((fixture.goneTopicIds || []).includes(id)) {
       return new Response(JSON.stringify({errors:['not found']}),{status:404,headers:{'Content-Type':'application/json'}});
+    }
+    // 瞬时故障：TopicView 500，onebox 兜底还有机会救回来。
+    if((fixture.topicViewFailIds || []).includes(id)) {
+      return new Response('temporary failure',{status:500});
     }
     const base = Object.assign({}, fixture.head.find(t=>t.id===id) || fixture.topic(id));
     // TopicView 与列表项形状不同：没有 posters，创建者放在 details.created_by。

@@ -8,12 +8,14 @@ import type { ValueStore } from "../preferences";
 import { Preferences } from "../preferences";
 import {
   createReadLaterStore,
+  extractPreview,
   mergeTopicSnapshot,
   readLaterFallbackTitle,
   resolveReadLaterStorage,
   topicFromView,
   type ParsedReadLaterLink,
   type ReadLaterItem,
+  type ReadLaterPreview,
 } from "../read-later";
 import { createSiteData } from "../site/site-data";
 import { createTagStyles } from "../site/tag-styles";
@@ -270,12 +272,24 @@ export function createFeedController({
    * 与编辑器同一个请求形状（`frontend/pretty-text/addon/oneboxer.js:79`）：
    * `refresh=true` 绕过服务端缓存——否则曾经缓存下来的纯 `<a>` 兜底会一直生效，
    * 表现就是「个人资料预览不出来」；`X-Requested-With` 让 `requires_login`
-   * 返回 403 而不是跳登录页。`category_id`/`topic_id` 只有话题预览用得上，
-   * 我们从不 onebox 话题，故不传。
+   * 返回 403 而不是跳登录页。
+   *
+   * `category_id`/`topic_id` 只有话题兜底用得上：`Oneboxer.local_topic`
+   * 在 `category_id` 与目标话题同分类时改用**当前用户**的 guardian
+   * （`lib/oneboxer.rb:379-383`），静音分类里的话题因此也能出真卡片；
+   * 不传就退成匿名 guardian，登录可见的站点一律拿回纯 `<a>` 兜底。
    */
-  function fetchOneboxPreview(url: string, signal: AbortSignal) {
+  function fetchOneboxPreview(
+    url: string,
+    signal: AbortSignal,
+    opts?: { categoryId?: number; topicId?: number },
+  ) {
     const target = toAbsoluteSiteUrl(url);
     const query = new URLSearchParams({ url: target, refresh: "true" });
+    if (Number.isFinite(opts?.categoryId))
+      query.set("category_id", String(opts?.categoryId));
+    if (Number.isFinite(opts?.topicId))
+      query.set("topic_id", String(opts?.topicId));
     return fetch(`/onebox?${query}`, {
       credentials: "include",
       headers: {
@@ -288,6 +302,34 @@ export function createFeedController({
       status: response.status,
       html: response.ok ? await response.text() : "",
     }));
+  }
+
+  /**
+   * 话题的 onebox 兜底：`/t/<id>.json` 也拿不到时才用。
+   * 纯 `<a>` 兜底与空结果都算失败（判据同编辑器 `prosemirror/extensions/onebox.js:694`），
+   * 所以「不存在的话题」照样只会拿到 null，不会被渲染成一张假卡片。
+   */
+  async function fetchTopicPreview(
+    id: number,
+    categoryId: number | undefined,
+    signal: AbortSignal,
+  ) {
+    try {
+      const result = await fetchOneboxPreview(`/t/${id}`, signal, {
+        categoryId,
+        topicId: id,
+      });
+      if (result.status < 200 || result.status >= 300 || !result.html) return null;
+      const preview = extractPreview(
+        new DOMParser().parseFromString(result.html, "text/html"),
+        location.origin,
+      );
+      return preview.title || preview.excerpt || preview.imageUrl || preview.badge
+        ? preview
+        : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -393,8 +435,14 @@ export function createFeedController({
 
     const topics = new Map<number, Topic>(residentById);
     const users = new Map<number, TopicUser>();
-    /** `/t/<id>.json` 明确说不存在：只有这些才标异常。 */
+    const previews = new Map<number, ReadLaterPreview>();
+    /** 两处都说「没有」：只有这些才标异常。 */
     const gone = new Set<number>();
+    const itemById = new Map<number, ReadLaterItem>();
+    for (const item of readLaterStore.items()) {
+      if (item.topicId && !itemById.has(item.topicId))
+        itemById.set(item.topicId, item);
+    }
     for (let index = 0; index < missing.length; index += READ_LATER_SYNC_CHUNK) {
       const chunk = missing.slice(index, index + READ_LATER_SYNC_CHUNK);
       try {
@@ -410,18 +458,32 @@ export function createFeedController({
     }
     for (const id of missing) {
       if (topics.has(id) || disposed) continue;
+      const item = itemById.get(id);
+      let definitive = false;
       try {
         const result = await fetchTopicView(id, requests.signal);
         const parsed = result.json ? topicFromView(result.json) : null;
         if (parsed) {
           topics.set(id, parsed.topic);
           if (parsed.user) users.set(parsed.user.id, parsed.user);
-        } else if (result.status === 403 || result.status === 404) {
-          gone.add(id);
+          continue;
         }
+        definitive = result.status === 403 || result.status === 404;
       } catch (e) {
         if (requests.signal.aborted) return;
       }
+      // 已经标过异常的话题不再重复问一遍 onebox，省掉每轮一次的无效请求。
+      if (definitive && item?.topic?.sfpUnavailable) {
+        gone.add(id);
+        continue;
+      }
+      const preview = await fetchTopicPreview(
+        id,
+        item?.topic?.category_id,
+        requests.signal,
+      );
+      if (preview) previews.set(id, preview);
+      else if (definitive) gone.add(id);
     }
     if (disposed) return;
 
@@ -430,6 +492,11 @@ export function createFeedController({
       if (!item.topicId) return item;
       const fresh = topics.get(item.topicId);
       if (!fresh) {
+        const preview = previews.get(item.topicId);
+        if (preview) {
+          changed = true;
+          return { ...item, topic: undefined, preview };
+        }
         if (!gone.has(item.topicId)) return item;
         const topic: Topic = { ...(item.topic || { id: item.topicId }) };
         if (!markUnavailable(topic)) return item;
@@ -445,6 +512,7 @@ export function createFeedController({
         topic: fresh,
         user: user || item.user,
         title,
+        preview: undefined,
       };
     });
     if (changed) readLaterStore.update(next as ReadLaterItem[]);

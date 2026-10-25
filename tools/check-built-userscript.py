@@ -908,18 +908,19 @@ try:
             fixture.requests.some(r=>r.path==='/t/9011.json') &&
             !!item?.querySelector('.sfp-topic-item') && !item.querySelector('.sfp-rl-card');
         })()""")
-        # 200 但列表里没有、按 id 又回 404：标成话题异常，同样不发预览。
+        # 200 但列表里没有、按 id 又回 404：标成话题异常。onebox 兜底会试一次，
+        # 但对不存在的话题它只会回纯 `<a>`（与真站一致），所以不会渲染成卡片。
         cdp.evaluate("""fixture.failNext=false;
           fixture.missingTopicIds=[9012];
           fixture.goneTopicIds=[9012];
-          window.missingOneboxBefore=fixture.oneboxRequests.length;
+          fixture.oneboxRequests.length=0;
           dragTo('.sfp-read-later', location.origin + '/t/9012');""")
         wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9012\"] .sfp-topic-unavailable')")
         time.sleep(.45)
         check('a topic missing everywhere is marked unavailable, not previewed', """(() => {
           const item=document.querySelector('.sfp-rl-item[data-url="/t/9012"]');
-          return fixture.oneboxRequests.length===missingOneboxBefore &&
-            fixture.requests.some(r=>r.path==='/t/9012.json') &&
+          return fixture.requests.some(r=>r.path==='/t/9012.json') &&
+            fixture.oneboxRequests.length===1 &&
             !!item?.querySelector('.sfp-topic-unavailable') && !item.querySelector('.sfp-rl-card');
         })()""")
         cdp.evaluate("""fixture.missingTopicIds=[];
@@ -1071,10 +1072,34 @@ try:
             !!item.querySelector('.sfp-topic-avatar') &&
             item.querySelector('.sfp-topic-stat').textContent.includes('3');
         })()""")
+        # TopicView 也失败时的最后兜底：onebox 带上同分类的 category_id 会走当前
+        # 用户的 guardian（`lib/oneboxer.rb:379-383`），因此还能出真卡片。
+        cdp.evaluate("""fixture.missingTopicIds=[]; fixture.goneTopicIds=[];
+          fixture.topicViewFailIds=[];
+          localStorage.setItem('sfp_read_later_v1', JSON.stringify({version:2,items:[
+            {url:'/t/9003',title:'fallback',kind:'topic',topicId:9003,addedAt:1}
+          ]}));
+          window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:'x'}));""")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9003\"] .sfp-topic-item')")
+        cdp.evaluate("""fixture.missingTopicIds=[9003]; fixture.topicViewFailIds=[9003];
+          fixture.requests.length=0; fixture.oneboxRequests.length=0;
+          document.querySelector('.sfp-refresh-btn').click();""")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9003\"] .sfp-rl-card')")
+        check('a topic whose TopicView fails falls back to the onebox card', """(() => {
+          const item=document.querySelector('.sfp-rl-item[data-url="/t/9003"]');
+          return fixture.requests.some(r=>r.path==='/t/9003.json') &&
+            !!item?.querySelector('.sfp-rl-card') &&
+            !item.querySelector('.sfp-topic-unavailable');
+        })()""")
+        check('the topic onebox carries the same-category parameters', """(() => {
+          return fixture.requests.some(r=>r.path.startsWith('/onebox') &&
+            r.path.includes('category_id=2') && r.path.includes('topic_id=9003'));
+        })()""")
         # 刷新会触发两次同步请求；等它们都落地，否则同步写回会覆盖测试的删除。
         time.sleep(.6)
         cdp.evaluate("""fixture.missingTopicIds=[];
           fixture.goneTopicIds=[];
+          fixture.topicViewFailIds=[];
           localStorage.removeItem('sfp_read_later_v1');
           window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:null}));""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===0")

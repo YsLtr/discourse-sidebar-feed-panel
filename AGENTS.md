@@ -18,7 +18,7 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - **静默刷新补齐稍后再读**（`3.4.1`）：增量刷新路径此前只合并主列表，条目快照要等下一次手动刷新才更新。现在 `_applySidebarIncomingTopics()` 拿到数据后调 `applyReadLaterSnapshot()`，用纯函数 `mergeTopicSnapshot()` 覆盖命中条目（标题、新回复数、首个 poster），**不发任何请求**；这一轮没取到的话题原样保留，不猜、不补拉。见契约 §五。
 - **话题快照页内缓存**（`3.4.3`）：`src/ui/read-later.ts` 新增 `topicCache`（渲染到带快照的条目时记下 `topic`/`user`/`title`，控制器 `addReadLaterLink()` 经 `cachedTopic()` 复用，删掉再加回来不再请求 latest）。同时改掉「两路并发」：话题在渲染时**不再**排 `/onebox`。
 - **话题失败不退预览**（`3.4.4`）：删掉 3.4.3 里「latest 失败才 `/onebox`」那一支（`settleTopicPreviews()` 整个移除）。真站核对（linux.do，已登录）：`/latest.json?topic_ids=166564656`（编造）与 `3071354`（静音分类 45）都是 200 且 `topics: []`；`/onebox` 对两者都回 200 的纯 `<a>` 兜底；`/t/topic/166564656` 是 404，`/t/3071354` 是 200 且 OG 描述为「（话题已被作者删除）」。靠这些判真假只会渲染出假卡片。见契约 §四.2、§五、§十三。
-- **按 id 补取话题快照**（`3.4.5`）：加入稍后再读是用户的明确意图，不能因为列表接口不给就显示异常。`syncReadLater()` 现在两步走：先按批 `/latest.json?topic_ids=`，仍然没回来的一条条取 `/t/<id>.json`（`createFeedApi.topicView`），用纯函数 `topicFromView()`（`src/read-later.ts`）压成列表项快照——标题、分类、统计、标签、`last_read_post_number`/`highest_post_number`，首个 poster 从 `details.created_by`（退到 `post_stream.posts[0]`）重建。只有 `/t/<id>.json` 回 403/404 才 `markUnavailable`；网络失败与中止保持原样。静音分类之所以必须这么补：`TopicQuery#remove_muted_categories`（`lib/topic_query.rb:1029`）在 `topic_ids` 过滤之后又剔了一遍，加 `order=created`、`include_subcategories=true`、`page=0` 都拿不回来（真站实测 3071354）。TopicView 没有 `bumped_at`/`unread_posts`：时间退到 `last_posted_at`，新回复数不猜，继续显示圆点。见契约 §二.4、§四.2、§五、§十三。
+- **按 id 补取话题快照**（`3.4.5`）：加入稍后再读是用户的明确意图，不能因为列表接口不给就显示异常。`syncReadLater()` 现在两步走：先按批 `/latest.json?topic_ids=`，仍然没回来的一条条取 `/t/<id>.json`（`createFeedApi.topicView`），用纯函数 `topicFromView()`（`src/read-later.ts`）压成列表项快照——标题、分类、统计、标签、`last_read_post_number`/`highest_post_number`，首个 poster 从 `details.created_by`（退到 `post_stream.posts[0]`）重建。只有 `/t/<id>.json` 回 403/404 才 `markUnavailable`；网络失败与中止保持原样。静音分类之所以必须这么补：`TopicQuery#remove_muted_categories`（`lib/topic_query.rb:1029`）在 `topic_ids` 过滤之后又剔了一遍，加 `order=created`、`include_subcategories=true`、`page=0` 都拿不回来（真站实测 3071354）。TopicView 没有 `bumped_at`/`unread_posts`：时间退到 `last_posted_at`，新回复数不猜，继续显示圆点。`/t/<id>.json` 也拿不到时再发一次 `/onebox?refresh=true&category_id=<已知分类>&topic_id=<id>`——**`category_id` 是关键**：`Oneboxer.local_topic`（`lib/oneboxer.rb:365-386`）在 `category_id` 与目标话题同分类时改用当前用户的 guardian，静音分类的话题因此能出真卡片；不传就退成匿名 guardian，登录可见站点一律纯 `<a>` 兜底（真站实测 3066266/3070854/3071354：不带参数 67 字节，带上就是 2 KB 的 `aside.quote`；编造的 166564656 带不带都兜底，所以不会渲染假卡片）。拿到卡片就存 `item.preview` 并清旧快照；已标异常的话题不再重复问 onebox。见契约 §二.4、§四.2、§五、§十三。
 - **新回复数不再被本地点击清零**（`3.4.2`）：此前 `_applyReadMarker()` 把 `unread_posts`/`new_posts` 置 0、`markRead()` 连 `.sfp-unread-count` 一起藏，于是点开一个还有 N 条新回复的话题，徽章当场消失，下次刷新又被服务端数字顶回来。现在本地标记只推进 `last_read_post_number`/`is_seen`/`unseen`，计数原样留给刷新覆盖；`markRead()` 只藏圆点。未读筛选不受影响——它判的是 `_isTopicRead`（跳转 URL 是否带楼层号），不是计数。
 
 
@@ -73,13 +73,13 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - 3.4.2 只改两处：`_applyReadMarker()` 不再把 `unread_posts`/`new_posts` 置 0，`markRead()` 只藏圆点不藏计数。
 - 3.4.3 改一处：话题快照进页内缓存（`topicCache`/`cachedTopic()`），删掉再加回来不再请求 latest。
 - 3.4.4 只改一处：话题拿不到快照时**不再**退到 `/onebox`（`settleTopicPreviews()` 移除）。
-- 3.4.5 只改一处：列表接口没回来的话题按 id 取 `/t/<id>.json` 补快照（`topicFromView()`），只有 403/404 才标异常。
-- 完整校验全绿：typecheck 0、14 文件 / 95 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **118 项**。
+- 3.4.5 改两处：列表接口没回来的话题按 id 取 `/t/<id>.json` 补快照（`topicFromView()`）；`/t/<id>.json` 也失败时再发一次带 `category_id`/`topic_id` 的 `/onebox`，能出卡片就渲染卡片。
+- 完整校验全绿：typecheck 0、14 文件 / 95 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **120 项**。
 - **本机注意**：`npm test` / `npm run build` 的 Vite 配置加载会 `exec("net use")`，在受限文件沙箱下报 `spawn EPERM`；本机已切到 danger-full-access，不是代码问题。
 
 ## 未决问题
 
-- **`/onebox` 只核过 linux.do 的失败形态**：端点、模板与客户端节奏都来自本机 Discourse 克隆（`app/controllers/onebox_controller.rb`、`lib/oneboxer.rb`、`frontend/pretty-text/addon/oneboxer.js`）；`requires_login`、`recently_failed?` 与「同一用户一个预览」的排队行为属发布前人工核对项。夹具里的 `/onebox` 是模拟的。
+- **`/onebox` 只核过 linux.do**：端点、模板与客户端节奏都来自本机 Discourse 克隆（`app/controllers/onebox_controller.rb`、`lib/oneboxer.rb`、`frontend/pretty-text/addon/oneboxer.js`）；`requires_login`、`recently_failed?` 与「同一用户一个预览」的排队行为属发布前人工核对项。`category_id` 走的是 `Oneboxer.local_topic` 的 `Guardian.new(current_user).can_see_topic?` 分支（`lib/oneboxer.rb:379-383`），已在 linux.do 实测；`category_id` 取自条目上一轮快照，**从未取到过快照的话题没有分类可传**，onebox 那一步必然兜底失败。夹具里的 `/onebox` 按同一规则模拟。
 - **昵称/用户名拖出**依次尝试指针位置、`target` 祖先与文本选区；三者都指不到发布者 span 时仍会退回话题链接。
 - **删除与排序只有拖动**：没有按钮，也没有键盘等价操作；触摸设备上等于无法删除。
 - **分隔线只有 3 px 高**，鼠标命中区偏窄；这是「不遮挡两侧内容」的直接代价。
@@ -94,4 +94,4 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 真站再核对（拖入四个位置、拖昵称/用户名、拖出删除、拖动排序、拖分隔线看内容是否稳定、两标签页同步、`/onebox` 的登录与 429、语言切换），再决定是否 push。
 
-Updated: 2026-10-25 16:45 中国标准时间 +0800
+Updated: 2026-10-25 17:12 中国标准时间 +0800

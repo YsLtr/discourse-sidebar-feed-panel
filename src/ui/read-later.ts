@@ -270,7 +270,10 @@ export function createReadLaterView({
     wrapper.className = "sfp-rl-item";
     wrapper.dataset.url = item.url;
 
-    const snapshot = item.kind === "topic" ? knownTopic(item) : null;
+    // 自带预览卡片的（话题 onebox 兜底）优先：那时话题快照已经被判为拿不到，
+    // 页内缓存里可能还留着上一轮那份，不能拿它盖掉刚取回来的卡片。
+    const snapshot =
+      item.kind === "topic" && !item.preview ? knownTopic(item) : null;
     if (snapshot) {
       const element = renderer.createTopicItem(snapshot.topic, false, {
         href: item.url,
