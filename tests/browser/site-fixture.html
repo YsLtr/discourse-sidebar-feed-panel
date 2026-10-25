@@ -10,8 +10,10 @@ body.uc-enable-main-outlet-grid-layout-change{--d-sidebar-width:15em}
 .home-logo-wrapper-outlet{height:60px}.title{display:flex}
 #main-outlet-wrapper{display:grid;grid-template-columns:0 minmax(0,1fr);width:1600px}
 body.has-sidebar-page #main-outlet-wrapper{grid-template-columns:var(--d-sidebar-width) minmax(0,1fr)}
-.sidebar-wrapper{display:flex;align-self:start;position:sticky;top:60px}
-.sidebar-wrapper .sidebar-container{display:flex;flex-direction:column;position:relative;width:100%;min-width:0;background:white}
+/* 与 Discourse 的 common/base/sidebar.scss 一致：wrapper 纵向滚动（于是横向计算成
+   auto）、container 横向裁剪。feed 模式要把这两处都放开才命中得到边界外的把手。 */
+.sidebar-wrapper{display:flex;align-self:start;position:sticky;top:60px;overflow-y:auto}
+.sidebar-wrapper .sidebar-container{display:flex;flex-direction:column;position:relative;width:100%;min-width:0;background:white;overflow-x:hidden}
 #d-sidebar{height:700px;background:white}
 #main-outlet{height:400px;min-width:0}
 </style>

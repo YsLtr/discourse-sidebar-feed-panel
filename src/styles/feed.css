@@ -38,11 +38,23 @@
 }
 
 /* ===== 侧边栏 Feed 模式 ===== */
+/*
+ * feed 模式下**不裁剪**横向溢出。
+ *
+ * Discourse 自己给 `.sidebar-container` 设了 `overflow-x: hidden`
+ * （`common/base/sidebar.scss`），`overflow-y` 因此计算成 `auto`；我们过去又用
+ * `!important` 把两者都钉成隐藏。但 feed 模式里没有任何东西需要这层裁剪：
+ * 纵向 `scrollHeight === clientHeight`（`.sfp-feed-container` 是 `height: 100%`
+ * 且 `overflow: hidden`），自己的 UI 也被 `.sfp-feed-container` 和
+ * `.sfp-settings-shell` 各自裁住。唯一想越过边界的是右侧宽度把手和它的
+ * 命中条——而 `overflow-x: visible` 和 `overflow-y: auto` 不能共存
+ * （`visible` 会被计算成 `auto`），所以两轴都得放开。
+ */
 .sidebar-wrapper:has(> .sidebar-container.sfp-feed-mode) {
-  overflow-x: hidden !important;
+  overflow: visible !important;
 }
 .sidebar-container.sfp-feed-mode {
-  overflow-x: hidden !important;
+  overflow: visible !important;
 }
 .sidebar-container.sfp-feed-mode .sfp-feed-container,
 .sidebar-container.sfp-feed-mode .sfp-feed-container * {
@@ -98,17 +110,16 @@
 }
 /*
  * 5 px 的宽度把手同样太细。加一条不可见的宽条：宽 15 px（3 倍把手宽）、
- * 高 25%（侧边栏高度的 1/4）。
- *
- * 它挂在 `body` 上而不是把手里面，因为侧边栏是 `overflow-x: hidden`——
- * 挂在里面的话，伸到边界外的那一截会被裁掉，看得见摸不着。`position: fixed`
- * 加运行时同步（`syncResizerGrip`）让它横跨边界，里外都能命中。
- * 它只做命中判定，不画任何东西。
+ * 高 25%（侧边栏高度的 1/4），以把手为圆心，于是左右各伸出 5 px、横跨侧边栏
+ * 边界。它只做命中判定，不画任何东西。能伸出边界是因为上面把侧边栏的裁剪
+ * 放开了；否则越界的那半截会被裁掉，看得见摸不着。
  */
 .sfp-resizer-grip {
-  position: fixed;
-  z-index: 10002;
+  position: absolute;
+  top: 50%;
+  left: 50%;
   width: 15px;
+  height: 25%;
   transform: translate(-50%, -50%);
   cursor: ew-resize;
 }

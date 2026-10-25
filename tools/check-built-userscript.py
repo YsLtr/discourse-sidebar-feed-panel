@@ -146,9 +146,9 @@ try:
         wait_for("document.querySelectorAll('.sfp-topic-item').length===30 && !!document.querySelector('#d-sidebar .sfp-resizer')")
         check('host replacement remounts once without duplicate subscriptions', "document.querySelectorAll('.sfp-feed-container').length===1 && [...fixture.subscriptions.values()].every(s=>s.size===1)")
         check('the width handle carries an invisible 3x-wide grip in its middle', """(() => {
-          // 5 px 的把手太细：另挂一条不可见的宽条，宽 15 px（3 倍）、高 25%。
+          // 5 px 的把手太细：里面挂一条不可见的宽条，宽 15 px（3 倍）、高 25%。
           const handle=document.querySelector('.sfp-resizer');
-          const grip=document.querySelector('.sfp-resizer-grip');
+          const grip=handle.querySelector('.sfp-resizer-grip');
           if (!grip) return false;
           const h=handle.getBoundingClientRect(), g=grip.getBoundingClientRect();
           const style=getComputedStyle(grip);
@@ -159,18 +159,31 @@ try:
             style.cursor==='ew-resize';
         })()""")
         check('the width grip straddles the sidebar edge so the outer half is hittable', """(() => {
-          // 侧边栏是 `overflow-x: hidden`：挂在它里面的东西，越出边界的部分会被
-          // 裁掉、点不到。命中条挂在 body 上、position: fixed，才横跨边界。
+          // 侧边栏在 feed 模式下不裁剪横向溢出，所以命中条可以直接挂在把手里面、
+          // 伸出边界，边界外那半截照样能点。
           const sidebar=document.querySelector('#d-sidebar');
-          const grip=document.querySelector('.sfp-resizer-grip');
-          if (!grip || grip.parentElement!==document.body) return false;
+          const grip=sidebar.querySelector('.sfp-resizer > .sfp-resizer-grip');
+          if (!grip) return false;
           const s=sidebar.getBoundingClientRect(), g=grip.getBoundingClientRect();
           if (!(g.left < s.right && g.right > s.right)) return false;
           const midY=g.top+g.height/2;
           const own=el => el===grip || grip.contains(el);
-          // 边界内、边界外各取一点，都必须命中它。
           return own(document.elementFromPoint(g.left+2, midY)) &&
-            own(document.elementFromPoint(g.right-2, midY));
+            own(document.elementFromPoint(g.right-2, midY)) &&
+            // 边界外 5 px 处：把手本身已不在那儿，全靠命中条。
+            own(document.elementFromPoint(s.right+5, midY));
+        })()""")
+        check('feed mode does not clip the sidebar, and has no vertical overflow to lose', """(() => {
+          // 放开裁剪的前提：两轴都是 visible（`overflow-x: visible` 无法与
+          // `overflow-y: auto` 共存），而 feed 模式里本来也没有纵向溢出可丢。
+          const sidebar=document.querySelector('#d-sidebar');
+          const wrapper=sidebar.closest('.sidebar-wrapper') || sidebar.parentElement;
+          return getComputedStyle(sidebar).overflowX==='visible' &&
+            getComputedStyle(sidebar).overflowY==='visible' &&
+            getComputedStyle(wrapper).overflowX==='visible' &&
+            getComputedStyle(wrapper).overflowY==='visible' &&
+            sidebar.scrollHeight <= sidebar.clientHeight + 1 &&
+            wrapper.scrollHeight <= wrapper.clientHeight + 1;
         })()""")
         cdp.evaluate("fixture.pause=true;document.querySelector('.sfp-refresh-btn').click()")
         wait_for('fixture.pending.length===1')
