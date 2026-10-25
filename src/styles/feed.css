@@ -1378,7 +1378,25 @@
   flex-direction: column;
   gap: 2px;
 }
+.sfp-rl-card-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+/* 用户卡片的全名：与标题同一行、排在前面，样式同话题条目的姓名。 */
+.sfp-rl-card-name {
+  flex: 0 0 auto;
+  max-width: 55%;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--primary-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .sfp-rl-card-title {
+  min-width: 0;
   font-size: 13px;
   font-weight: 500;
   line-height: 1.3;

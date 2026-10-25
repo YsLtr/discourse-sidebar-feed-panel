@@ -16,6 +16,8 @@ export const READ_LATER_VERSION = 2;
 
 export interface ReadLaterPreview {
   title?: string;
+  /** 用户卡片的全名：与标题同一行、排在标题前（§四.2）。 */
+  name?: string;
   excerpt?: string;
   imageUrl?: string;
   badge?: string;
@@ -115,6 +117,9 @@ function validPreview(value: unknown): ReadLaterPreview | undefined {
   const result: ReadLaterPreview = {};
   if (typeof preview.title === "string" && preview.title) {
     result.title = preview.title;
+  }
+  if (typeof preview.name === "string" && preview.name) {
+    result.name = preview.name;
   }
   if (typeof preview.excerpt === "string" && preview.excerpt) {
     result.excerpt = preview.excerpt;
@@ -474,24 +479,36 @@ export function extractPreview(
     box.querySelector(".quote-title__text-content a") ||
     box.querySelector(".onebox-body h3 a") ||
     box.querySelector("a");
-  // 用户卡片没有简介时（`lib/onebox/templates/discourse_user_onebox.mustache:26`），
-  // 摘要槽只剩 `span.full-name`；有简介的用户仍显示简介，姓名让位。
+  // 用户卡片的标题只有 `@username`，姓名在 `span.full-name`
+  // （`lib/onebox/templates/discourse_user_onebox.mustache:5-8`）。
+  // 姓名单独存一个字段：渲染时排在标题前、与标题同一行，样式同话题条目的姓名；
+  // 摘要槽留给简介，不兼收姓名。
+  const nameEl = box.querySelector(".full-name");
   const excerptEl =
     box.querySelector("blockquote") ||
     box.querySelector(".onebox-body p") ||
-    box.querySelector(".full-name") ||
     box.querySelector(".description p");
   const badgeEl = box.querySelector(".badge-category__name");
 
+  const title = cleanText(titleEl?.textContent);
+  const name = cleanText(nameEl?.textContent);
+
   const preview: ReadLaterPreview = {
-    title: cleanText(titleEl?.textContent) || undefined,
+    title: title || undefined,
+    name: name && name !== title ? name : undefined,
     excerpt:
       truncateText(cleanText(excerptEl?.textContent), READ_LATER_EXCERPT_MAX) ||
       undefined,
     imageUrl,
     badge: cleanText(badgeEl?.textContent) || undefined,
   };
-  if (!preview.title && !preview.excerpt && !preview.imageUrl && !preview.badge) {
+  if (
+    !preview.title &&
+    !preview.name &&
+    !preview.excerpt &&
+    !preview.imageUrl &&
+    !preview.badge
+  ) {
     return {};
   }
   return preview;

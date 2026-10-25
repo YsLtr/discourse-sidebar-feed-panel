@@ -856,6 +856,27 @@ try:
             fixture.oneboxRequests.filter(u=>u.endsWith('/u/alice')).length===1 &&
             !!item && !!item.querySelector('.sfp-rl-card');
         })()""")
+        # 用户卡片：姓名（span.full-name）与标题同一行、排在标题前面。
+        cdp.evaluate("""fixture.oneboxHtml=(target)=>`<aside class="onebox"><article class="onebox-body user-onebox">
+            <img alt='' src='/uploads/avatar.png' class='avatar'>
+            <h3><a href="${target}">@dana</a></h3>
+            <div><span class="full-name">Dana Scully</span></div>
+            <div class="user-onebox--joined">Joined</div>
+          </article></aside>`;
+          dragTo('.sfp-read-later', location.origin + '/u/dana');""")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/u/dana\"] .sfp-rl-card')")
+        check('a user card shows the full name on the title row, ahead of the username', """(() => {
+          const card=document.querySelector('.sfp-rl-item[data-url="/u/dana"] .sfp-rl-card');
+          const row=card.querySelector('.sfp-rl-card-title-row');
+          const name=row?.querySelector('.sfp-rl-card-name');
+          const title=row?.querySelector('.sfp-rl-card-title');
+          return !!row && name?.textContent==='Dana Scully' &&
+            title?.textContent==='@dana' &&
+            !!(name.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+            !card.querySelector('.sfp-rl-card-excerpt');
+        })()""")
+        cdp.evaluate("""fixture.oneboxHtml=null; removeRlItem('/u/dana');""")
+        wait_for("!document.querySelector('.sfp-rl-item[data-url=\"/u/dana\"]')")
         # 直接重新拖入已在列表里的链接：移到最新位置，保留预览，不再请求。
         cdp.evaluate("""dragTo('.sfp-read-later', location.origin + '/t/299');""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===2")

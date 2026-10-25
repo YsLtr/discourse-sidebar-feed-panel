@@ -19,7 +19,7 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - **话题快照页内缓存**（`3.4.3`）：`src/ui/read-later.ts` 新增 `topicCache`（渲染到带快照的条目时记下 `topic`/`user`/`title`，控制器 `addReadLaterLink()` 经 `cachedTopic()` 复用，删掉再加回来不再请求 latest）。同时改掉「两路并发」：话题在渲染时**不再**排 `/onebox`。
 - **话题失败不退预览**（`3.4.4`）：删掉 3.4.3 里「latest 失败才 `/onebox`」那一支（`settleTopicPreviews()` 整个移除）。真站核对（linux.do，已登录）：`/latest.json?topic_ids=166564656`（编造）与 `3071354`（静音分类 45）都是 200 且 `topics: []`；`/onebox` 对两者都回 200 的纯 `<a>` 兜底；`/t/topic/166564656` 是 404，`/t/3071354` 是 200 且 OG 描述为「（话题已被作者删除）」。靠这些判真假只会渲染出假卡片。见契约 §四.2、§五、§十三。
 - **按 id 补取话题快照**（`3.4.5`）：加入稍后再读是用户的明确意图，不能因为列表接口不给就显示异常。`syncReadLater()` 现在两步走：先按批 `/latest.json?topic_ids=`，仍然没回来的一条条取 `/t/<id>.json`（`createFeedApi.topicView`），用纯函数 `topicFromView()`（`src/read-later.ts`）压成列表项快照——标题、分类、统计、标签、`last_read_post_number`/`highest_post_number`，首个 poster 从 `details.created_by`（退到 `post_stream.posts[0]`）重建。只有 `/t/<id>.json` 回 403/404 才 `markUnavailable`；网络失败与中止保持原样。静音分类之所以必须这么补：`TopicQuery#remove_muted_categories`（`lib/topic_query.rb:1029`）在 `topic_ids` 过滤之后又剔了一遍，加 `order=created`、`include_subcategories=true`、`page=0` 都拿不回来（真站实测 3071354）。TopicView 没有 `bumped_at`/`unread_posts`：时间退到 `last_posted_at`，新回复数不猜，继续显示圆点。`/t/<id>.json` 也拿不到时再发一次 `/onebox?refresh=true&category_id=<已知分类>&topic_id=<id>`——**`category_id` 是关键**：`Oneboxer.local_topic`（`lib/oneboxer.rb:365-386`）在 `category_id` 与目标话题同分类时改用当前用户的 guardian，静音分类的话题因此能出真卡片；不传就退成匿名 guardian，登录可见站点一律纯 `<a>` 兜底（真站实测 3066266/3070854/3071354：不带参数 67 字节，带上就是 2 KB 的 `aside.quote`；编造的 166564656 带不带都兜底，所以不会渲染假卡片）。拿到卡片就存 `item.preview` 并清旧快照；已标异常的话题不再重复问 onebox。见契约 §二.4、§四.2、§五、§十三。
-- **用户卡片显示姓名**（`3.4.6`）：`extractPreview()` 的摘要取值顺序补一档 `.full-name`（在 `.onebox-body p` 之后）。用户 onebox 模板里只有简介是 `<p>`、姓名在 `<span class="full-name">`（`lib/onebox/templates/discourse_user_onebox.mustache:5-8,26-28`），没写简介的用户摘要槽只剩姓名，缺这一档就只显示 `@username`。有简介的用户仍优先显示简介。见契约 §四.2。
+- **用户卡片显示姓名**（`3.4.6`）：`extractPreview()` 把 `.full-name` 存进 `preview.name`，渲染时与标题**同一行、排在标题前**（`.sfp-rl-card-title-row` 内的 `.sfp-rl-card-name`，12 px、`--primary-medium`，样式同话题条目的姓名），摘要槽只留给简介。用户 onebox 模板里标题只有 `@username`、姓名在 `<span class="full-name">`（`lib/onebox/templates/discourse_user_onebox.mustache:5-8`），此前没有任何选择器认领它，没写简介的用户就只剩 `@username`。见契约 §四.2。
 - **新回复数不再被本地点击清零**（`3.4.2`）：此前 `_applyReadMarker()` 把 `unread_posts`/`new_posts` 置 0、`markRead()` 连 `.sfp-unread-count` 一起藏，于是点开一个还有 N 条新回复的话题，徽章当场消失，下次刷新又被服务端数字顶回来。现在本地标记只推进 `last_read_post_number`/`is_seen`/`unseen`，计数原样留给刷新覆盖；`markRead()` 只藏圆点。未读筛选不受影响——它判的是 `_isTopicRead`（跳转 URL 是否带楼层号），不是计数。
 
 
@@ -75,8 +75,8 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - 3.4.3 改一处：话题快照进页内缓存（`topicCache`/`cachedTopic()`），删掉再加回来不再请求 latest。
 - 3.4.4 只改一处：话题拿不到快照时**不再**退到 `/onebox`（`settleTopicPreviews()` 移除）。
 - 3.4.5 改两处：列表接口没回来的话题按 id 取 `/t/<id>.json` 补快照（`topicFromView()`）；`/t/<id>.json` 也失败时再发一次带 `category_id`/`topic_id` 的 `/onebox`，能出卡片就渲染卡片。
-- 3.4.6 改一处：`extractPreview()` 摘要多认一档 `.full-name`，用户卡片没有简介时显示姓名而不是只剩 `@username`。
-- 完整校验全绿：typecheck 0、14 文件 / 96 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **120 项**。
+- 3.4.6 改一处：`extractPreview()` 把 `.full-name` 存进 `preview.name`，卡片上姓名与标题同一行、排在标题前（`.sfp-rl-card-title-row` / `.sfp-rl-card-name`）。
+- 完整校验全绿：typecheck 0、14 文件 / 97 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **121 项**。
 - **本机注意**：`npm test` / `npm run build` 的 Vite 配置加载会 `exec("net use")`，在受限文件沙箱下报 `spawn EPERM`；本机已切到 danger-full-access，不是代码问题。
 
 ## 未决问题

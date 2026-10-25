@@ -303,9 +303,9 @@ describe("extractPreview", () => {
     expect(preview).toEqual({});
   });
 
-  it("falls back to the full name when a user card has no bio", () => {
+  it("keeps the user full name as its own field ahead of the title", () => {
     // 真站用户卡片（`lib/onebox/templates/discourse_user_onebox.mustache`）：
-    // 简介才是 `<p>`，姓名在 `<span class="full-name">`，没写简介时摘要槽只剩姓名。
+    // 标题只有 `@username`，姓名是 `span.full-name`，简介才是 `<p>`。
     const preview = extractPreview(
       makeRoot({
         "aside, .onebox": {},
@@ -317,10 +317,26 @@ describe("extractPreview", () => {
     );
     expect(preview).toEqual({
       title: "@Cunningham520",
-      excerpt: "Reverse1999",
+      name: "Reverse1999",
+      excerpt: undefined,
       imageUrl: `${ORIGIN}/user_avatar/forum.example/x/1_2.png`,
       badge: undefined,
     });
+  });
+
+  it("keeps the bio in the excerpt slot when the user has one", () => {
+    const preview = extractPreview(
+      makeRoot({
+        "aside, .onebox": {},
+        ".onebox-body h3 a": { text: "@x" },
+        ".full-name": { text: "Full Name" },
+        ".onebox-body p": { text: "just a bio" },
+      }),
+      ORIGIN,
+    );
+    expect(preview.name).toBe("Full Name");
+    expect(preview.title).toBe("@x");
+    expect(preview.excerpt).toBe("just a bio");
   });
 
   it("truncates long excerpts", () => {

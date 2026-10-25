@@ -156,7 +156,13 @@ export function createReadLaterView({
         previewQueue = [];
       } else if (status >= 200 && status < 300 && html) {
         const preview = parsePreview(html);
-        if (preview.title || preview.excerpt || preview.imageUrl || preview.badge) {
+        if (
+          preview.title ||
+          preview.name ||
+          preview.excerpt ||
+          preview.imageUrl ||
+          preview.badge
+        ) {
           previewCache.set(url, preview);
           updateItems(
             items().map((item) =>
@@ -230,7 +236,7 @@ export function createReadLaterView({
       item.url;
     const href = toAbsoluteSiteUrl(item.url);
 
-    if (preview.imageUrl || preview.excerpt || preview.badge) {
+    if (preview.imageUrl || preview.excerpt || preview.badge || preview.name) {
       const card = document.createElement("a");
       card.className = "sfp-rl-card";
       card.href = href;
@@ -240,7 +246,11 @@ export function createReadLaterView({
       const badgeHtml = preview.badge
         ? `<span class="sfp-rl-card-badge">${escapeHtml(preview.badge)}</span>`
         : "";
-      card.innerHTML = `${imageHtml}<span class="sfp-rl-card-body"><span class="sfp-rl-card-title" dir="auto">${escapeHtml(title)}</span>${preview.excerpt ? `<span class="sfp-rl-card-excerpt" dir="auto">${escapeHtml(preview.excerpt)}</span>` : ""}${badgeHtml}</span>`;
+      // 用户卡片的全名排在标题前、与标题同一行（§四.2），样式同话题条目的姓名。
+      const nameHtml = preview.name
+        ? `<span class="sfp-rl-card-name" dir="auto">${escapeHtml(preview.name)}</span>`
+        : "";
+      card.innerHTML = `${imageHtml}<span class="sfp-rl-card-body"><span class="sfp-rl-card-title-row">${nameHtml}<span class="sfp-rl-card-title" dir="auto">${escapeHtml(title)}</span></span>${preview.excerpt ? `<span class="sfp-rl-card-excerpt" dir="auto">${escapeHtml(preview.excerpt)}</span>` : ""}${badgeHtml}</span>`;
       return card;
     }
 
