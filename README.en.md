@@ -185,13 +185,11 @@ https://meta.discourse.org/*
 
 GitHub installation and the built-in update URLs now point to the `.user.js` asset in the latest stable Release. Your userscript manager usually checks automatically; manual checks are also available. Greasy Fork and ScriptCat are synchronized manually by the maintainer; manager settings determine the update source.
 
-The old GitHub Raw path retains a complete 3.0.0 migration script whose `@updateURL` and `@downloadURL` point to Releases. Existing installations can discover 3.0.0 through Raw and download the update from Releases. On the first push, the Release download URL becomes available only after automatic publication finishes; retry later if an update fails during that interval. If your manager pins a custom update URL, change it to the GitHub installation link above or open that link to update the existing script.
-
 ## Development
 
-Source lives in `src/` and is built with Vite and vite-plugin-monkey. `dist/` is ignored. The root `.user.js` is a 3.0.0 migration snapshot for old Raw installations; do not edit it directly.
+Source lives in `src/` and is built with Vite and vite-plugin-monkey. `dist/` is ignored.
 
-Pushing to `main` triggers the Release workflow, which reads the version from `package.json` in the latest commit of that push. For an unpublished version, it runs all checks, builds the script, automatically creates the matching tag (for example, `v3.0.0`), and publishes the `.user.js` asset as the latest Release. No manual tag push is needed. Already published versions are skipped; the check workflow still validates ordinary commits. Future versions ship through Releases while the root 3.0.0 snapshot stays in place. See [release instructions](docs/development/01-开发与校验.md#release-distribution).
+Pushing to `main` triggers the Release workflow, which reads the version from `package.json` in the latest commit of that push. For an unpublished version, it runs all checks, builds the script, automatically creates the matching tag (for example, `v3.0.0`), and publishes the `.user.js` asset as the latest Release. No manual tag push is needed. Already published versions are skipped; the check workflow still validates ordinary commits. Future versions ship through Releases. See [release instructions](docs/development/01-开发与校验.md#release-distribution).
 
 ```sh
 npm ci

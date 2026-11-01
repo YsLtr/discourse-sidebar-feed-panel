@@ -185,13 +185,11 @@ https://meta.discourse.org/*
 
 GitHub 安装与脚本内置更新地址现统一指向最新正式 Release 的 `.user.js` 附件。脚本管理器通常会自动检查更新，也可以手动检查。Greasy Fork 和脚本猫的发布内容由维护者手动同步，更新来源以管理器设置为准。
 
-旧 GitHub Raw 路径保留完整的 3.0.0 迁移版，其中的 `@updateURL` 和 `@downloadURL` 已指向 Release。旧安装可先通过 Raw 检测到 3.0.0，再从 Release 下载更新；首次推送后，需等待自动发布完成，Release 下载链接才会可用；在此期间更新失败可稍后重试。如果管理器固定了自定义更新地址，请改为上面的 GitHub 安装链接，或打开链接覆盖更新现有脚本。
-
 ## 开发
 
-源码位于 `src/`，使用 Vite 和 vite-plugin-monkey 构建。`dist/` 不纳入 Git；根目录 `.user.js` 是保留给旧 Raw 安装的 3.0.0 迁移快照，不直接编辑。
+源码位于 `src/`，使用 Vite 和 vite-plugin-monkey 构建。`dist/` 不纳入 Git。
 
-推送到 `main` 会触发 Release 工作流，自动读取这次推送最新提交中的 `package.json` 版本号。若该版本尚未发布，全部检查通过后自动构建、创建对应标签（例如 `v3.0.0`）并发布 `.user.js` 附件，将该 Release 设为 latest，无需手动推送标签。已发布的同版本会跳过发布，普通提交仍由检查工作流验证。后续版本只发布 Release，保留根目录 3.0.0 快照。发布步骤见[开发与验证说明](docs/development/01-开发与校验.md#release-distribution)。
+推送到 `main` 会触发 Release 工作流，自动读取这次推送最新提交中的 `package.json` 版本号。若该版本尚未发布，全部检查通过后自动构建、创建对应标签（例如 `v3.0.0`）并发布 `.user.js` 附件，将该 Release 设为 latest，无需手动推送标签。已发布的同版本会跳过发布，普通提交仍由检查工作流验证。后续版本只发布 Release。发布步骤见[开发与验证说明](docs/development/01-开发与校验.md#release-distribution)。
 
 ```sh
 npm ci

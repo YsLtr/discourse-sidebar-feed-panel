@@ -16,8 +16,8 @@ export function metadata(source) {
 }
 
 export async function checkArtifact() {
-  const [source, legacy, pkgText] = await Promise.all([
-    read(`dist/${fileName}`), read(fileName), read('package.json'),
+  const [source, pkgText] = await Promise.all([
+    read(`dist/${fileName}`), read('package.json'),
   ]);
   const pkg = JSON.parse(pkgText);
   const releaseURL = `https://github.com/YsLtr/discourse-sidebar-feed-panel/releases/latest/download/${fileName}`;
@@ -29,11 +29,6 @@ export async function checkArtifact() {
   assert.deepEqual(meta.version, [pkg.version], 'Built userscript version must match package.json');
   for (const field of ['downloadURL', 'updateURL']) {
     assert.deepEqual(meta[field], [releaseURL], `@${field} must point to the latest Release asset`);
-  }
-  const legacyMeta = metadata(legacy);
-  assert.deepEqual(legacyMeta.version, ['3.0.0'], 'Raw migration snapshot must stay at version 3.0.0');
-  for (const field of ['downloadURL', 'updateURL']) {
-    assert.deepEqual(legacyMeta[field], [releaseURL], `Raw migration snapshot @${field} must point to the latest Release asset`);
   }
   assert.deepEqual((await readdir(new URL('dist/', root))).sort(), [fileName], 'Build must contain one self-contained userscript');
   assert(!/@vite\/client|localhost:\d+|127\.0\.0\.1:\d+|__monkeyWindow-/.test(source), 'Development bridge leaked into production');
