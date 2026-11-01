@@ -103,7 +103,6 @@ export function createReadLaterView({
 
   let dragActive = false;
   let dragHref = "";
-  let dragIsProfile = false;
   let dropActive = false;
 
   // 区域内部搬动：排序，或拖出区域即删除。
@@ -488,7 +487,6 @@ export function createReadLaterView({
       internalUrl && !internalHandled && leftSection ? internalUrl : null;
     dragActive = false;
     dragHref = "";
-    dragIsProfile = false;
     dropActive = false;
     internalUrl = null;
     internalHandled = false;
@@ -499,37 +497,9 @@ export function createReadLaterView({
     render();
   }
 
-  /**
-   * 文本拖拽时 `dragstart.target` 会退到整张条目卡片（外层 `<a>`），
-   * 于是从昵称、用户名拖出会被当成话题。两种兜底：
-   * 先按指针位置取真正被抓住的元素（最准），再退到文本选区。
-   */
-  function profileAt(event: DragEvent) {
-    const hit = document.elementFromPoint(event.clientX, event.clientY);
-    return (
-      (hit instanceof Element
-        ? hit.closest<HTMLElement>("[data-user-profile-link]")
-        : null) || null
-    );
-  }
 
-  function selectionProfile() {
-    const selection = document.getSelection();
-    if (!selection || selection.isCollapsed) return null;
-    const anchor = selection.anchorNode;
-    if (!anchor) return null;
-    const element =
-      anchor instanceof Element ? anchor : (anchor.parentElement ?? null);
-    return element?.closest<HTMLElement>("[data-user-profile-link]") || null;
-  }
-
-  /**
-   * 优先用 dragstart 记下的地址，但只限「从发布者链接拖出」这一种：
-   * 浏览器给整张条目卡片（外层 `<a>`）准备的 `text/uri-list` 是话题链接，
-   * 会盖掉发布者链接。其余情况仍以 `text/uri-list` 为准，跨文档拖入也走它。
-   */
+  /** 拖拽期间 `getData()` 返回空串，所以 drop 时才读；`dragHref` 只作兜底。 */
   function readDraggedHref(event: DragEvent) {
-    if (dragIsProfile && dragHref) return dragHref;
     const data = event.dataTransfer;
     if (!data) return dragHref;
     const uriList = data.getData("text/uri-list");
@@ -631,19 +601,17 @@ export function createReadLaterView({
           return;
         }
 
-        // 条目本身是 `<a>`，头像/昵称/用户名是包在里面的 span：
-        // 直接 closest("a[href]") 会拿到话题链接，所以先认发布者链接。
-        // 指针位置最可靠（dragstart 的 target 有时会被重定向到外层卡片），
-        // 文本拖拽则靠选区兜底。
-        const profile =
-          profileAt(event) ||
-          origin.closest<HTMLElement>("[data-user-profile-link]") ||
-          selectionProfile();
+        // 卡片里的标题、头像、昵称、用户名都是真的 `<a href>`，浏览器给的
+        // `text/uri-list` 天然就是对的地址。只有从卡片空白处（时间、统计）
+        // 起拖时才没有链接可取，退回这张卡片标题链接（也就是它的
+        // 话题地址）——不能取卡片里第一个链接，那是发布者资料页。
         dragHref =
-          profile?.getAttribute("data-user-profile-url") ||
-          origin.closest<HTMLElement>("a[href]")?.getAttribute("href") ||
+          origin.closest<HTMLAnchorElement>("a[href]")?.getAttribute("href") ||
+          origin
+            .closest<HTMLElement>(".sfp-topic-item")
+            ?.querySelector<HTMLAnchorElement>(".sfp-topic-title-line")
+            ?.getAttribute("href") ||
           "";
-        dragIsProfile = Boolean(profile);
         if (dragHref) beginDrag();
       },
       true,

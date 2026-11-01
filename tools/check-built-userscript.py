@@ -592,72 +592,34 @@ try:
         cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
           localStorage.removeItem('sfp_read_later_height_v1');""")
 
-        # 从主列表的发布者区域拖出：拿到的是资料页，不是话题页。
-        # 带真实指针坐标，走 `elementFromPoint` 那条最准的路径。
-        cdp.evaluate("""window.dragFrom=(selector, uri) => {
-            const dt = new DataTransfer();
-            dt.setData('text/uri-list', uri);
-            const node = document.querySelector(selector);
-            const rect = node.getBoundingClientRect();
-            node.dispatchEvent(new DragEvent('dragstart', {bubbles:true, cancelable:true, dataTransfer:dt,
-              clientX: Math.round(rect.left + rect.width/2), clientY: Math.round(rect.top + rect.height/2)}));
-            document.querySelector('.sfp-read-later').dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dt}));
-          };
-          dragFrom('.sfp-feed-scroll .sfp-topic-item .sfp-topic-username',
-            document.querySelector('.sfp-feed-scroll .sfp-topic-item').href);""")
-        wait_for("document.querySelectorAll('.sfp-rl-item').length===1")
-        check('dragging the poster area saves the profile, not the topic', """(() => {
-          const item=document.querySelector('.sfp-rl-item');
-          return item.dataset.url==='/u/alice' && !item.querySelector('.sfp-topic-item');
+        # 发布者区域与标题都是真的 `<a href>`：拖拽、右键与状态栏都能看到对的地址。
+        check('the poster area is a real profile link', """(() => {
+          const links=[...document.querySelectorAll('.sfp-feed-scroll .sfp-topic-item .sfp-topic-user-link')];
+          return links.length>=2 &&
+            links.every(a=>a.tagName==='A' && a.getAttribute('href')==='/u/alice');
         })()""")
-        # 昵称（name）与文本选区两种拖拽起点都要落到资料页。
-        cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
-          window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:null}));""")
-        wait_for("document.querySelectorAll('.sfp-rl-item').length===0")
-        cdp.evaluate("""window.dragFromName=(selector) => {
-            const dt = new DataTransfer();
-            dt.setData('text/uri-list', document.querySelector('.sfp-feed-scroll .sfp-topic-item').href);
-            document.querySelector(selector).dispatchEvent(new DragEvent('dragstart', {bubbles:true, cancelable:true, dataTransfer:dt, clientX:-1, clientY:-1}));
-            document.querySelector('.sfp-read-later').dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dt}));
-          };
-          dragFromName('.sfp-feed-scroll .sfp-topic-item .sfp-topic-name');""")
-        wait_for("document.querySelectorAll('.sfp-rl-item').length===1")
-        check('dragging the display name saves the profile too', """document.querySelector('.sfp-rl-item').dataset.url==='/u/alice'""")
-        cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
-          window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:null}));""")
-        wait_for("document.querySelectorAll('.sfp-rl-item').length===0")
-        # 发布者区域整块（含昵称与用户名之间的空隙）都要认成资料页。
-        cdp.evaluate("""window.dragFromArea=() => {
-            const dt = new DataTransfer();
-            dt.setData('text/uri-list', document.querySelector('.sfp-feed-scroll .sfp-topic-item').href);
-            document.querySelector('.sfp-feed-scroll .sfp-topic-item .sfp-topic-user-info')
-              .dispatchEvent(new DragEvent('dragstart', {bubbles:true, cancelable:true, dataTransfer:dt, clientX:-1, clientY:-1}));
-            document.querySelector('.sfp-read-later').dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dt}));
-          };
-          dragFromArea();""")
-        wait_for("document.querySelectorAll('.sfp-rl-item').length===1")
-        check('dragging the poster info row saves the profile', """document.querySelector('.sfp-rl-item').dataset.url==='/u/alice'""")
-        cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
-          window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:null}));""")
-        wait_for("document.querySelectorAll('.sfp-rl-item').length===0")
+        check('the title is a real topic link', """(() => {
+          const card=document.querySelector('.sfp-feed-scroll .sfp-topic-item');
+          const title=card.querySelector('a.sfp-topic-title-line');
+          return card.tagName==='DIV' && !!title &&
+            new URL(title.href,location.origin).pathname.endsWith(`/${card.dataset.topicId}`);
+        })()""")
+        # 浏览器自己把被拖链接写进 uri-list；这里只验兜底：从卡片上没链接的
+        # 部分（时间）起拖，仍应拿回这张卡片的话题地址。
         cdp.evaluate("""(() => {
-            // 文本拖拽时 dragstart 的 target 可能退到整张卡片，只剩选区能定位来源。
-            const username=document.querySelector('.sfp-feed-scroll .sfp-topic-item .sfp-topic-username');
-            const range=document.createRange();
-            range.selectNodeContents(username);
-            const selection=document.getSelection();
-            selection.removeAllRanges();
-            selection.addRange(range);
+            const card=document.querySelector('.sfp-feed-scroll .sfp-topic-item');
+            window.bareTopicId=card.dataset.topicId;
             const dt=new DataTransfer();
-            dt.setData('text/uri-list', document.querySelector('.sfp-feed-scroll .sfp-topic-item').href);
-            document.querySelector('.sfp-feed-scroll .sfp-topic-item')
+            card.querySelector('.sfp-topic-time')
               .dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:dt,clientX:-1,clientY:-1}));
             document.querySelector('.sfp-read-later')
               .dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:dt}));
-            selection.removeAllRanges();
           })()""")
         wait_for("document.querySelectorAll('.sfp-rl-item').length===1")
-        check('a text drag whose target falls back to the card still saves the profile', """document.querySelector('.sfp-rl-item').dataset.url==='/u/alice'""")
+        check('dragging a bare part of the card still adds its topic', """(() => {
+          const item=document.querySelector('.sfp-rl-item');
+          return new URL(item.dataset.url,location.origin).pathname.split('/').includes(bareTopicId);
+        })()""")
         # 主列表已有的话题：直接复制快照，不再发补全请求。
         cdp.evaluate("""localStorage.removeItem('sfp_read_later_v1');
           window.dispatchEvent(new StorageEvent('storage',{key:'sfp_read_later_v1',newValue:null}));""")

@@ -38,7 +38,6 @@ export function createTopicRenderer({
   const { _getCategoryMeta } = site;
   const { _tagDisplayName, _getTagStyle } = tags;
   const {
-    toAbsoluteSiteUrl,
     getAvatarUrl,
     getUserProfileUrl,
     handlePointerNavigation,
@@ -182,10 +181,11 @@ export function createTopicRenderer({
       onActivate?: () => void;
     } = {},
   ) {
-    const item = document.createElement("a");
+    // 根节点是 `<div>`：卡片里放进真的链接（标题、头像/昵称/用户名），
+    // 而 `<a>` 不能套 `<a>`。其余空白区的点击仍由下面的处理器兜底。
+    const item = document.createElement("div");
     const targetUrl = href || _topicListUrl(topic);
     item.className = "sfp-topic-item";
-    item.href = toAbsoluteSiteUrl(targetUrl);
     item.dataset.topicId = String(topic.id);
     if (topic.pinned || topic.pinned_globally) {
       item.classList.add("sfp-pinned");
@@ -219,7 +219,7 @@ export function createTopicRenderer({
     // 头像 HTML
     const avatarHtml =
       userProfileUrl && avatarUrl
-        ? `<span class="sfp-topic-user-link sfp-topic-avatar-link" data-user-profile-url="${escapeAttr(userProfileUrl)}" data-user-profile-link="true"><img class="sfp-topic-avatar" src="${avatarUrl}" alt="${escapeHtml(username)}" loading="lazy"></span>`
+        ? `<a class="sfp-topic-user-link sfp-topic-avatar-link" href="${escapeAttr(userProfileUrl)}"><img class="sfp-topic-avatar" src="${avatarUrl}" alt="${escapeHtml(username)}" loading="lazy"></a>`
         : avatarUrl
           ? `<img class="sfp-topic-avatar" src="${avatarUrl}" alt="${escapeHtml(username)}" loading="lazy">`
           : "";
@@ -228,11 +228,11 @@ export function createTopicRenderer({
     const displayName =
       name && name !== username
         ? userProfileUrl
-          ? `<span class="sfp-topic-user-link sfp-topic-name" data-user-profile-url="${escapeAttr(userProfileUrl)}" data-user-profile-link="true">${escapeHtml(name)}</span>`
+          ? `<a class="sfp-topic-user-link sfp-topic-name" href="${escapeAttr(userProfileUrl)}">${escapeHtml(name)}</a>`
           : `<span class="sfp-topic-name">${escapeHtml(name)}</span>`
         : "";
     const usernameHtml = userProfileUrl
-      ? `<span class="sfp-topic-user-link sfp-topic-username" data-user-profile-url="${escapeAttr(userProfileUrl)}" data-user-profile-link="true">${escapeHtml(username)}</span>`
+      ? `<a class="sfp-topic-user-link sfp-topic-username" href="${escapeAttr(userProfileUrl)}">${escapeHtml(username)}</a>`
       : `<span class="sfp-topic-username">${escapeHtml(username)}</span>`;
 
     const statusBadgesHtml = _topicStatusBadgesHtml(topic);
@@ -260,7 +260,7 @@ export function createTopicRenderer({
     item.innerHTML = `
       <div class="sfp-topic-header">
         ${avatarHtml}
-        <div class="sfp-topic-meta-col"${userProfileUrl ? ` data-user-profile-url="${escapeAttr(userProfileUrl)}" data-user-profile-link="true"` : ""}>
+        <div class="sfp-topic-meta-col">
           <div class="sfp-topic-user-info">
             ${displayName}
             ${usernameHtml}
@@ -269,7 +269,7 @@ export function createTopicRenderer({
         ${statusBadgesHtml}
         <span class="sfp-topic-time">${_topicTimeHtml(topic)}</span>
       </div>
-      <div class="sfp-topic-title"><span class="sfp-topic-title-line" dir="auto">${closedHtml}${escapeHtml(decodeHtmlEntities(selectTopicTitle(topic)))}</span></div>
+      <div class="sfp-topic-title"><a class="sfp-topic-title-line" href="${escapeAttr(targetUrl)}" dir="auto">${closedHtml}${escapeHtml(decodeHtmlEntities(selectTopicTitle(topic)))}</a></div>
       <div class="sfp-topic-category-tags">
         ${categoryHtml}
         ${tagsHtml}
@@ -279,32 +279,22 @@ export function createTopicRenderer({
       </div>
     `;
 
-    // 点击跳转。稍后再读传入自己的 onActivate（标记快照已读），主列表沿用默认。
+    // 卡片根节点是 `<div>`，但发布者链接与标题链接都是真的 `<a href>`：
+    // 命中它们就照它的 href 走，其余空白区仍按话题地址。两种都交给
+    // `handlePointerNavigation`，只为保持面板内的 SPA 跳转与已读同步。
+    const profileHref = (e: MouseEvent) =>
+      closestTarget(e, "a.sfp-topic-user-link")?.getAttribute("href") || "";
     const activate = onActivate || (() => markTopicAsRead(topic, item));
     item.addEventListener("click", (e) => {
-      const profileLink = closestTarget(e, "[data-user-profile-link='true']");
-      if (profileLink) {
-        const profileUrl =
-          profileLink.getAttribute("data-user-profile-url") || "";
-        handlePointerNavigation(e, profileUrl);
-        return;
-      }
-      handlePointerNavigation(e, targetUrl, {
-        onPrimaryActivate: activate,
+      handlePointerNavigation(e, profileHref(e) || targetUrl, {
+        onPrimaryActivate: profileHref(e) ? undefined : activate,
       });
     });
 
     // 中键使用原生链接打开新标签页，同时保持本地已读状态同步。
     item.addEventListener("auxclick", (e) => {
-      const profileLink = closestTarget(e, "[data-user-profile-link='true']");
-      if (profileLink) {
-        const profileUrl =
-          profileLink.getAttribute("data-user-profile-url") || "";
-        handlePointerNavigation(e, profileUrl);
-        return;
-      }
-      handlePointerNavigation(e, targetUrl, {
-        onMiddleActivate: activate,
+      handlePointerNavigation(e, profileHref(e) || targetUrl, {
+        onMiddleActivate: profileHref(e) ? undefined : activate,
       });
     });
 

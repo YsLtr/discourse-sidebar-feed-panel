@@ -774,18 +774,19 @@
   overflow-wrap: break-word;
   word-break: break-word;
 }
-.sfp-topic-item:visited,
-.sfp-topic-item:hover,
-.sfp-topic-item:focus {
+/* 卡片是 `<div>`，内部标题与发布者才是真链接；这里抹平原生链接样式。 */
+.sfp-topic-item .sfp-topic-title-line,
+.sfp-topic-item .sfp-topic-user-link {
   color: inherit;
   text-decoration: none;
 }
+.sfp-topic-item .sfp-topic-title-line:focus-visible {
+  outline: 2px solid var(--tertiary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 .sfp-topic-item:hover {
   background: var(--primary-very-low);
-}
-.sfp-topic-item:focus-visible {
-  outline: 2px solid var(--tertiary);
-  outline-offset: -2px;
 }
 .sfp-topic-item.sfp-filter-mismatch {
   opacity: 0.48;

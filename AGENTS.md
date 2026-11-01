@@ -22,6 +22,7 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - **用户卡片显示姓名**（`3.4.6`）：`extractPreview()` 把 `.full-name` 存进 `preview.name`，渲染时与标题**同一行、排在标题前**（`.sfp-rl-card-title-row` 内的 `.sfp-rl-card-name`，12 px、`--primary-medium`，样式同话题条目的姓名），摘要槽只留给简介。用户 onebox 模板里标题只有 `@username`、姓名在 `<span class="full-name">`（`lib/onebox/templates/discourse_user_onebox.mustache:5-8`），此前没有任何选择器认领它，没写简介的用户就只剩 `@username`。见契约 §四.2。
 - **预览卡片不再显示分类徽章**（`3.4.7`）：`.badge-category__name` 在分类卡片里就是标题本身（`discourse_category_onebox.mustache:6-11` 的 `h3 > a.badge-category__wrapper > span.badge-category__name`），在话题卡片里是标题旁那个分类（`oneboxer.rb:422` 的 `CategoryBadge.html_for`）。前者取出来就是把标题显示两遍，后者只出现在极少用到的「话题 onebox 兜底」卡片上，不值得一个常驻字段。`ReadLaterPreview.badge`、`.sfp-rl-card-badge` 与三处「有没有字段」的判定一起删掉，卡片就是标题 + 摘要 + 头图。见契约 §四.2。
 - **新回复数不再被本地点击清零**（`3.4.2`）：此前 `_applyReadMarker()` 把 `unread_posts`/`new_posts` 置 0、`markRead()` 连 `.sfp-unread-count` 一起藏，于是点开一个还有 N 条新回复的话题，徽章当场消失，下次刷新又被服务端数字顶回来。现在本地标记只推进 `last_read_post_number`/`is_seen`/`unseen`，计数原样留给刷新覆盖；`markRead()` 只藏圆点。未读筛选不受影响——它判的是 `_isTopicRead`（跳转 URL 是否带楼层号），不是计数。
+- **发布者区域变成真链接**（`3.4.8`）：此前条目根节点是 `<a href="话题">`，头像/昵称/用户名只能是包在里面的 `<span data-user-profile-url>`，靠 `click`/`auxclick` 冒充链接、靠 `elementFromPoint` + 文本选区三步猜拖拽起点。`<a>` 不能套 `<a>`，所以改成根节点 `<div class="sfp-topic-item">`，标题（`a.sfp-topic-title-line`）与三个发布者入口（`a.sfp-topic-user-link`）都是真的 `<a href>`。点击仍由卡片上的 `handlePointerNavigation` 接管（命中 `a.sfp-topic-user-link` 就走它的 `href`，否则走话题地址），只为保持面板内 SPA 跳转与已读同步；状态栏、右键、原生拖拽则由浏览器直接给出正确地址。随之删掉 `[data-user-profile-*]`、`profileAt()`、`selectionProfile()`、`dragIsProfile` 与 `readDraggedHref()` 的特判；从卡片空白处（时间、统计）起拖时才退回标题链接的话题地址——**不能取卡片里第一个链接**，那是发布者资料页。见契约 §一.1、§七.1。代价：卡片不再是可聚焦元素，键盘走内部链接；`<div>` 上不再有 `:visited`。
 
 
 ## 真站反馈修掉的问题
@@ -70,7 +71,7 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 - 第五、六轮真站反馈（`d463df2`…`3a89c61`，共 6 个提交）：列表恢复正序、预览页内缓存、重复拖入幂等并移到最新、onebox 失败回退 OG、条目高取最近分隔线那条、隐形命中区与把手命中条，细节见契约 [docs/feed/02-稍后再读.md](docs/feed/02-稍后再读.md)。
 - `feat/read-later` 已快进合并进 `main`（`3a89c61`）；`main` 领先 `origin/main` 38 个提交。
-- 版本升到 **3.4.7**：`npm version 3.4.7 --no-git-tag-version`，`package.json` 与 `package-lock.json` 同步；根目录 3.0.0 迁移快照保持不变。
+- 版本升到 **3.4.8**：`npm version 3.4.8 --no-git-tag-version`，`package.json` 与 `package-lock.json` 同步；根目录 3.0.0 迁移快照保持不变。
 - 3.4.1 只改一处：增量刷新（`_applySidebarIncomingTopics()`）拿到数据后用 `mergeTopicSnapshot()` 校正命中条目，**不发请求**；这一轮没取到的话题保持原样（见契约 §五）。
 - 3.4.2 只改两处：`_applyReadMarker()` 不再把 `unread_posts`/`new_posts` 置 0，`markRead()` 只藏圆点不藏计数。
 - 3.4.3 改一处：话题快照进页内缓存（`topicCache`/`cachedTopic()`），删掉再加回来不再请求 latest。
@@ -78,7 +79,8 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - 3.4.5 改两处：列表接口没回来的话题按 id 取 `/t/<id>.json` 补快照（`topicFromView()`）；`/t/<id>.json` 也失败时再发一次带 `category_id`/`topic_id` 的 `/onebox`，能出卡片就渲染卡片。
 - 3.4.6 改一处：`extractPreview()` 把 `.full-name` 存进 `preview.name`，卡片上姓名与标题同一行、排在标题前（`.sfp-rl-card-title-row` / `.sfp-rl-card-name`）。
 - 3.4.7 改一处：预览卡片不再显示分类徽章，`ReadLaterPreview.badge` 与 `.sfp-rl-card-badge` 一并删除。
-- 完整校验全绿：typecheck 0、14 文件 / 98 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **122 项**。
+- 3.4.8 改三处：条目根节点改 `<div>`，标题与发布者三处入口改成真 `<a href>`（删 `[data-user-profile-*]` 与 `profileAt()`/`selectionProfile()`/`dragIsProfile`）；`dragstart` 只认 `closest("a[href]")`，空白处退回标题链接；`check-built-userscript.py` 里 4 条「拖发布者得到资料页」换成 3 条（真链接两条 + 空白处拖拽一条）。
+- 完整校验全绿：typecheck 0、14 文件 / 98 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **121 项**。
 - **本机注意**：`npm test` / `npm run build` 的 Vite 配置加载会 `exec("net use")`，在受限文件沙箱下报 `spawn EPERM`；本机已切到 danger-full-access，不是代码问题。
 
 ## 未决问题
