@@ -59,7 +59,7 @@ const I18N: Record<string, Record<string, string>> = {
     pinned: "已置顶",
     topicUnavailable: "话题异常",
     topicUnavailableTip:
-      "此话题已从服务器列表中消失，可能被取消公开、隐藏或删除。点击可自行确认实际情况。",
+      "此话题已从服务器列表中消失，可能被取消公开、隐藏或删除。点击标记可查看异常标记前缓存的内容。",
     closedTitle: "此话题已被关闭；不再接受新回复",
     newReplies: "{count} 条新回复",
     loadMore: "加载更多",
@@ -69,6 +69,13 @@ const I18N: Record<string, Record<string, string>> = {
     readLaterDropHint: "拖进加入稍后再读",
     readLaterDropRelease: "松开加入稍后再读",
     linkPreview: "链接预览",
+    topicContentTitle: "话题内容",
+    topicContentEmpty: "没有可显示的正文。",
+    topicContentSource: "内容来自异常标记前缓存的 API 响应，可选中复制。",
+    topicContentSnapshot: "异常标记时只保留了摘要，没有正文。",
+    topicContentNoBody: "异常标记前的请求没有留下正文或摘要。",
+    topicContentReplies: "{count} 条回复",
+    topicContentViews: "{count} 次浏览",
   },
   en: {
     all: "All",
@@ -129,7 +136,7 @@ const I18N: Record<string, Record<string, string>> = {
     pinned: "Pinned",
     topicUnavailable: "Unavailable",
     topicUnavailableTip:
-      "This topic disappeared from the server list; it may be unlisted, hidden, or deleted. Click to check what happened.",
+      "This topic disappeared from the server list; it may be unlisted, hidden, or deleted. Click the badge to read the content cached before it was marked.",
     closedTitle: "This topic is closed; it no longer accepts replies",
     newReplies: "{count} new replies",
     loadMore: "Load more",
@@ -139,6 +146,16 @@ const I18N: Record<string, Record<string, string>> = {
     readLaterDropHint: "Drag into Read later",
     readLaterDropRelease: "Release to add to Read later",
     linkPreview: "Link preview",
+    topicContentTitle: "Topic content",
+    topicContentEmpty: "No content available.",
+    topicContentSource:
+      "Content cached from an API response before the topic was marked unavailable. Select and copy as usual.",
+    topicContentSnapshot:
+      "Only an excerpt was kept when the topic was marked unavailable; no post body was cached.",
+    topicContentNoBody:
+      "Requests before the unavailable mark left neither a body nor an excerpt.",
+    topicContentReplies: "{count} replies",
+    topicContentViews: "{count} views",
   },
 };
 

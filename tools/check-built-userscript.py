@@ -151,6 +151,26 @@ try:
         check('topic lifecycle subscription survives independently', "document.querySelector('[data-topic-id=\"999\"]').textContent.includes('话题异常')")
         cdp.evaluate("fixture.publish('/delete',null);fixture.publish('/recover',undefined);fixture.publish('/destroy',{topic_id:'invalid',message_type:'destroy'})")
         check('malformed lifecycle messages leave the current feed usable', "document.querySelectorAll('.sfp-topic-item').length===30 && document.querySelector('[data-topic-id=\"999\"]').textContent.includes('话题异常')")
+        cdp.evaluate("""window.sfpPathBefore=location.pathname;
+          window.sfpContentRequestsBefore=fixture.requests.filter(r=>r.path==='/t/999.json').length;
+          document.querySelector('[data-topic-id="999"] .topic-status-card.--unavailable').click()""")
+        wait_for("!!document.querySelector('.sfp-tc-dialog') && !!document.querySelector('.sfp-tc-excerpt')")
+        check('an unavailable topic opens the snapshot cached when it was marked', """(() => {
+          const dialog=document.querySelector('.sfp-tc-dialog');
+          return dialog.querySelector('.sfp-tc-title').textContent==='Topic 999' &&
+            dialog.querySelector('.sfp-tc-excerpt').textContent==='Excerpt for topic 999' &&
+            dialog.querySelectorAll('.sfp-tc-post').length===0 &&
+            dialog.querySelector('.sfp-tc-note').textContent.includes('只保留了摘要') &&
+            getComputedStyle(dialog.querySelector('.sfp-tc-body')).userSelect==='text';
+        })()""")
+        check('the anomaly badge opens the dialog without navigating or refetching', """location.pathname===window.sfpPathBefore &&
+          fixture.requests.filter(r=>r.path==='/t/999.json').length===window.sfpContentRequestsBefore""")
+        cdp.evaluate("document.querySelector('.sfp-tc-close').click()")
+        check('closing the dialog restores the page and removes the overlay', "!document.querySelector('.sfp-tc-overlay') && !document.documentElement.classList.contains('sfp-tc-open')")
+        cdp.evaluate("document.querySelector('[data-topic-id=\"999\"] .topic-status-card.--unavailable').click()")
+        wait_for("!!document.querySelector('.sfp-tc-overlay')")
+        cdp.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+        check('Escape closes the topic content dialog', "!document.querySelector('.sfp-tc-overlay')")
         cdp.evaluate("document.querySelector('.sfp-toggle-btn').click()")
         check('deactivate removes feed and message-bus subscriptions', "document.querySelectorAll('.sfp-feed-container').length===0 && [...fixture.subscriptions.values()].every(s=>s.size===0)")
         cdp.evaluate("document.querySelector('.sfp-toggle-btn').click()")
@@ -926,6 +946,16 @@ try:
             fixture.oneboxRequests.length===1 &&
             !!item?.querySelector('.sfp-topic-unavailable') && !item.querySelector('.sfp-rl-card');
         })()""")
+        # 9012 从未取到过正文；点击读标记时缓存，没有内容就明确说明，不再发请求。
+        cdp.evaluate("""window.sfpMissingRequestsBefore=fixture.requests.filter(r=>r.path==='/t/9012.json').length;
+          document.querySelector('.sfp-rl-item[data-url="/t/9012"] .topic-status-card.--unavailable').click()""")
+        wait_for("!!document.querySelector('.sfp-tc-empty')")
+        check('an anomaly with no cached content says so without refetching', """(() => {
+          const note=document.querySelector('.sfp-tc-note').textContent;
+          return note.includes('没有留下正文或摘要') &&
+            fixture.requests.filter(r=>r.path==='/t/9012.json').length===window.sfpMissingRequestsBefore;
+        })()""")
+        cdp.evaluate("document.querySelector('.sfp-tc-close').click()")
         cdp.evaluate("""fixture.missingTopicIds=[];
           fixture.goneTopicIds=[];
           removeRlItem('/t/9012'); removeRlItem('/t/9011'); removeRlItem('/t/9010');""")
@@ -1075,6 +1105,22 @@ try:
             !!item.querySelector('.sfp-topic-avatar') &&
             item.querySelector('.sfp-topic-stat').textContent.includes('3');
         })()""")
+        # 同一话题此前已经通过 TopicView 取到过正文；变成异常后点击只读缓存，
+        # 不应再发一次 `/t/9002.json`。
+        cdp.evaluate("""fixture.goneTopicIds=[9002];
+          document.querySelector('.sfp-refresh-btn').click();""")
+        wait_for("!!document.querySelector('.sfp-rl-item[data-url=\"/t/9002\"] .sfp-topic-unavailable')")
+        cdp.evaluate("""window.sfpFullRequestsBefore=fixture.requests.filter(r=>r.path==='/t/9002.json').length;
+          document.querySelector('.sfp-rl-item[data-url="/t/9002"] .topic-status-card.--unavailable').click()""")
+        wait_for("!!document.querySelector('.sfp-tc-cooked')")
+        check('a topic with a cached TopicView keeps its body after turning unavailable', """(() => {
+          const dialog=document.querySelector('.sfp-tc-dialog');
+          return dialog.querySelectorAll('.sfp-tc-post').length===2 &&
+            dialog.querySelector('.sfp-tc-cooked').textContent.includes('Topic 9002 first post') &&
+            fixture.requests.filter(r=>r.path==='/t/9002.json').length===window.sfpFullRequestsBefore;
+        })()""")
+        check('cooked content is stripped of script nodes', "window.__sfpXss===undefined && !document.querySelector('.sfp-tc-cooked script')")
+        cdp.evaluate("document.querySelector('.sfp-tc-close').click()")
         # TopicView 也失败时的最后兜底：onebox 带上同分类的 category_id 会走当前
         # 用户的 guardian（`lib/oneboxer.rb:379-383`），因此还能出真卡片。
         cdp.evaluate("""fixture.missingTopicIds=[]; fixture.goneTopicIds=[];

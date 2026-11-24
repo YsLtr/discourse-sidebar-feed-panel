@@ -23,6 +23,7 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - **预览卡片不再显示分类徽章**（`3.4.7`）：`.badge-category__name` 在分类卡片里就是标题本身（`discourse_category_onebox.mustache:6-11` 的 `h3 > a.badge-category__wrapper > span.badge-category__name`），在话题卡片里是标题旁那个分类（`oneboxer.rb:422` 的 `CategoryBadge.html_for`）。前者取出来就是把标题显示两遍，后者只出现在极少用到的「话题 onebox 兜底」卡片上，不值得一个常驻字段。`ReadLaterPreview.badge`、`.sfp-rl-card-badge` 与三处「有没有字段」的判定一起删掉，卡片就是标题 + 摘要 + 头图。见契约 §四.2。
 - **新回复数不再被本地点击清零**（`3.4.2`）：此前 `_applyReadMarker()` 把 `unread_posts`/`new_posts` 置 0、`markRead()` 连 `.sfp-unread-count` 一起藏，于是点开一个还有 N 条新回复的话题，徽章当场消失，下次刷新又被服务端数字顶回来。现在本地标记只推进 `last_read_post_number`/`is_seen`/`unseen`，计数原样留给刷新覆盖；`markRead()` 只藏圆点。未读筛选不受影响——它判的是 `_isTopicRead`（跳转 URL 是否带楼层号），不是计数。
 - **发布者区域变成真链接**（`3.4.8`）：此前条目根节点是 `<a href="话题">`，头像/昵称/用户名只能是包在里面的 `<span data-user-profile-url>`，靠 `click`/`auxclick` 冒充链接、靠 `elementFromPoint` + 文本选区三步猜拖拽起点。`<a>` 不能套 `<a>`，所以改成根节点 `<div class="sfp-topic-item">`，标题（`a.sfp-topic-title-line`）与三个发布者入口（`a.sfp-topic-user-link`）都是真的 `<a href>`。点击仍由卡片上的 `handlePointerNavigation` 接管（命中 `a.sfp-topic-user-link` 就走它的 `href`，否则走话题地址），只为保持面板内 SPA 跳转与已读同步；状态栏、右键、原生拖拽则由浏览器直接给出正确地址。随之删掉 `[data-user-profile-*]`、`profileAt()`、`selectionProfile()`、`dragIsProfile` 与 `readDraggedHref()` 的特判；从卡片空白处（时间、统计）起拖时才退回标题链接的话题地址——**不能取卡片里第一个链接**，那是发布者资料页。见契约 §一.1、§七.1。代价：卡片不再是可聚焦元素，键盘走内部链接；`<div>` 上不再有 `:visited`。
+- **异常话题可查看标记时缓存的内容**（`3.4.9`）：话题异常标记从「只能点话题自行确认」改成可点击入口。新增 `src/feed/topic-content.ts`（`topicContentFromView` 抽 `/t/<id>.json` 的标题、分类、时间与前 20 楼 `cooked`，`topicContentFromList` 抽列表快照的标题/`excerpt`，`cacheUnavailableSnapshot` 在标记时写入且不覆盖已有正文，`TopicContentCache` 页内 LRU 200 条）与 `src/ui/topic-content.ts`（正文弹窗，`sanitizeCooked()` 再去一次脚本/事件属性/`javascript:` 地址，文本可选中复制）。`markUnavailable()` 新增 `onMark` 回调，主列表消失检测、`/delete` 等生命周期消息与稍后再读同步都在**异常标记产生的那一刻**调用 `rememberUnavailableContent()`；`syncReadLater()` 每轮成功取到 TopicView 时也会写完整正文。点击只读缓存，**不再请求 `/t/<id>.json`**：异常话题往往已经不在可请求范围内，点击时再取要么拿不到、要么已经晚于能拿到的时刻；没有正文就显示摘要，连摘要都没有则明确说明标记前的请求没有留下内容。点击/Enter/Space 打开，`stopPropagation()` 不触发卡片导航；Esc、遮罩与关闭按钮都能关闭。见契约 §五、§九、§十三。
 
 
 ## 真站反馈修掉的问题
@@ -71,7 +72,7 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 
 - 第五、六轮真站反馈（`d463df2`…`3a89c61`，共 6 个提交）：列表恢复正序、预览页内缓存、重复拖入幂等并移到最新、onebox 失败回退 OG、条目高取最近分隔线那条、隐形命中区与把手命中条，细节见契约 [docs/feed/02-稍后再读.md](docs/feed/02-稍后再读.md)。
 - `feat/read-later` 已快进合并进 `main`（`3a89c61`）；`main` 领先 `origin/main` 38 个提交。
-- 版本升到 **3.4.8**：`npm version 3.4.8 --no-git-tag-version`，`package.json` 与 `package-lock.json` 同步；根目录 3.0.0 迁移快照保持不变。
+- 版本升到 **3.4.9**：`package.json` 与 `package-lock.json` 同步；根目录 3.0.0 迁移快照保持不变。
 - 3.4.1 只改一处：增量刷新（`_applySidebarIncomingTopics()`）拿到数据后用 `mergeTopicSnapshot()` 校正命中条目，**不发请求**；这一轮没取到的话题保持原样（见契约 §五）。
 - 3.4.2 只改两处：`_applyReadMarker()` 不再把 `unread_posts`/`new_posts` 置 0，`markRead()` 只藏圆点不藏计数。
 - 3.4.3 改一处：话题快照进页内缓存（`topicCache`/`cachedTopic()`），删掉再加回来不再请求 latest。
@@ -80,8 +81,9 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - 3.4.6 改一处：`extractPreview()` 把 `.full-name` 存进 `preview.name`，卡片上姓名与标题同一行、排在标题前（`.sfp-rl-card-title-row` / `.sfp-rl-card-name`）。
 - 3.4.7 改一处：预览卡片不再显示分类徽章，`ReadLaterPreview.badge` 与 `.sfp-rl-card-badge` 一并删除。
 - 3.4.8 改三处：条目根节点改 `<div>`，标题与发布者三处入口改成真 `<a href>`（删 `[data-user-profile-*]` 与 `profileAt()`/`selectionProfile()`/`dragIsProfile`）；`dragstart` 只认 `closest("a[href]")`，空白处退回标题链接；`check-built-userscript.py` 里 4 条「拖发布者得到资料页」换成 3 条（真链接两条 + 空白处拖拽一条）。
-- 完整校验全绿：typecheck 0、14 文件 / 98 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **121 项**。
-- **本机注意**：`npm test` / `npm run build` 的 Vite 配置加载会 `exec("net use")`，在受限文件沙箱下报 `spawn EPERM`；本机已切到 danger-full-access，不是代码问题。
+- 3.4.9 改五处：新增 `src/feed/topic-content.ts` 与 `src/ui/topic-content.ts`；`markUnavailable()` 通过 `onMark` 在三条标记路径上即时写入快照，成功 TopicView 保留完整正文；`createTopicItem` 的异常标记变成可点击入口（`role="button"` + Enter/Space）；`showTopicContent()` 只读缓存、不再请求；`Topic.excerpt` 与 `topicContent*` 词条、`.sfp-tc-*` 样式、单测与 7 项浏览器检查。
+- 完整校验全绿：typecheck 0、15 文件 / 111 单测、`check:dev`、`build`、`check:artifact`、`check:scroll`、`check:browser` **128 项**。本次在 Linux 环境用临时 Node 22.20 + Chrome for Testing 158 完成，仓库未新增依赖。
+- **Windows 本机注意**：`npm test` / `npm run build` 的 Vite 配置加载会 `exec("net use")`，在受限文件沙箱下报 `spawn EPERM`；本机已切到 danger-full-access，不是代码问题。
 
 ## 未决问题
 
@@ -91,13 +93,12 @@ The userscript replaces a selected area of a Discourse forum with a compact, loc
 - **分隔线只有 3 px 高**，鼠标命中区偏窄；这是「不遮挡两侧内容」的直接代价。
 - **侧边栏高度变化不会自动重新钳制**：只在渲染、窗口 `resize`、头部重建时重算。真站上 `#d-sidebar` 高度是否随滚动/头部折叠变化未实测；若会变，需要 `ResizeObserver`。
 - **话题关注度的真站核对**：`notification_level` 只在登录用户且 `user_data` 存在时才序列化；未登录或 `latest.json` 未带该字段时 `_unreadReplyCount` 返回 0，继续显示圆点。真站需确认跟踪/关注话题确实带出 `notification_level >= 2` 且 `unread_posts > 0`。
-- **未 push**：`main` 上 3.4.7 的发布尚未授权，本地提交只在本地。
 - **`perf/` 产物不可复算**（已记入 `docs/discourse/04-消息总线与主线程成本.md` §八）：原始 trace 与四个分析工具从未入库。
 - **`docs/` 的链接与索引无自动化校验**：新增或改名主题文件后须人工核对 `docs/INDEX.md` 与各级 `README.md` 的相对层级（子目录互链为 `../<部分>/<文件>.md`）。
 - **`CONTEXT.md` 未纳入新术语**：`Read Later Section`、`Preview Card`、`Preview Availability` 只在 `docs/feed/02-稍后再读.md` 的术语小节。
 
 ## 后续任务
 
-真站再核对（拖入四个位置、拖昵称/用户名、拖出删除、拖动排序、拖分隔线看内容是否稳定、两标签页同步、`/onebox` 的登录与 429、语言切换），再决定是否 push。
+真站再核对（点击异常标记看正文与关闭路径、拖入四个位置、拖昵称/用户名、拖出删除、拖动排序、拖分隔线看内容是否稳定、两标签页同步、`/onebox` 的登录与 429、语言切换），再决定是否 push。
 
-Updated: 2026-10-25 17:12 中国标准时间 +0800
+Updated: 2026-11-24 11:13 中国标准时间 +0800

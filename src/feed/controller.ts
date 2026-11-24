@@ -25,6 +25,7 @@ import { createFeedHost } from "../ui/host";
 import { selectTopicTitle } from "../ui/html";
 import { createReadLaterView } from "../ui/read-later";
 import { createFeedScroll } from "../ui/scroll";
+import { createTopicContentDialog } from "../ui/topic-content";
 import { createTopicRenderer } from "../ui/topic-item";
 import { createTopicList } from "../ui/topic-list";
 import { createFeedApi } from "./api";
@@ -36,6 +37,12 @@ import { ReadingState } from "./reading";
 import { PageActivity, RefreshCountdown } from "./refresh";
 import type { MergeOptions } from "./resident";
 import { ResidentTopics } from "./resident";
+import {
+  TopicContentCache,
+  cacheUnavailableSnapshot,
+  hasTopicContent,
+  topicContentFromView,
+} from "./topic-content";
 import type {
   FeedQuerySnapshot,
   Topic,
@@ -202,9 +209,21 @@ export function createFeedController({
   let activeLoadToken = 0;
   let activeLoadMoreToken = 0;
   let activeRefreshToken = 0;
+  /** 异常话题正文：页内 LRU，主列表与稍后再读共用，按话题 id 命中。 */
+  const topicContentCache = new TopicContentCache();
+  /** 异常标记产生的那一刻写入快照；点击只读这份缓存，不再发请求。 */
+  const rememberUnavailableContent = (topic: Topic) => {
+    cacheUnavailableSnapshot(topicContentCache, topic);
+  };
 
   let refreshBusyCount = 0;
 
+  const topicContentDialog = createTopicContentDialog({
+    t,
+    formatRelativeTime,
+    categoryName: (id) => _getCategoryMeta(id)?.name,
+    getScope: () => viewScope,
+  });
   const topicRenderer = createTopicRenderer({
     t,
     formatRelativeTime,
@@ -213,6 +232,7 @@ export function createFeedController({
     discourse,
     getUser: (id) => resident.users[id],
     markTopicAsRead,
+    showUnavailableContent: showTopicContent,
     getScope: () => viewScope,
   });
   const host = createFeedHost({
@@ -352,6 +372,18 @@ export function createFeedController({
     });
   }
 
+  /**
+   * 点击「话题异常」：只读标记产生时写下的缓存。
+   * 主列表消失检测存的是当时的列表快照（标题、分类、`excerpt`）；
+   * 稍后再读此前成功取到 TopicView 时存的是完整正文。
+   * 异常话题不再发 `/t/<id>.json`——那一步要么拿不到，要么已经晚于能拿到的时刻。
+   */
+  function showTopicContent(topic: Topic) {
+    const id = Number(topic?.id);
+    if (!Number.isFinite(id) || id <= 0) return;
+    topicContentDialog.open(topic, topicContentCache.get(id) || null);
+  }
+
   function addReadLaterLink(link: ParsedReadLaterLink, title: string) {
     // 主列表里已经有这个话题时直接复制快照；否则用页内快照缓存
     // （删掉再加回来直接复用），两处都没有才请求 latest。
@@ -418,6 +450,11 @@ export function createFeedController({
    */
   async function syncReadLater() {
     if (disposed) return;
+    // 已经标过异常的条目也补一次快照缓存：缓存是页内 LRU，可能在上一轮
+    // 被挤出；重新同步时把仍然保留的条目快照放回去。
+    for (const item of readLaterStore.items()) {
+      if (item.topic?.sfpUnavailable) rememberUnavailableContent(item.topic);
+    }
     const residentById = new Map<number, Topic>();
     for (const item of readLaterStore.items()) {
       if (!item.topicId || residentById.has(item.topicId)) continue;
@@ -466,6 +503,9 @@ export function createFeedController({
         const parsed = result.json ? topicFromView(result.json) : null;
         if (parsed) {
           topics.set(id, parsed.topic);
+          // 同一份 TopicView 里就有正文；异常标记之后点开可以直接读，不必再请求。
+          const content = topicContentFromView(result.json);
+          if (hasTopicContent(content)) topicContentCache.set(content);
           if (parsed.user) users.set(parsed.user.id, parsed.user);
           continue;
         }
@@ -500,7 +540,9 @@ export function createFeedController({
         }
         if (!gone.has(item.topicId)) return item;
         const topic: Topic = { ...(item.topic || { id: item.topicId }) };
-        if (!markUnavailable(topic)) return item;
+        if (!topic.excerpt && item.preview?.excerpt)
+          topic.excerpt = item.preview.excerpt;
+        if (!markUnavailable(topic, rememberUnavailableContent)) return item;
         changed = true;
         return { ...item, topic };
       }
@@ -510,7 +552,12 @@ export function createFeedController({
       changed = true;
       return {
         ...item,
-        topic: fresh,
+        // TopicView 压出来的快照没有 `excerpt`；保留上一轮列表接口的摘要，
+        // 这样话题之后变成异常时，标记时缓存仍有内容可显示。
+        topic:
+          fresh.excerpt || !item.topic?.excerpt
+            ? fresh
+            : { ...fresh, excerpt: item.topic.excerpt },
         user: user || item.user,
         title,
         preview: undefined,
@@ -705,6 +752,9 @@ export function createFeedController({
    */
   function reloadForPageLocale() {
     if (disposed) return;
+    // 弹窗内容与说明是上一语言的快照；页面内重建时直接关掉，避免留下
+    // 一个和重建后的面板语言不一致的悬浮层。
+    topicContentDialog.close();
     site.reset();
     tags.reset();
     readLaterView.refresh();
@@ -761,6 +811,7 @@ export function createFeedController({
     _resetRefreshButtonBusy();
     controls.feedRefreshBtn?.classList.remove("sfp-back-top-enter");
 
+    topicContentDialog.close();
     readLaterView.destroy();
     host.unmount();
     controls.reset();
@@ -1279,7 +1330,11 @@ export function createFeedController({
   }
 
   function _handleSidebarTopicLifecycleMessage(data: TopicMessage) {
-    if (resident.lifecycle(data) && host.feedListEl) renderTopics();
+    if (
+      resident.lifecycle(data, rememberUnavailableContent) &&
+      host.feedListEl
+    )
+      renderTopics();
   }
 
   function _handleSidebarIncomingMessage(data: TopicMessage) {
@@ -1728,7 +1783,16 @@ export function createFeedController({
       if (!data?.topic_list?.topics) return false;
       // 先用未经本地处理的原始 page-0 与旧数据比对，标记凭空消失的话题，
       // 再走合并渲染；被标记的旧条目会在合并的 retained 尾部保留下来。
-      resident.detectVanished(data.topic_list.topics, requestQuery);
+      resident.detectVanished(
+        data.topic_list.topics,
+        requestQuery,
+        rememberUnavailableContent,
+      );
+      // 缓存是页内 LRU，旧异常可能已被挤出；每轮刷新把仍在列表里的异常
+      // 重新写一遍，保证点击时总有标记时留下的快照。
+      for (const topic of resident.topics) {
+        if (topic.sfpUnavailable) rememberUnavailableContent(topic);
+      }
       const topics = _excludeTopReadPinnedTopics(
         data.topic_list.topics,
         requestQuery,

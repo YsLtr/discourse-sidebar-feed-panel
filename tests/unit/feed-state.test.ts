@@ -110,6 +110,24 @@ describe("resident ownership", () => {
     }
     expect(state.lifecycle({ message_type: "delete", topic_id: "1" })).toBe(true);
   });
+
+  it("notifies the owner once when a lifecycle message marks a topic", () => {
+    const state = new ResidentTopics();
+    state.loadHead([topic(1)], 1, "/next");
+    const marked: Topic[] = [];
+    expect(
+      state.lifecycle({ message_type: "delete", topic_id: 1 }, (t) =>
+        marked.push(t),
+      ),
+    ).toBe(true);
+    expect(marked.map((t) => t.id)).toEqual([1]);
+    expect(
+      state.lifecycle({ message_type: "destroy", topic_id: 1 }, (t) =>
+        marked.push(t),
+      ),
+    ).toBe(false);
+    expect(marked.map((t) => t.id)).toEqual([1]);
+  });
 });
 
 describe("vanished head detection", () => {
@@ -139,6 +157,19 @@ describe("vanished head detection", () => {
       order: "activity",
     });
     expect(pinned[0].sfpUnavailable).toBeUndefined();
+  });
+
+  it("notifies the owner for each newly vanished topic only", () => {
+    const old = [topic(9), topic(8), topic(7)];
+    const marked: Topic[] = [];
+    detectVanishedTopics(old, [topic(10), topic(9), topic(6)], query, (t) =>
+      marked.push(t),
+    );
+    expect(marked.map((t) => t.id)).toEqual([8, 7]);
+    detectVanishedTopics(old, [topic(10), topic(9), topic(6)], query, (t) =>
+      marked.push(t),
+    );
+    expect(marked.map((t) => t.id)).toEqual([8, 7]);
   });
 });
 

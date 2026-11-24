@@ -22,6 +22,8 @@ interface TopicRendererDependencies {
   discourse: ReturnType<typeof createDiscourseBridge>;
   getUser(id: number): TopicUser | undefined;
   markTopicAsRead(topic: Topic, item: HTMLElement): void;
+  /** 异常话题：打开缓存正文弹窗。 */
+  showUnavailableContent(topic: Topic): void;
   getScope(): Lifetime;
 }
 
@@ -33,6 +35,7 @@ export function createTopicRenderer({
   discourse,
   getUser,
   markTopicAsRead,
+  showUnavailableContent,
   getScope,
 }: TopicRendererDependencies) {
   const { _getCategoryMeta } = site;
@@ -90,7 +93,7 @@ export function createTopicRenderer({
     }
     if (_isTopicUnavailable(topic)) {
       statusBadges.push(
-        `<span class="topic-status-card --unavailable" title="${escapeAttr(t("topicUnavailableTip"))}">${_svgIcon("far-eye-slash")}<p class="topic-status-card__name">${escapeHtml(t("topicUnavailable"))}</p></span>`,
+        `<span class="topic-status-card --unavailable" role="button" tabindex="0" title="${escapeAttr(t("topicUnavailableTip"))}">${_svgIcon("far-eye-slash")}<p class="topic-status-card__name">${escapeHtml(t("topicUnavailable"))}</p></span>`,
       );
     }
     return statusBadges.length
@@ -297,6 +300,23 @@ export function createTopicRenderer({
         onMiddleActivate: profileHref(e) ? undefined : activate,
       });
     });
+
+    // 异常标记本身就是入口：点它看缓存正文，不触发卡片的话题跳转。
+    const unavailable = item.querySelector<HTMLElement>(
+      ".topic-status-card.--unavailable",
+    );
+    if (unavailable) {
+      const show = (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showUnavailableContent(topic);
+      };
+      unavailable.addEventListener("click", show);
+      unavailable.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        show(e);
+      });
+    }
 
     return item;
   }

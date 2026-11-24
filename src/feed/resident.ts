@@ -9,6 +9,7 @@ import {
   detectVanishedTopics,
   interleaveUnavailableTopics,
   markUnavailable,
+  type UnavailableListener,
 } from "./unavailable";
 
 export interface MergeOptions {
@@ -99,7 +100,10 @@ export class ResidentTopics {
     return true;
   }
 
-  lifecycle(message: TopicMessage | null | undefined) {
+  lifecycle(
+    message: TopicMessage | null | undefined,
+    onMark?: UnavailableListener,
+  ) {
     if (!message?.topic_id) return false;
     const topicId = Number(message.topic_id);
     if (!Number.isFinite(topicId)) return false;
@@ -115,12 +119,16 @@ export class ResidentTopics {
     }
     return (
       ["delete", "destroy"].includes(message.message_type || "") &&
-      markUnavailable(topic)
+      markUnavailable(topic, onMark)
     );
   }
 
-  detectVanished(rawTopics: readonly Topic[], query: FeedQuerySnapshot) {
-    detectVanishedTopics(this.retained, rawTopics, query);
+  detectVanished(
+    rawTopics: readonly Topic[],
+    query: FeedQuerySnapshot,
+    onMark?: UnavailableListener,
+  ) {
+    detectVanishedTopics(this.retained, rawTopics, query, onMark);
   }
 
   private rebuildUsers() {

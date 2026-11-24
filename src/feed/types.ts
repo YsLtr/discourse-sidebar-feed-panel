@@ -38,6 +38,8 @@ export interface Topic extends TopicReadState {
   title?: string;
   fancy_title?: string;
   unicode_title?: string;
+  /** 列表接口附带的纯文本摘要（`ListableTopicSerializer`），用于异常话题的回退内容。 */
+  excerpt?: string;
   category_id?: number;
   archetype?: string;
   closed?: boolean;
@@ -53,6 +55,25 @@ export interface Topic extends TopicReadState {
   tags?: Array<string | TopicTag>;
   sfpUnavailable?: boolean;
   sfpUnavailablePushed?: number;
+}
+
+export interface TopicContentPost {
+  postNumber?: number;
+  username?: string;
+  name?: string;
+  createdAt?: string;
+  /** Discourse 服务端已消毒的正文 HTML（`post_stream.posts[].cooked`）。 */
+  cooked?: string;
+}
+
+/** 点击「话题异常」时弹窗展示的内容：来自 `/t/<id>.json` 或列表快照。 */
+export interface TopicContent {
+  id: number;
+  title?: string;
+  categoryId?: number;
+  createdAt?: string;
+  excerpt?: string;
+  posts: TopicContentPost[];
 }
 
 export interface TopicUser {

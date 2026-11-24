@@ -992,6 +992,11 @@
   --badge-accent: var(--danger);
   --badge-bg: var(--danger-low, var(--d-hover, var(--tertiary-low)));
   --badge-border: color-mix(in srgb, var(--danger) 28%, transparent);
+  cursor: pointer;
+}
+.sfp-topic-item .topic-status-card.--unavailable:focus-visible {
+  outline: 2px solid var(--tertiary);
+  outline-offset: 2px;
 }
 .sfp-topic-item .topic-status-card__name {
   color: var(--badge-accent);
@@ -1491,4 +1496,180 @@
   border-color: var(--tertiary);
   color: var(--tertiary);
   background: color-mix(in srgb, var(--tertiary) 12%, transparent);
+}
+
+/* ===== 异常话题内容弹窗 ===== */
+html.sfp-tc-open {
+  overflow: hidden;
+}
+.sfp-tc-overlay,
+.sfp-tc-overlay * {
+  box-sizing: border-box;
+}
+.sfp-tc-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10010;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+}
+.sfp-tc-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: min(82vh, 100%);
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--secondary);
+  color: var(--primary);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  text-align: left;
+}
+.sfp-tc-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--primary-low);
+}
+.sfp-tc-heading {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.sfp-tc-title {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.sfp-tc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--primary-medium);
+}
+.sfp-tc-sep {
+  color: var(--primary-low-mid);
+}
+.sfp-tc-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: var(--primary-very-low);
+  color: var(--primary-medium);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sfp-tc-close:hover {
+  background: var(--primary-low);
+  color: var(--primary);
+}
+.sfp-tc-close:focus-visible {
+  outline: 2px solid var(--tertiary);
+  outline-offset: 2px;
+}
+.sfp-tc-body {
+  flex: 1 1 auto;
+  min-height: 60px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px 16px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.sfp-tc-body:focus-visible {
+  outline: 2px solid var(--tertiary);
+  outline-offset: -2px;
+}
+.sfp-tc-post + .sfp-tc-post {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--primary-low);
+}
+.sfp-tc-post-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--primary-medium);
+}
+.sfp-tc-post-author {
+  font-weight: 600;
+  color: var(--primary);
+}
+.sfp-tc-post-number {
+  color: var(--primary-low-mid);
+}
+.sfp-tc-post-head time {
+  margin-left: auto;
+}
+.sfp-tc-cooked {
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.sfp-tc-cooked :is(p, ul, ol, blockquote, pre, table, aside) {
+  margin: 0 0 0.75em;
+}
+.sfp-tc-cooked :last-child {
+  margin-bottom: 0;
+}
+.sfp-tc-cooked img {
+  max-width: 100%;
+  height: auto;
+}
+.sfp-tc-cooked pre {
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--primary-very-low);
+}
+.sfp-tc-cooked code {
+  font-size: 0.92em;
+}
+.sfp-tc-cooked blockquote {
+  padding-left: 10px;
+  border-left: 3px solid var(--primary-low-mid);
+  color: var(--primary-medium);
+}
+.sfp-tc-cooked table {
+  display: block;
+  overflow: auto;
+  border-collapse: collapse;
+}
+.sfp-tc-cooked a {
+  color: var(--tertiary);
+}
+.sfp-tc-excerpt {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.sfp-tc-empty {
+  margin: 0;
+  color: var(--primary-medium);
+}
+.sfp-tc-note {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-top: 1px solid var(--primary-low);
+  background: var(--primary-very-low);
+  font-size: 12px;
+  color: var(--primary-medium);
 }

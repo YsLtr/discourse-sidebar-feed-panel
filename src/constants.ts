@@ -21,3 +21,8 @@ export const READ_LATER_MIN_SECTION_HEIGHT = 56;
 export const READ_LATER_ONBOX_GAP_MS = 150;
 export const READ_LATER_ONBOX_RETRY_MS = 2000;
 export const READ_LATER_EXCERPT_MAX = 200;
+
+// 异常话题弹窗：只留前 20 楼；页内缓存与稍后再读上限对齐，避免异常条目
+// 还没点开就被 LRU 挤出、弹窗只剩空态。
+export const TOPIC_CONTENT_POST_LIMIT = 20;
+export const TOPIC_CONTENT_CACHE_LIMIT = 200;

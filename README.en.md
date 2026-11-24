@@ -145,7 +145,9 @@ SFPFeedPanel.clearCaches()
 
 ### What is the "Unavailable" badge on a topic?
 
-On each refresh the feed compares the new list with the previous one. A topic that should still be inside the current list window but is no longer returned by the server stays in place and gets an "Unavailable" badge. This usually means it was unlisted (for example temporarily hidden after community flags), deleted, or moved into a restricted category; click the topic to check what actually happened.
+On each refresh the feed compares the new list with the previous one. A topic that should still be inside the current list window but is no longer returned by the server stays in place and gets an "Unavailable" badge. This usually means it was unlisted (for example temporarily hidden after community flags), deleted, or moved into a restricted category.
+
+Clicking the "Unavailable" badge opens a content dialog filled from the cache written at the moment the badge appeared: main-feed topics show the title and excerpt kept in the list snapshot; a Read later topic that had already fetched `/t/<id>.json` shows its post bodies (up to the first 20). Clicking never requests the topic again, since an unavailable topic usually can no longer be fetched. The text is selectable and copyable, and Esc or the backdrop closes the dialog. Click the title instead if you want to open the topic page itself.
 
 Badged topics do not consume the regular retention quota and stay in place; they are removed once the count of topics newly entering the list exceeds the current retention count, and a full reload (switching category, order, or filter) also clears them. Topics that simply sink down the list do not trigger the badge.
 

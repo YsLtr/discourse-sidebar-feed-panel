@@ -1,10 +1,13 @@
 import { _needsPeriodForUrl } from "./query";
 import type { FeedQuerySnapshot, Topic } from "./types";
 
-export function markUnavailable(topic: Topic) {
+export type UnavailableListener = (topic: Topic) => void;
+
+export function markUnavailable(topic: Topic, onMark?: UnavailableListener) {
   if (!topic || topic.sfpUnavailable) return false;
   topic.sfpUnavailable = true;
   topic.sfpUnavailablePushed = 0;
+  onMark?.(topic);
   return true;
 }
 
@@ -73,6 +76,7 @@ export function detectVanishedTopics(
   allTopics: readonly Topic[],
   rawTopics: readonly Topic[],
   query: FeedQuerySnapshot,
+  onMark?: UnavailableListener,
 ) {
   if (!Array.isArray(rawTopics) || rawTopics.length === 0) return;
   if (allTopics.length === 0) return;
@@ -111,6 +115,6 @@ export function detectVanishedTopics(
     // 排序键相同（同一秒/同一计数）时顺序不确定，只用严格更新的
     // 键做判断，避免误标。
     if (keyValue === null || keyValue <= windowMinKeyValue) continue;
-    markUnavailable(topic);
+    markUnavailable(topic, onMark);
   }
 }
