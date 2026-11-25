@@ -10,7 +10,6 @@ export const userscript: MonkeyUserScript = {
   author: "YsLtr",
   match: [
     "https://linux.do/*",
-    "https://www.nodeloc.com/*",
     "https://forum.chrultrabook.com/*",
     "https://community.openai.com/*",
     "https://meta.discourse.org/*",

@@ -25,11 +25,11 @@
 | 站点 | 匹配规则 |
 | --- | --- |
 | [LINUX DO](https://linux.do/) | `https://linux.do/*` |
-| [NodeLoc](https://www.nodeloc.com/) | `https://www.nodeloc.com/*` |
 | [Chrultrabook Forum](https://forum.chrultrabook.com/) | `https://forum.chrultrabook.com/*` |
 | [OpenAI Community](https://community.openai.com/) | `https://community.openai.com/*` |
 | [Discourse Meta](https://meta.discourse.org/) | `https://meta.discourse.org/*` |
 
+[NodeLoc](https://www.nodeloc.com/) 已改版，不适配
 其他 Discourse 论坛可以手动添加匹配规则后尝试使用。
 
 ## 安装

@@ -25,11 +25,11 @@ These sites are built into the userscript metadata and do not need manual match 
 | Site | Match rule |
 | --- | --- |
 | [LINUX DO](https://linux.do/) | `https://linux.do/*` |
-| [NodeLoc](https://www.nodeloc.com/) | `https://www.nodeloc.com/*` |
 | [Chrultrabook Forum](https://forum.chrultrabook.com/) | `https://forum.chrultrabook.com/*` |
 | [OpenAI Community](https://community.openai.com/) | `https://community.openai.com/*` |
 | [Discourse Meta](https://meta.discourse.org/) | `https://meta.discourse.org/*` |
 
+[NodeLoc](https://www.nodeloc.com/) has been revamped and is no longer compatible.
 Other Discourse forums can be tried by adding custom match rules in your userscript manager. The script does not use a global web match and does not auto-detect arbitrary Discourse sites.
 
 ## Installation
